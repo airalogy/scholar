@@ -471,6 +471,7 @@ const enUS = {
     backToList: 'Back to Degree Theses',
     readThesis: 'Read Full Text',
     downloadThesis: 'Download Full Text',
+    signInToRead: 'Sign in to read full text',
     metadata: 'Thesis Metadata',
     versionLabel: 'Version',
     reviewProgress: 'Review Progress',
@@ -963,6 +964,8 @@ const enUS = {
     bookmarkRemoved: 'Removed from bookmarks',
     bookmarkAdded: 'Added to bookmarks',
     bookmarkActionFailed: 'Action failed, please try again',
+    signInToRead: 'Sign in to read full text',
+    signInToDownload: 'Sign in to download',
   },
   papersPage: {
     eyebrow: 'Paper Browser',

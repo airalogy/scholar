@@ -107,7 +107,7 @@ export const adminRoutes: RouteRecordRaw[] = [
   }),
 ]
 
-const routes = [
+export const appRoutes: RouteRecordRaw[] = [
   {
     path: '/',
     name: 'Home',
@@ -160,38 +160,45 @@ const routes = [
   {
     path: '/papers',
     name: 'Papers',
-    component: () => import('../views/Papers.vue')
+    component: () => import('../views/Papers.vue'),
+    meta: { allowAnonymous: true },
   },
   {
     path: '/institutions/:slug/papers',
     name: 'InstitutionPapers',
-    component: () => import('../views/Papers.vue')
+    component: () => import('../views/Papers.vue'),
+    meta: { allowAnonymous: true },
   },
   {
     path: '/institutions/:slug/colleges/:collegeSlug/papers',
     name: 'InstitutionCollegePapers',
-    component: () => import('../views/Papers.vue')
+    component: () => import('../views/Papers.vue'),
+    meta: { allowAnonymous: true },
   },
   {
     path: '/labs/:slug/papers',
     name: 'LabPapers',
-    component: () => import('../views/Papers.vue')
+    component: () => import('../views/Papers.vue'),
+    meta: { allowAnonymous: true },
   },
   {
     path: '/scholars/:id/papers',
     name: 'ScholarPapers',
-    component: () => import('../views/Papers.vue')
+    component: () => import('../views/Papers.vue'),
+    meta: { allowAnonymous: true },
   },
   {
     path: '/papers/:id',
     name: 'PaperDetail',
-    component: () => import('../views/PaperDetail.vue')
+    component: () => import('../views/PaperDetail.vue'),
+    meta: { allowAnonymous: true },
   },
   {
     path: '/theses',
     name: 'Theses',
     component: () => import('../views/Theses.vue'),
     meta: {
+      allowAnonymous: true,
       featureKey: 'degreeTheses',
     },
   },
@@ -224,23 +231,27 @@ const routes = [
     name: 'ThesisDetail',
     component: () => import('../views/ThesisDetail.vue'),
     meta: {
+      allowAnonymous: true,
       featureKey: 'degreeTheses',
     },
   },
   {
     path: '/scholars',
     name: 'Scholars',
-    component: () => import('../views/Scholars.vue')
+    component: () => import('../views/Scholars.vue'),
+    meta: { allowAnonymous: true },
   },
   {
     path: '/scholars/:id',
     name: 'ScholarDetail',
-    component: () => import('../views/ScholarDetail.vue')
+    component: () => import('../views/ScholarDetail.vue'),
+    meta: { allowAnonymous: true },
   },
   {
     path: '/labs/:slug',
     name: 'LabDetail',
-    component: () => import('../views/LabDetail.vue')
+    component: () => import('../views/LabDetail.vue'),
+    meta: { allowAnonymous: true },
   },
   {
     path: '/my-library',
@@ -271,7 +282,7 @@ const routes = [
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
-  routes,
+  routes: appRoutes,
 })
 
 const resolveFeatureRedirectPath = (
@@ -331,7 +342,9 @@ router.beforeEach(async (to) => {
   }
 
   if (!allowAnonymous && !isLoggedIn.value && !isDevAuthBypassEnabled) {
-    window.dispatchEvent(new CustomEvent('auth:unauthorized'))
+    window.dispatchEvent(new CustomEvent('auth:unauthorized', {
+      detail: { returnTo: to.fullPath },
+    }))
     return false
   }
 

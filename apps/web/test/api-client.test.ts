@@ -77,6 +77,23 @@ describe('API client', () => {
     expect(unauthorizedCount).toBe(1)
   })
 
+  it('can suppress sign-in prompts for background session checks', async () => {
+    let unauthorizedCount = 0
+    const client = createApiClient({
+      baseUrl: '/api',
+      fetcher: async () => new Response(null, { status: 401 }),
+      getToken: () => 'stale-token',
+      onUnauthorized: () => {
+        unauthorizedCount += 1
+      },
+    })
+
+    await expect(
+      client.get('/users/me', { promptOnUnauthorized: false }),
+    ).rejects.toMatchObject({ response: { status: 401 } })
+    expect(unauthorizedCount).toBe(0)
+  })
+
   it('opens authenticated streams against the configured API base URL', async () => {
     let requestUrl = ''
     let requestHeaders = new Headers()

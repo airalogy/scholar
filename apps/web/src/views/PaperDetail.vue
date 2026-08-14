@@ -133,6 +133,15 @@
                   <IconDownload />
                   <span>{{ $t('common.downloadPaper') }}</span>
                 </a>
+                <button
+                  v-else-if="hasProtectedFile && !isLoggedIn"
+                  class="download-btn"
+                  type="button"
+                  @click="requestFileAccess"
+                >
+                  <IconDownload />
+                  <span>{{ $t('paperDetail.signInToDownload') }}</span>
+                </button>
                 <button v-else class="download-btn download-btn--disabled" disabled type="button">
                   <IconDownload />
                   <span>{{ $t('common.noFile') }}</span>
@@ -144,13 +153,15 @@
             <div class="detail-read-section">
               <button
                 class="read-fulltext-btn"
-                :class="{ 'read-fulltext-btn--disabled': !paperPreviewUrl }"
-                :disabled="!paperPreviewUrl"
+                :class="{ 'read-fulltext-btn--disabled': !paperPreviewUrl && !hasProtectedFile }"
+                :disabled="!paperPreviewUrl && !hasProtectedFile"
                 type="button"
-                @click="showPdfViewer = true"
+                @click="openFullText"
               >
                 <IconFile />
-                <span>{{ $t('common.readFullText') }}</span>
+                <span>
+                  {{ hasProtectedFile && !isLoggedIn ? $t('paperDetail.signInToRead') : $t('common.readFullText') }}
+                </span>
               </button>
             </div>
           </div>
@@ -210,7 +221,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Message } from '@arco-design/web-vue'
 import { useI18n } from 'vue-i18n'
@@ -231,10 +242,12 @@ import { usePublicConfig } from '@/composables/usePublicConfig'
 import { LANGUAGE_LABEL_KEYS, PAPER_STATUS_LABEL_KEYS, PAPER_TYPE_LABEL_KEYS } from '@/i18n/helpers'
 import { hasPublishYear } from '@/utils/papers'
 import { resolveSafeHttpUrl } from '@/utils/url'
+import { useAuth } from '@/composables/useAuth'
 
 const route = useRoute()
 const { t, locale } = useI18n()
 const { features } = usePublicConfig()
+const { isLoggedIn, token } = useAuth()
 
 const isLoading = ref(true)
 const paper = ref<PaperResponse | null>(null)
@@ -250,6 +263,28 @@ const paperPreviewUrl = computed(() => {
 const paperDownloadUrl = computed(() => {
   return resolveSafeHttpUrl(paper.value?.download_url ?? paper.value?.file_url)
 })
+const hasProtectedFile = computed(() => Boolean(paper.value?.oss_file_id))
+
+const requestLogin = (): void => {
+  window.dispatchEvent(new CustomEvent('auth:open-login', {
+    detail: { returnTo: route.fullPath },
+  }))
+}
+
+const requestFileAccess = (): void => {
+  requestLogin()
+}
+
+const openFullText = (): void => {
+  if (paperPreviewUrl.value) {
+    showPdfViewer.value = true
+    return
+  }
+
+  if (hasProtectedFile.value && !isLoggedIn.value) {
+    requestFileAccess()
+  }
+}
 
 const paperContext = computed(() => {
   if (!paper.value) return undefined
@@ -292,22 +327,43 @@ const getLanguageLabel = (value: number): string => {
   return t(key)
 }
 
-onMounted(async () => {
+const loadPaper = async (): Promise<void> => {
+  isLoading.value = true
   try {
     const id = route.params.id as string
     const [p, status] = await Promise.all([
       getPaper(id),
-      getBookmarkStatus(id).catch(() => ({ bookmarked: false })),
+      isLoggedIn.value
+        ? getBookmarkStatus(id, false).catch(() => ({ bookmarked: false }))
+        : Promise.resolve({ bookmarked: false }),
     ])
     paper.value = p
     bookmarked.value = status.bookmarked
   } finally {
     isLoading.value = false
   }
+}
+
+onMounted(loadPaper)
+
+watch(token, (nextToken, previousToken) => {
+  if (!nextToken) {
+    bookmarked.value = false
+    showPdfViewer.value = false
+    return
+  }
+
+  if (!previousToken) {
+    void loadPaper()
+  }
 })
 
 async function toggleBookmark() {
   if (!paper.value) return
+  if (!isLoggedIn.value) {
+    requestLogin()
+    return
+  }
   const current = bookmarked.value
   bookmarked.value = !current
   try {

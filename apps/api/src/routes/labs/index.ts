@@ -14,11 +14,13 @@ import {
   updateLab,
   upsertLabMembership,
 } from './service'
+import { resolveOptionalAccessTokenUserId } from '../../utils/auth'
 
 const labRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.get(
     '/:slug',
     {
+      config: { publicRoute: true },
       schema: {
         tags: ['labs'],
         params: LabParamsSchema,
@@ -28,7 +30,8 @@ const labRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
       },
     },
     async (request) => {
-      return getLab(fastify, request.params.slug, request.user.userId)
+      const userId = await resolveOptionalAccessTokenUserId(fastify, request)
+      return getLab(fastify, request.params.slug, userId)
     },
   )
 

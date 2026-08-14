@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyRequest } from 'fastify'
 
 export const ACCESS_TOKEN_TYPE = 'access'
 
@@ -62,6 +62,33 @@ export const assertTokenUserExists = async (
   }
 
   await assertUserExists(fastify, userId)
+}
+
+export const resolveOptionalAccessTokenUserId = async (
+  fastify: FastifyInstance,
+  request: FastifyRequest,
+): Promise<string | null> => {
+  if (!request.headers.authorization?.startsWith('Bearer ')) {
+    return null
+  }
+
+  try {
+    await request.jwtVerify()
+  } catch {
+    return null
+  }
+
+  if (request.user.token_type === 'integration') {
+    throw fastify.httpErrors.forbidden('Integration credentials cannot access user-facing pages')
+  }
+
+  try {
+    const userId = resolveAccessTokenUserId(fastify, request.user)
+    await assertUserExists(fastify, userId)
+    return userId
+  } catch {
+    return null
+  }
 }
 
 export const signAccessToken = (fastify: FastifyInstance, userId: string): string => {

@@ -186,7 +186,7 @@ const isConfidential = (version: ThesisVersionRecord): boolean => {
 const canViewPublishedVersion = async (
   fastify: FastifyInstance,
   thesis: ThesisRecord,
-  userId: string,
+  userId: string | null,
 ): Promise<boolean> => {
   const version = thesis.published_version
   if (!version || isConfidential(version)) {
@@ -195,7 +195,7 @@ const canViewPublishedVersion = async (
   if (version.visibility === 'public') {
     return true
   }
-  if (version.visibility === 'institution') {
+  if (version.visibility === 'institution' && userId) {
     const access = await getInstitutionAccessById(fastify, userId, thesis.institutionId)
     return access.platform_role === 'platform_admin' || access.institution_role !== null
   }
@@ -205,16 +205,17 @@ const canViewPublishedVersion = async (
 const formatVersion = (
   fastify: FastifyInstance,
   version: ThesisVersionRecord,
-  userId: string,
+  userId: string | null,
   includePrivateMetadata: boolean,
 ) => {
-  const urls = version.fileId
-    ? buildProtectedFileAccessUrls(fastify, {
-        fileId: version.fileId,
-        userId,
-        paperId: null,
-      })
-    : null
+  const urls =
+    version.fileId && userId
+      ? buildProtectedFileAccessUrls(fastify, {
+          fileId: version.fileId,
+          userId,
+          paperId: null,
+        })
+      : null
   return {
     id: version.id,
     version_number: version.version_number,
@@ -245,12 +246,13 @@ const formatVersion = (
 const formatThesis = async (
   fastify: FastifyInstance,
   thesis: ThesisRecord,
-  userId: string,
+  userId: string | null,
   includePrivate: boolean,
 ) => {
-  const access = includePrivate
-    ? await resolveAccess(fastify, thesis, userId)
-    : { canEdit: false, canReview: false, canViewCurrent: false }
+  const access =
+    includePrivate && userId
+      ? await resolveAccess(fastify, thesis, userId)
+      : { canEdit: false, canReview: false, canViewCurrent: false }
   const showPrivate = includePrivate && access.canViewCurrent
   return {
     id: thesis.id,
@@ -319,7 +321,7 @@ const formatThesis = async (
 const formatPublishedThesis = (
   fastify: FastifyInstance,
   thesis: PublishedThesisRecord,
-  userId: string,
+  userId: string | null,
 ) => {
   const publishedVersion = thesis.published_version
   if (!publishedVersion) {
@@ -663,16 +665,18 @@ export const reviewDegreeThesis = async (
 
 const publishedWhere = async (
   fastify: FastifyInstance,
-  userId: string,
+  userId: string | null,
   query: DegreeThesisListQuery,
 ): Promise<Prisma.degree_thesesWhereInput> => {
-  const [platformRole, memberships] = await Promise.all([
-    getUserPlatformRole(fastify, userId),
-    fastify.prisma.institution_memberships.findMany({
-      where: { userId },
-      select: { institutionId: true },
-    }),
-  ])
+  const [platformRole, memberships] = userId
+    ? await Promise.all([
+        getUserPlatformRole(fastify, userId),
+        fastify.prisma.institution_memberships.findMany({
+          where: { userId },
+          select: { institutionId: true },
+        }),
+      ])
+    : (['member', []] as const)
   const institutionIds = memberships.map((membership) => membership.institutionId)
   const visibility: Prisma.degree_thesis_versionsWhereInput =
     platformRole === 'platform_admin'
@@ -736,7 +740,7 @@ const publishedWhere = async (
 export const listDegreeTheses = async (
   fastify: FastifyInstance,
   query: DegreeThesisListQuery,
-  userId: string,
+  userId: string | null,
 ) => {
   const where = await publishedWhere(fastify, userId, query)
   const [items, total] = await Promise.all([
@@ -856,7 +860,11 @@ export const listDegreeThesisReviewQueue = async (
   }
 }
 
-export const getDegreeThesis = async (fastify: FastifyInstance, id: string, userId: string) => {
+export const getDegreeThesis = async (
+  fastify: FastifyInstance,
+  id: string,
+  userId: string | null,
+) => {
   const thesis = await findThesis(fastify, id)
   return formatAccessibleDegreeThesis(fastify, thesis, userId)
 }
@@ -864,7 +872,7 @@ export const getDegreeThesis = async (fastify: FastifyInstance, id: string, user
 export const getDegreeThesisByRecordCode = async (
   fastify: FastifyInstance,
   recordCode: string,
-  userId: string,
+  userId: string | null,
 ) => {
   const thesis = await findThesisByRecordCode(fastify, recordCode)
   return formatAccessibleDegreeThesis(fastify, thesis, userId)
@@ -873,9 +881,11 @@ export const getDegreeThesisByRecordCode = async (
 const formatAccessibleDegreeThesis = async (
   fastify: FastifyInstance,
   thesis: ThesisRecord,
-  userId: string,
+  userId: string | null,
 ) => {
-  const access = await resolveAccess(fastify, thesis, userId)
+  const access = userId
+    ? await resolveAccess(fastify, thesis, userId)
+    : { canEdit: false, canReview: false, canViewCurrent: false }
   const canViewPublished = await canViewPublishedVersion(fastify, thesis, userId)
   if (!access.canViewCurrent && !canViewPublished) {
     throw fastify.httpErrors.forbidden('You do not have permission to view this degree thesis')
@@ -886,7 +896,7 @@ const formatAccessibleDegreeThesis = async (
   }
 }
 
-export const getDegreeThesisFacets = async (fastify: FastifyInstance, userId: string) => {
+export const getDegreeThesisFacets = async (fastify: FastifyInstance, userId: string | null) => {
   const where = await publishedWhere(fastify, userId, {})
   const theses = await fastify.prisma.degree_theses.findMany({
     where,

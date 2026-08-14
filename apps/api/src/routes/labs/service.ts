@@ -36,6 +36,15 @@ interface ResolvedLabMember {
   role: 'owner' | 'admin' | 'member'
 }
 
+const ANONYMOUS_LAB_ACCESS = {
+  platform_role: 'member',
+  institution_role: null,
+  lab_role: null,
+  can_edit_content: false,
+  can_manage_members: false,
+  can_review_content: false,
+} as const
+
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === 'object' && value !== null
 }
@@ -238,7 +247,11 @@ const resolveRepresentativePapers = async (
     .filter((paper): paper is NonNullable<typeof paper> => paper !== null)
 }
 
-export const getLab = async (fastify: FastifyInstance, slug: string, currentUserId: string) => {
+export const getLab = async (
+  fastify: FastifyInstance,
+  slug: string,
+  currentUserId: string | null,
+) => {
   const lab = await getLabBySlug(fastify, slug)
   const institution = lab.institutionId
     ? await fastify.prisma.institutions.findUnique({
@@ -253,7 +266,9 @@ export const getLab = async (fastify: FastifyInstance, slug: string, currentUser
       orderBy: [{ join_year: 'asc' }, { name: 'asc' }],
     }),
     resolveLabMembers(fastify, lab),
-    getLabAccessById(fastify, currentUserId, lab.id),
+    currentUserId
+      ? getLabAccessById(fastify, currentUserId, lab.id)
+      : Promise.resolve(ANONYMOUS_LAB_ACCESS),
   ])
 
   const representativePapers = await resolveRepresentativePapers(

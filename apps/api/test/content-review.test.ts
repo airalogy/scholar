@@ -209,6 +209,15 @@ test('published thesis responses hide active draft state and private submitter m
   assert.equal(response.data.published_version?.student_id, null)
   assert.equal(response.data.submitted_at, publishedAt.toISOString())
   assert.equal(response.data.updated_at, publishedAt.toISOString())
+
+  const anonymousResponse = await getDegreeThesis(app, CLAIM_ID, null)
+  assert.equal(anonymousResponse.data.status, 'approved')
+  assert.equal(anonymousResponse.data.institution_reference, null)
+  assert.equal(anonymousResponse.data.submitted_by, null)
+  assert.equal(anonymousResponse.data.current_step, null)
+  assert.equal(anonymousResponse.data.current_version, null)
+  assert.deepEqual(anonymousResponse.data.versions, [])
+  assert.equal(anonymousResponse.data.published_version?.student_id, null)
 })
 
 test('degree thesis routes honor the feature flag and reject integration JWTs', async (t) => {

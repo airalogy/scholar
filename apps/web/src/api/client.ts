@@ -7,6 +7,7 @@ export interface ApiRequestConfig {
   headers?: HeadersInit
   timeout?: number
   signal?: AbortSignal
+  promptOnUnauthorized?: boolean
 }
 
 export interface ApiStreamRequestConfig {
@@ -125,13 +126,13 @@ export const createApiClient = (dependencies: ApiClientDependencies): ApiClient 
     return headers
   }
 
-  const assertResponseOk = async (response: Response): Promise<void> => {
+  const assertResponseOk = async (response: Response, promptOnUnauthorized = true): Promise<void> => {
     if (response.ok) {
       return
     }
 
     const data = await parseResponseBody(response)
-    if (response.status === 401) {
+    if (response.status === 401 && promptOnUnauthorized) {
       dependencies.onUnauthorized()
     }
 
@@ -168,7 +169,7 @@ export const createApiClient = (dependencies: ApiClientDependencies): ApiClient 
           signal: controller.signal,
         },
       )
-      await assertResponseOk(response)
+      await assertResponseOk(response, config.promptOnUnauthorized)
       const data = await parseResponseBody(response)
 
       return {

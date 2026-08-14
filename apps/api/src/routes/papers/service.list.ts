@@ -15,7 +15,7 @@ import { formatPapers } from './service.paper'
 
 const resolvePaperListScope = async (
   fastify: FastifyInstance,
-  userId: string,
+  userId: string | null,
   query: ListQuery,
 ): Promise<ResolvedPaperListScope> => {
   const scope = normalizePaperBrowseScope(query.scope)
@@ -26,6 +26,10 @@ const resolvePaperListScope = async (
   let platformRole: Awaited<ReturnType<typeof getUserPlatformRole>> | null = null
 
   const resolvePlatformRole = async () => {
+    if (!userId) {
+      throw fastify.httpErrors.unauthorized('Sign in to browse institution-private papers')
+    }
+
     if (!platformRole) {
       platformRole = await getUserPlatformRole(fastify, userId)
     }
@@ -66,23 +70,15 @@ const resolvePaperListScope = async (
     }
   }
 
-  if (institutionId) {
-    const currentPlatformRole = await resolvePlatformRole()
-    if (currentPlatformRole !== 'platform_admin') {
-      institutionAccess = await getInstitutionAccessById(fastify, userId, institutionId)
-      if (institutionAccess.institution_role === null) {
-        throw fastify.httpErrors.forbidden(
-          'You do not have permission to browse this institution library',
-        )
-      }
-    }
-  }
-
   if (scope === 'institution') {
     if (!institutionId) {
       throw fastify.httpErrors.badRequest(
         'Institution scope requires institution_id or a lab belonging to an institution',
       )
+    }
+
+    if (!userId) {
+      throw fastify.httpErrors.unauthorized('Sign in to browse institution-private papers')
     }
 
     const currentPlatformRole = await resolvePlatformRole()
@@ -378,7 +374,11 @@ const buildListQueryContext = (
   }
 }
 
-export async function listPapers(fastify: FastifyInstance, userId: string, query: ListQuery) {
+export async function listPapers(
+  fastify: FastifyInstance,
+  userId: string | null,
+  query: ListQuery,
+) {
   const limit = query.limit ?? 20
   const offset = query.offset ?? 0
 
@@ -452,7 +452,10 @@ export async function listPapers(fastify: FastifyInstance, userId: string, query
           where: { id: { in: submissionIds } },
         })
       : Promise.resolve([]),
-    resolvedScope.scope === 'institution' && resolvedScope.institutionId && paperIds.length > 0
+    userId &&
+    resolvedScope.scope === 'institution' &&
+    resolvedScope.institutionId &&
+    paperIds.length > 0
       ? resolveInstitutionPaperBoundMembersMap(fastify, resolvedScope.institutionId, paperIds)
       : Promise.resolve(new Map()),
   ])
