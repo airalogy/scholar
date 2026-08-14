@@ -24,6 +24,7 @@ import {
   updateDegreeThesis,
 } from './service'
 import { assertFeatureEnabled } from '../../../utils/deployment'
+import { resolveOptionalAccessTokenUserId } from '../../../utils/auth'
 
 const degreeThesisRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.addHook('preHandler', async () => {
@@ -36,12 +37,16 @@ const degreeThesisRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.get(
     '/facets',
     {
+      config: { publicRoute: true },
       schema: {
         tags: ['degree-theses-v1'],
         response: { 200: DegreeThesisFacetsResponseSchema },
       },
     },
-    async (request) => getDegreeThesisFacets(fastify, request.user.userId),
+    async (request) => {
+      const userId = await resolveOptionalAccessTokenUserId(fastify, request)
+      return getDegreeThesisFacets(fastify, userId)
+    },
   )
 
   fastify.get(
@@ -70,13 +75,17 @@ const degreeThesisRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.get(
     '/',
     {
+      config: { publicRoute: true },
       schema: {
         tags: ['degree-theses-v1'],
         querystring: DegreeThesisListQuerySchema,
         response: { 200: DegreeThesisListResponseSchema },
       },
     },
-    async (request) => listDegreeTheses(fastify, request.query, request.user.userId),
+    async (request) => {
+      const userId = await resolveOptionalAccessTokenUserId(fastify, request)
+      return listDegreeTheses(fastify, request.query, userId)
+    },
   )
 
   fastify.post(
@@ -101,26 +110,33 @@ const degreeThesisRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.get(
     '/by-code/:recordCode',
     {
+      config: { publicRoute: true },
       schema: {
         tags: ['degree-theses-v1'],
         params: DegreeThesisRecordCodeParamsSchema,
         response: { 200: DegreeThesisResponseSchema },
       },
     },
-    async (request) =>
-      getDegreeThesisByRecordCode(fastify, request.params.recordCode, request.user.userId),
+    async (request) => {
+      const userId = await resolveOptionalAccessTokenUserId(fastify, request)
+      return getDegreeThesisByRecordCode(fastify, request.params.recordCode, userId)
+    },
   )
 
   fastify.get(
     '/:id',
     {
+      config: { publicRoute: true },
       schema: {
         tags: ['degree-theses-v1'],
         params: DegreeThesisParamsSchema,
         response: { 200: DegreeThesisResponseSchema },
       },
     },
-    async (request) => getDegreeThesis(fastify, request.params.id, request.user.userId),
+    async (request) => {
+      const userId = await resolveOptionalAccessTokenUserId(fastify, request)
+      return getDegreeThesis(fastify, request.params.id, userId)
+    },
   )
 
   fastify.put(

@@ -213,11 +213,11 @@ export const buildUserReviewableClaimsWhere = async (fastify: FastifyInstance, u
 
 const assertCanAccessClaim = async (
   fastify: FastifyInstance,
-  userId: string,
+  userId: string | null,
   claim: ClaimRecord | null,
   submission: SubmissionRecord | null,
 ): Promise<void> => {
-  if (!claim && submission?.userId === userId) {
+  if (userId && !claim && submission?.userId === userId) {
     return
   }
 
@@ -230,8 +230,12 @@ const assertCanAccessClaim = async (
     return
   }
 
-  if (submission?.userId === userId || claim.submittedBy === userId) {
+  if (userId && (submission?.userId === userId || claim.submittedBy === userId)) {
     return
+  }
+
+  if (!userId) {
+    throw fastify.httpErrors.forbidden('This paper is not publicly available yet')
   }
 
   await assertCanReviewPaperClaim(fastify, userId, claim)
@@ -371,7 +375,7 @@ const buildFormattedPaper = (
   fastify: FastifyInstance,
   paper: PaperRecord,
   claim: ClaimRecord | null,
-  viewerUserId: string,
+  viewerUserId: string | null,
   resolvedSubmission: SubmissionRecord | null,
   boundMembers: InstitutionPaperBoundMember[],
   paperAuthors: Array<{ authorId: string; order: number }>,
@@ -387,13 +391,14 @@ const buildFormattedPaper = (
   const ossFile = resolvedSubmission?.oss_file_id
     ? (ossFileMap.get(resolvedSubmission.oss_file_id) ?? null)
     : null
-  const fileUrls = ossFile
-    ? buildProtectedFileAccessUrls(fastify, {
-        fileId: ossFile.id,
-        userId: viewerUserId,
-        paperId: paper.id,
-      })
-    : null
+  const fileUrls =
+    ossFile && viewerUserId
+      ? buildProtectedFileAccessUrls(fastify, {
+          fileId: ossFile.id,
+          userId: viewerUserId,
+          paperId: paper.id,
+        })
+      : null
 
   return {
     id: paper.id,
@@ -415,7 +420,7 @@ const buildFormattedPaper = (
       return {
         id: paperAuthor.authorId,
         name: author?.name ?? '',
-        email: author?.email ?? null,
+        email: viewerUserId ? (author?.email ?? null) : null,
         order: paperAuthor.order,
       }
     }),
@@ -453,7 +458,7 @@ const buildFormattedPaper = (
 export async function formatPapers(
   fastify: FastifyInstance,
   items: FormatPaperBatchInput[],
-  viewerUserId: string,
+  viewerUserId: string | null,
 ): Promise<FormattedPaper[]> {
   if (items.length === 0) {
     return []
@@ -600,7 +605,7 @@ export async function formatPaper(
   fastify: FastifyInstance,
   paper: PaperRecord,
   claim: ClaimRecord | null,
-  viewerUserId: string,
+  viewerUserId: string | null,
   submission?: SubmissionRecord | null,
   boundMembers: InstitutionPaperBoundMember[] = [],
 ): Promise<FormattedPaper> {
@@ -620,19 +625,21 @@ export async function formatPaper(
   return formatted
 }
 
-export async function getPaper(fastify: FastifyInstance, id: string, userId: string) {
+export async function getPaper(fastify: FastifyInstance, id: string, userId: string | null) {
   const paper = await fastify.prisma.papers.findUnique({ where: { id } })
   if (!paper) {
     throw fastify.httpErrors.notFound('Paper not found')
   }
 
-  const ownSubmission = await fastify.prisma.paper_submissions.findFirst({
-    where: {
-      paperId: id,
-      userId,
-    },
-    orderBy: { createdAt: 'desc' },
-  })
+  const ownSubmission = userId
+    ? await fastify.prisma.paper_submissions.findFirst({
+        where: {
+          paperId: id,
+          userId,
+        },
+        orderBy: { createdAt: 'desc' },
+      })
+    : null
 
   const ownClaim = ownSubmission?.claimId
     ? await fastify.prisma.paper_claims.findUnique({
@@ -655,7 +662,7 @@ export async function getPaper(fastify: FastifyInstance, id: string, userId: str
     claim = approvedClaim ? toClaimRecord(approvedClaim) : null
   }
 
-  if (!claim) {
+  if (!claim && userId) {
     const reviewScopeWhere = await buildUserReviewableClaimsWhere(fastify, userId).catch(() => ({}))
     if (Object.keys(reviewScopeWhere).length > 0) {
       const reviewableClaim = await fastify.prisma.paper_claims.findFirst({

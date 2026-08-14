@@ -28,6 +28,14 @@
           <a v-if="previewUrl" :href="previewUrl" target="_blank" rel="noopener" class="primary-btn">
             {{ $t('degreeTheses.readThesis') }}
           </a>
+          <button
+            v-else-if="displayVersion.file_id && !isLoggedIn"
+            class="primary-btn button-reset"
+            type="button"
+            @click="requestFileAccess"
+          >
+            {{ $t('degreeTheses.signInToRead') }}
+          </button>
           <a v-if="downloadUrl" :href="downloadUrl" rel="noopener" class="secondary-btn">
             {{ $t('degreeTheses.downloadThesis') }}
           </a>
@@ -95,14 +103,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { getDegreeThesis, type DegreeThesis } from '@/api/theses'
 import { resolveSafeHttpUrl } from '@/utils/url'
+import { useAuth } from '@/composables/useAuth'
 
 const route = useRoute()
 const { t, locale } = useI18n()
+const { isLoggedIn, token } = useAuth()
 const thesis = ref<DegreeThesis | null>(null)
 const loading = ref(false)
 const errorMessage = ref('')
@@ -124,8 +134,15 @@ const actionLabel = (action: string): string => {
   return translated === key ? action : translated
 }
 
-onMounted(async () => {
+const requestFileAccess = (): void => {
+  window.dispatchEvent(new CustomEvent('auth:open-login', {
+    detail: { returnTo: route.fullPath },
+  }))
+}
+
+const loadThesis = async (): Promise<void> => {
   loading.value = true
+  errorMessage.value = ''
   try {
     thesis.value = await getDegreeThesis(String(route.params.id ?? ''))
   } catch (error) {
@@ -138,6 +155,14 @@ onMounted(async () => {
     }
   } finally {
     loading.value = false
+  }
+}
+
+onMounted(loadThesis)
+
+watch(token, (nextToken, previousToken) => {
+  if (nextToken && !previousToken) {
+    void loadThesis()
   }
 })
 </script>
@@ -157,6 +182,7 @@ h1 { margin: 18px 0 10px; font-size: 30px; line-height: 1.45; }
 .author-line { display: flex; gap: 10px 20px; flex-wrap: wrap; margin-top: 20px; color: var(--scholar-text-secondary); }
 .header-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .primary-btn, .secondary-btn { padding: 10px 16px; border-radius: 8px; text-decoration: none; font-weight: 600; white-space: nowrap; }
+.button-reset { border: 0; cursor: pointer; font: inherit; }
 .primary-btn { background: var(--scholar-primary); color: #fff; }
 .secondary-btn { border: 1px solid var(--scholar-border-input); color: var(--scholar-text-primary); }
 .review-alert { display: grid; gap: 5px; margin-top: 18px; padding: 16px 20px; border: 1px solid #fecdca; border-radius: 10px; color: #b42318; background: #fff4f2; }

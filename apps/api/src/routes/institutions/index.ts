@@ -53,6 +53,7 @@ import {
   revokeInstitutionApiCredential,
   rotateInstitutionApiCredential,
 } from './service.credentials'
+import { resolveOptionalAccessTokenUserId } from '../../utils/auth'
 
 const institutionRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.get(
@@ -88,6 +89,7 @@ const institutionRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.get(
     '/:slug',
     {
+      config: { publicRoute: true },
       schema: {
         tags: ['institutions'],
         params: InstitutionParamsSchema,
@@ -97,7 +99,8 @@ const institutionRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
       },
     },
     async (request) => {
-      return getInstitution(fastify, request.params.slug, request.user.userId)
+      const userId = await resolveOptionalAccessTokenUserId(fastify, request)
+      return getInstitution(fastify, request.params.slug, userId)
     },
   )
 

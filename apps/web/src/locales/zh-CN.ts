@@ -471,6 +471,7 @@ const zhCN = {
     backToList: '返回学位论文专题',
     readThesis: '阅读正文',
     downloadThesis: '下载正文',
+    signInToRead: '登录后阅读正文',
     metadata: '论文信息',
     versionLabel: '版本',
     reviewProgress: '审核进度',
@@ -963,6 +964,8 @@ const zhCN = {
     bookmarkRemoved: '已取消收藏',
     bookmarkAdded: '已加入收藏',
     bookmarkActionFailed: '操作失败，请重试',
+    signInToRead: '登录后阅读全文',
+    signInToDownload: '登录后下载',
   },
   papersPage: {
     eyebrow: '论文浏览',

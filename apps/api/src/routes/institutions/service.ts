@@ -41,6 +41,15 @@ interface InstitutionRecord {
   website: string | null
 }
 
+const ANONYMOUS_INSTITUTION_ACCESS = {
+  platform_role: 'member',
+  institution_role: null,
+  can_edit_content: false,
+  can_manage_members: false,
+  can_review_content: false,
+  can_import_data: false,
+} as const
+
 interface ResolvedInstitutionMember {
   userId: string
   name: string
@@ -167,19 +176,6 @@ const getInstitutionBySlug = async (
   }
 
   return institution
-}
-
-const assertCanBrowseInstitution = async (
-  fastify: FastifyInstance,
-  userId: string,
-  institutionId: string,
-): Promise<InstitutionAccess> => {
-  const access = await getInstitutionAccessById(fastify, userId, institutionId)
-  if (access.platform_role === 'platform_admin' || access.institution_role !== null) {
-    return access
-  }
-
-  throw fastify.httpErrors.notFound('Institution not found')
 }
 
 const resolveInstitutionMembers = async (
@@ -426,12 +422,14 @@ const resolveInstitutionJoinRequests = async (
 export const getInstitution = async (
   fastify: FastifyInstance,
   slug: string,
-  currentUserId: string,
+  currentUserId: string | null,
 ) => {
   const institution = await getInstitutionBySlug(fastify, slug)
 
   const [access, labs, memberships] = await Promise.all([
-    assertCanBrowseInstitution(fastify, currentUserId, institution.id),
+    currentUserId
+      ? getInstitutionAccessById(fastify, currentUserId, institution.id)
+      : Promise.resolve(ANONYMOUS_INSTITUTION_ACCESS),
     fastify.prisma.labs.findMany({
       where: { institutionId: institution.id },
       orderBy: { name: 'asc' },

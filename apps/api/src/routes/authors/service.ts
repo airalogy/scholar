@@ -1,7 +1,11 @@
 import type { FastifyInstance } from 'fastify'
 import type { AuthorSearchQuery } from './schema'
 
-export async function searchAuthors(fastify: FastifyInstance, query: AuthorSearchQuery) {
+export async function searchAuthors(
+  fastify: FastifyInstance,
+  query: AuthorSearchQuery,
+  includeEmail = true,
+) {
   const limit = query.limit ?? 20
   const offset = query.offset ?? 0
   const q = query.q?.trim()
@@ -35,14 +39,14 @@ export async function searchAuthors(fastify: FastifyInstance, query: AuthorSearc
     items: authors.map((a) => ({
       id: a.id,
       name: a.name,
-      email: a.email ?? null,
+      email: includeEmail ? (a.email ?? null) : null,
       paperCount: countMap.get(a.id) ?? 0,
     })),
     total,
   }
 }
 
-export async function getAuthor(fastify: FastifyInstance, id: string) {
+export async function getAuthor(fastify: FastifyInstance, id: string, includeEmail = true) {
   const author = await fastify.prisma.authors.findUnique({ where: { id } })
   if (!author) {
     throw fastify.httpErrors.notFound('Author not found')
@@ -56,7 +60,7 @@ export async function getAuthor(fastify: FastifyInstance, id: string) {
   return {
     id: author.id,
     name: author.name,
-    email: author.email ?? null,
+    email: includeEmail ? (author.email ?? null) : null,
     paperCount: Number(count[0]?.count ?? 0),
   }
 }

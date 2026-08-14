@@ -322,11 +322,14 @@ import { INSTITUTION_ROLE_LABEL_KEYS } from '@/i18n/helpers'
 
 const emit = defineEmits<{
   'update:visible': [value: boolean]
+  authenticated: []
+  cancelled: []
 }>()
 
 const props = defineProps<{
   visible: boolean
   preferredTab?: 'institution' | 'airalogy'
+  returnTo?: string
 }>()
 
 const { login } = useAuth()
@@ -581,6 +584,7 @@ const resetAll = (): void => {
 }
 
 const closeModal = (): void => {
+  emit('cancelled')
   emit('update:visible', false)
   resetAll()
 }
@@ -612,6 +616,7 @@ const switchPlatformMode = (mode: 'signin' | 'signup'): void => {
 
 const applyLogin = (token: string, name: string): void => {
   login(token, name)
+  emit('authenticated')
   emit('update:visible', false)
   resetAll()
 }
@@ -738,7 +743,10 @@ const handleAiralogyOauth = (): void => {
   isRedirectingToAiralogy.value = true
   signinError.value = ''
   window.location.assign(
-    buildOauthAuthorizeUrl(AIRALOGY_AUTHORIZE_PATH, route.fullPath || defaultHomePath.value),
+    buildOauthAuthorizeUrl(
+      AIRALOGY_AUTHORIZE_PATH,
+      props.returnTo || route.fullPath || defaultHomePath.value,
+    ),
   )
 }
 
@@ -751,7 +759,10 @@ const handleInstitutionSso = (): void => {
   isRedirectingInstitutionSso.value = true
   activationError.value = ''
   window.location.assign(
-    buildOauthAuthorizeUrl(authorizePath, route.fullPath || defaultHomePath.value),
+    buildOauthAuthorizeUrl(
+      authorizePath,
+      props.returnTo || route.fullPath || defaultHomePath.value,
+    ),
   )
 }
 

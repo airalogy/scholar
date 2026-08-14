@@ -27,6 +27,7 @@ import {
   reviewPaper,
 } from './service'
 import { assertFeatureEnabled } from '../../utils/deployment'
+import { resolveOptionalAccessTokenUserId } from '../../utils/auth'
 
 const paperRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.post(
@@ -117,6 +118,7 @@ const paperRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.get(
     '/',
     {
+      config: { publicRoute: true },
       schema: {
         tags: ['papers'],
         querystring: ListQuerySchema,
@@ -126,7 +128,8 @@ const paperRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
       },
     },
     async (request) => {
-      return listPapers(fastify, request.user.userId, request.query)
+      const userId = await resolveOptionalAccessTokenUserId(fastify, request)
+      return listPapers(fastify, userId, request.query)
     },
   )
 
@@ -150,6 +153,7 @@ const paperRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.get(
     '/:id',
     {
+      config: { publicRoute: true },
       schema: {
         tags: ['papers'],
         params: PaperParamsSchema,
@@ -159,7 +163,8 @@ const paperRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
       },
     },
     async (request) => {
-      return getPaper(fastify, request.params.id, request.user.userId)
+      const userId = await resolveOptionalAccessTokenUserId(fastify, request)
+      return getPaper(fastify, request.params.id, userId)
     },
   )
 

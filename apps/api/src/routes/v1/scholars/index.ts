@@ -22,6 +22,7 @@ const scholarTimelineRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.get(
     '/facets',
     {
+      config: { publicRoute: true },
       schema: {
         tags: ['scholars-v1'],
         querystring: ScholarFacetsQuerySchema,

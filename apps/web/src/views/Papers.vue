@@ -485,6 +485,8 @@ const handleAuthorSearch = async (keyword: string): Promise<void> => {
   try {
     const response = await searchAuthors(keyword.trim() || undefined, 20, 0)
     authorOptions.value = response.items
+  } catch {
+    authorOptions.value = []
   } finally {
     isAuthorLoading.value = false
   }
@@ -499,7 +501,7 @@ const loadViewerInstitutionMemberships = async (): Promise<void> => {
 
   isViewerInstitutionsLoading.value = true
   try {
-    const profile = await getMyProfile()
+    const profile = await getMyProfile(false)
     viewerInstitutionMemberships.value = [...profile.institution_memberships]
       .sort((left, right) => left.name.localeCompare(right.name, locale.value))
     viewerInstitutionsError.value = ''
@@ -591,7 +593,9 @@ const loadPapers = async (): Promise<void> => {
 
     const [paperResponse, bookmarkResponse] = await Promise.all([
       listPapers(params),
-      listBookmarks(100, 0).catch(() => ({ items: [], total: 0 })),
+      isLoggedIn.value
+        ? listBookmarks(100, 0, false).catch(() => ({ items: [], total: 0 }))
+        : Promise.resolve({ items: [], total: 0 }),
     ])
 
     papers.value = paperResponse.items
@@ -607,6 +611,13 @@ const loadPapers = async (): Promise<void> => {
 }
 
 const toggleBookmark = async (paperId: string): Promise<void> => {
+  if (!isLoggedIn.value) {
+    window.dispatchEvent(new CustomEvent('auth:open-login', {
+      detail: { returnTo: route.fullPath },
+    }))
+    return
+  }
+
   const next = new Set(bookmarkSet.value)
   const isBookmarked = next.has(paperId)
 
@@ -644,6 +655,17 @@ watch(
   },
   { immediate: true },
 )
+
+watch(token, (nextToken, previousToken) => {
+  if (!nextToken) {
+    bookmarkSet.value = new Set()
+    return
+  }
+
+  if (!previousToken) {
+    void loadPapers()
+  }
+})
 
 watch(
   () => route.fullPath,

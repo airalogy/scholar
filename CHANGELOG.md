@@ -2,6 +2,16 @@
 
 Chinese version: [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)
 
+## [Unreleased]
+
+### Changed
+
+- Public paper, scholar, laboratory, and published degree-thesis pages can now be browsed without signing in; account actions request authentication only when invoked.
+
+### Security
+
+- Anonymous API access is limited to approved or published public records, excludes protected file links and private author metadata, and continues to reject integration credentials on user-facing endpoints.
+
 ## [3.0.0] - 2026-08-14
 
 ### Added

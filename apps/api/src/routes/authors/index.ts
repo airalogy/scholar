@@ -6,11 +6,13 @@ import {
   AuthorListResponseSchema,
 } from './schema'
 import { searchAuthors, getAuthor } from './service'
+import { resolveOptionalAccessTokenUserId } from '../../utils/auth'
 
 const authorRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.get(
     '/',
     {
+      config: { publicRoute: true },
       schema: {
         tags: ['authors'],
         querystring: AuthorSearchQuerySchema,
@@ -18,13 +20,15 @@ const authorRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
       },
     },
     async (request) => {
-      return searchAuthors(fastify, request.query)
+      const userId = await resolveOptionalAccessTokenUserId(fastify, request)
+      return searchAuthors(fastify, request.query, Boolean(userId))
     },
   )
 
   fastify.get(
     '/:id',
     {
+      config: { publicRoute: true },
       schema: {
         tags: ['authors'],
         params: AuthorParamsSchema,
@@ -32,7 +36,8 @@ const authorRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
       },
     },
     async (request) => {
-      return getAuthor(fastify, request.params.id)
+      const userId = await resolveOptionalAccessTokenUserId(fastify, request)
+      return getAuthor(fastify, request.params.id, Boolean(userId))
     },
   )
 }

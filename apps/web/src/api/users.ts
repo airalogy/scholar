@@ -116,8 +116,8 @@ interface UploadFileResponse {
   signatureUrl: string
 }
 
-export async function getMyProfile(): Promise<UserProfile> {
-  const res = await apiClient.get<UserProfileResponse>('/users/me')
+export async function getMyProfile(promptOnUnauthorized = true): Promise<UserProfile> {
+  const res = await apiClient.get<UserProfileResponse>('/users/me', { promptOnUnauthorized })
   return res.data.data
 }
 

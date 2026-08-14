@@ -55,7 +55,13 @@
         <router-view />
       </main>
       <FeedbackWidget />
-      <LoginModal v-model:visible="showLoginModal" :preferred-tab="loginModalPreferredTab" />
+      <LoginModal
+        v-model:visible="showLoginModal"
+        :preferred-tab="loginModalPreferredTab"
+        :return-to="pendingLoginPath"
+        @authenticated="handleAuthenticated"
+        @cancelled="pendingLoginPath = ''"
+      />
     </div>
   </a-config-provider>
 </template>
@@ -72,17 +78,20 @@ import { getMyProfile } from '@/api/users'
 import { useAuth } from '@/composables/useAuth'
 import { usePublicConfig } from '@/composables/usePublicConfig'
 import { isDevAuthBypassEnabled } from '@/utils/devAuth'
+import { ApiError } from '@/api/client'
 
 type LoginPreferredTab = 'institution' | 'airalogy'
 
 interface OpenLoginEventDetail {
   preferredTab?: LoginPreferredTab
+  returnTo?: string
 }
 
 const router = useRouter()
 const showLoginModal = ref(false)
 const mobileSidebarOpen = ref(false)
 const loginModalPreferredTab = ref<LoginPreferredTab | undefined>(undefined)
+const pendingLoginPath = ref('')
 const {
   isLoggedIn,
   token,
@@ -100,11 +109,16 @@ const openLoginModal = (preferredTab?: LoginPreferredTab): void => {
   showLoginModal.value = true
 }
 
-const handleUnauthorized = (): void => {
+const handleUnauthorized = (event: Event): void => {
   if (isDevAuthBypassEnabled) {
     return
   }
-  openLoginModal()
+  const detail = (event as CustomEvent<OpenLoginEventDetail>).detail
+  pendingLoginPath.value = detail?.returnTo ?? ''
+  if (isLoggedIn.value) {
+    logout()
+  }
+  openLoginModal(detail?.preferredTab)
 }
 
 const handleOpenLogin = (event: Event): void => {
@@ -113,7 +127,16 @@ const handleOpenLogin = (event: Event): void => {
   }
 
   const detail = (event as CustomEvent<OpenLoginEventDetail>).detail
+  pendingLoginPath.value = detail?.returnTo ?? ''
   openLoginModal(detail?.preferredTab)
+}
+
+const handleAuthenticated = (): void => {
+  const returnTo = pendingLoginPath.value
+  pendingLoginPath.value = ''
+  if (returnTo && returnTo.startsWith('/') && returnTo !== router.currentRoute.value.fullPath) {
+    void router.push(returnTo)
+  }
 }
 
 const handleLogout = (): void => {
@@ -133,11 +156,14 @@ const syncUserAvatar = async (): Promise<void> => {
   }
 
   try {
-    const profile = await getMyProfile()
+    const profile = await getMyProfile(false)
     updateAvatar(profile.avatar_url ?? profile.avatar ?? '')
     updateAdminAccess(profile.admin_access)
-  } catch {
+  } catch (error) {
     updateAdminAccess(null)
+    if (error instanceof ApiError && error.response.status === 401) {
+      logout()
+    }
     // 忽略头像拉取失败，避免影响页面可用性
   }
 }
