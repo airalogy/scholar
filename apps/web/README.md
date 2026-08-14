@@ -95,4 +95,4 @@ pnpm test
 - [Vite 文档](https://vitejs.dev/)
 - [Arco Design Vue 文档](https://arco.design/vue)
 - [Vue Router 文档](https://router.vuejs.org/)
-- [单机构私有化部署说明](../../docs/private-deployment.md)
+- [单机构私有化部署说明](../../docs/zh/private-deployment.md)

@@ -91,7 +91,7 @@ const zhThemeConfig: DefaultTheme.Config = {
   darkModeSwitchLabel: '外观',
   langMenuLabel: '语言',
   footer: {
-    message: '文档与 Scholar 产品版本同步交付',
+    message: '文档与 Airalogy Scholar 产品版本同步交付',
     copyright: 'Copyright © Hangzhou Airalogy Technology Co., Ltd.',
   },
 }
@@ -115,14 +115,14 @@ const enThemeConfig: DefaultTheme.Config = {
   darkModeSwitchLabel: 'Appearance',
   langMenuLabel: 'Language',
   footer: {
-    message: 'Documentation is delivered with the matching Scholar product version',
+    message: 'Documentation is delivered with the matching Airalogy Scholar product version',
     copyright: 'Copyright © Hangzhou Airalogy Technology Co., Ltd.',
   },
 }
 
 export default defineConfig({
   base: '/docs/',
-  title: 'Scholar Documentation',
+  title: 'Airalogy Scholar Documentation',
   description: 'Airalogy Scholar product documentation',
   cleanUrls: true,
   lastUpdated: false,
@@ -134,7 +134,7 @@ export default defineConfig({
     zh: {
       label: '简体中文',
       lang: 'zh-CN',
-      title: 'Scholar 文档',
+      title: 'Airalogy Scholar 文档',
       description: 'Airalogy Scholar 使用、机构管理与系统接入文档',
       link: '/zh/',
       themeConfig: zhThemeConfig,
@@ -142,7 +142,7 @@ export default defineConfig({
     en: {
       label: 'English',
       lang: 'en-US',
-      title: 'Scholar Documentation',
+      title: 'Airalogy Scholar Documentation',
       description: 'User, institution administration, and integration documentation for Airalogy Scholar',
       link: '/en/',
       themeConfig: enThemeConfig,

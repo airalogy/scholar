@@ -1,5 +1,7 @@
 # API（apps/api）
 
+[English](../en/api.md) | 简体中文
+
 ## 技术栈与版本（来自 `apps/api/package.json`）
 
 - **Fastify**: `^5.8.4`
@@ -60,19 +62,19 @@
   - `ENABLE_PAPER_UPLOAD=false` 不只是隐藏前端入口；后端也会同时拒绝 `POST /papers/create` 与 `POST /files/upload`。
   - 机构成员激活接口使用公开 `auth` 路由，当前支持基于激活令牌完成首次绑定/注册。
   - 机构 SSO 登录当前支持“首次成功认证后自动创建或匹配平台 `user`，并自动创建默认 `member` 级别机构成员关系”的 JIT provisioning。
-  - 机构登录入口和接入更多机构的约定见 `docs/institution-auth.md`。
+  - 机构登录入口和接入更多机构的约定见[机构认证](./institution-auth.md)。
 - **响应结构**
   - 响应必须符合路由声明的 TypeBox Schema；新增版本化业务接口使用 `{ code, data?, message? }`。
 - **内容治理与审核**
-  - 实验室主页权限与角色模型见 `docs/content-governance.md`。
-  - 论文审核状态机、接口约束与设计动机见 `docs/paper-review-workflow.md`。
-  - 学位论文的结构化版本、全文权限、专题展示和审核 API 见 `docs/degree-thesis-workflow.md`。
+  - 实验室主页权限与角色模型见[内容治理](./content-governance.md)。
+  - 论文审核状态机、接口约束与设计动机见[论文审核流程](./paper-review-workflow.md)。
+  - 学位论文的结构化版本、全文权限、专题展示和审核 API 见[学位论文流程](./degree-thesis-workflow.md)。
   - 普通论文和学位论文使用同一套 `content_review_*` 状态机、审核人快照和审计动作；新内容类型不应自建审核逻辑。
-  - 机构组织结构快照、导入格式、岗位任职模型，以及基于组织节点解析审核流的规则见 `docs/institution-org-structure.md`。
-  - 机构管理员预开通成员与首次激活规则同样见 `docs/content-governance.md`。
-  - 机构成员论文作者绑定接口 `POST /institutions/:slug/paper-author-bindings`、`DELETE /institutions/:slug/paper-author-bindings/:bindingId` 的设计边界与约束见 `docs/content-governance.md`。
-  - 机构成员论文统计口径，例如 `paperCount` 与 `approvedPaperCount` 的含义，见 `docs/paper-review-workflow.md`。
-  - 多机构登录入口与认证方式扩展规则见 `docs/institution-auth.md`。
-  - 如果要把当前系统交付为某一个机构的私有化部署版本，具体运行步骤、环境变量组合和初始化方式见 `docs/private-deployment.md`。
-  - 机构组织结构接口 `GET /institutions/:slug/org-structure`、`PUT /institutions/:slug/org-structure`，以及论文上传时可选的 `review_node_id`，见 `docs/institution-org-structure.md`。
+  - 机构组织结构快照、导入格式、岗位任职模型，以及基于组织节点解析审核流的规则见[机构组织结构](./institution-org-structure.md)。
+  - 机构管理员预开通成员与首次激活规则同样见[内容治理](./content-governance.md)。
+  - 机构成员论文作者绑定接口 `POST /institutions/:slug/paper-author-bindings`、`DELETE /institutions/:slug/paper-author-bindings/:bindingId` 的设计边界与约束见[内容治理](./content-governance.md)。
+  - 机构成员论文统计口径，例如 `paperCount` 与 `approvedPaperCount` 的含义，见[论文审核流程](./paper-review-workflow.md)。
+  - 多机构登录入口与认证方式扩展规则见[机构认证](./institution-auth.md)。
+  - 如果要把当前系统交付为某一个机构的私有化部署版本，具体运行步骤、环境变量组合和初始化方式见[私有化部署](./private-deployment.md)。
+  - 机构组织结构接口 `GET /institutions/:slug/org-structure`、`PUT /institutions/:slug/org-structure`，以及论文上传时可选的 `review_node_id`，见[机构组织结构](./institution-org-structure.md)。
   - 公网版 / 私有版共用同一套后端代码，差别由环境变量中的部署模式与 feature flag 决定，而不是维护独立分支。

@@ -76,5 +76,5 @@ Git 规则：
 
 ## 参考资料
 
-- API 框架文档索引：`docs/api.md`
-- 前端框架文档索引：`docs/web.md`
+- API 框架文档索引：`docs/zh/api.md`
+- 前端框架文档索引：`docs/zh/web.md`

@@ -1,6 +1,8 @@
 # 全站内容审核与论文审核机制
 
-本文档说明 Airalogy Scholar 的统一内容审核内核，以及普通论文如何使用该内核完成上传、审核、公开展示与重新审核。学位论文的业务字段和页面另见 `docs/degree-thesis-workflow.md`。
+[English](../en/paper-review-workflow.md) | 简体中文
+
+本文档说明 Airalogy Scholar 的统一内容审核内核，以及普通论文如何使用该内核完成上传、审核、公开展示与重新审核。学位论文的业务字段和页面另见[学位论文流程](./degree-thesis-workflow.md)。
 
 ## 背景与设计动机
 
@@ -44,7 +46,7 @@
 
 ## 可见性规则
 
-当前平台接口默认要求登录访问，因此这里的“公共展示”指平台面向所有登录用户的公开论文区。
+“公共展示”指无需登录即可浏览的公开论文区。登录只用于收藏、上传、访问受保护全文和进入个人或管理工作区。
 
 - 上传者的“我的上传”
   - 可看到自己提交的全部 `paper_submissions` 及其对应审核状态
@@ -55,8 +57,10 @@
 - 公共论文库、搜索结果、实验室代表论文
   - 只显示 `approved`
 - 论文详情页
-  - `approved` 对所有登录用户可见
+  - `approved` 的公开元数据对匿名访问者和登录用户可见
   - 非 `approved` 仅上传者、对应审核人和 `platform_admin` 可见
+  - 受保护全文需要登录，并在每次换取短效链接时重新鉴权
+  - 匿名响应不包含受保护文件链接或作者邮箱
 
 ## 机构成员统计与展示口径
 
@@ -118,7 +122,7 @@
 - 若任一步要求修改，则整条认领进入 `changes_requested`
 - 平台管理员或机构 owner/admin 可通过 `PUT /v1/institutions/:slug/review-workflows/:contentType` 为 `paper` 和 `degree_thesis` 分别配置默认流程
 
-组织结构的标准格式、字段约定和审核流解析规则，见 `docs/institution-org-structure.md`。
+组织结构的标准格式、字段约定和审核流解析规则，见[机构组织结构与审核流](./institution-org-structure.md)。
 
 ## 为什么不采用“先公开，再打未审核标签”
 
@@ -146,7 +150,7 @@
 
 ## 与其他文档的关系
 
-- 实验室主页权限边界与角色模型见 `docs/content-governance.md`
-- 机构组织结构与审核流见 `docs/institution-org-structure.md`
-- API 索引见 `docs/api.md`
-- Web 索引见 `docs/web.md`
+- [实验室主页权限边界与角色模型](./content-governance.md)
+- [机构组织结构与审核流](./institution-org-structure.md)
+- [API 架构](./api.md)
+- [Web 架构](./web.md)

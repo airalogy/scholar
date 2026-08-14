@@ -102,4 +102,4 @@ if (errors.length > 0) {
   process.exit(1)
 }
 
-console.log(`Validated ${markdownFiles.length} Scholar documentation pages in two languages`)
+console.log(`Validated ${markdownFiles.length} Airalogy Scholar product documentation pages in two languages`)

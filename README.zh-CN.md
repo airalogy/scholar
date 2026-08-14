@@ -175,7 +175,7 @@ pnpm version:check
 - `GET /health` 用于进程存活检查，`GET /health/ready` 会同时验证 PostgreSQL 可用性；发布和负载均衡应使用后者决定是否接流量。
 - 正式发布应使用与 `VERSION` 一致的 Git Tag，例如 `v3.0.0`，并使构建产物或镜像使用相同版本号。
 - 如果需要为历史生产版本补标签，必须先核对线上实际 Git 提交，不能根据 `package.json` 推测。
-- 维护者发布步骤见 [发布流程](./docs/releasing.md)。
+- 维护者发布步骤见[发布流程](./docs/zh/releasing.md)。
 
 一次生产升级应按以下顺序进行：
 
@@ -199,9 +199,9 @@ deploy/scholarctl bootstrap
 
 默认只把 Web 绑定到 `127.0.0.1:8080`，由部署方现有的 HTTPS 反向代理对外提供服务。中国大陆或断网环境不依赖 Docker Hub：可把全部镜像同步到阿里云 ACR、腾讯云 TCR 或校内 Harbor，并在 `deploy/.env` 中替换镜像地址；也可以通过 `deploy/export-images.sh` / `deploy/import-images.sh` 交付离线镜像包。
 
-Scholar 以一个产品版本整体交付；Web、API、迁移任务和可选 PostgreSQL 是该产品内部的独立服务，不作为可自由组合的版本分别交付。应用升级只替换发布清单指定的镜像。PostgreSQL、上传文件和备份由部署方持有，并通过 Docker volume、宿主机目录或外部数据库/对象存储持续保留。完整说明见 [私有化部署说明](./docs/private-deployment.md)。
+Scholar 以一个产品版本整体交付；Web、API、迁移任务和可选 PostgreSQL 是该产品内部的独立服务，不作为可自由组合的版本分别交付。应用升级只替换发布清单指定的镜像。PostgreSQL、上传文件和备份由部署方持有，并通过 Docker volume、宿主机目录或外部数据库/对象存储持续保留。完整说明见[私有化部署说明](./docs/zh/private-deployment.md)。
 
-正式部署后，机构管理员和系统集成人员可从 `/docs/zh/` 或 `/docs/en/` 阅读与当前产品版本一致的中英文指南，并在页面中切换语言；`/docs/` 默认进入中文版。`/api/docs` 提供当前 API 的 Swagger 文档。面向用户的文档站不收录部署、运维、仓库架构或开发流程；这些资料保留在仓库 [`docs/`](./docs/) 中。文档静态文件包含在 Web 镜像中，因此校内镜像和离线交付无需额外连接公共文档服务。
+正式部署后，机构管理员和系统集成人员可从 `/docs/zh/` 或 `/docs/en/` 阅读与当前产品版本一致的中英文指南，并在页面中切换语言；`/docs/` 默认进入中文版。`/api/docs` 提供当前 API 的 Swagger 文档。面向用户的文档站不收录部署、运维、仓库架构或开发流程；这些资料保留在仓库[中文维护文档](./docs/zh/README.md)中，并另有[英文版本](./docs/en/README.md)。文档静态文件包含在 Web 镜像中，因此校内镜像和离线交付无需额外连接公共文档服务。
 
 ## 开源与安全
 

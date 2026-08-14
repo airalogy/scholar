@@ -1,5 +1,7 @@
 # 学位论文专题与审核流程
 
+[English](../en/degree-thesis-workflow.md) | 简体中文
+
 Scholar 将学位论文作为独立内容域，但与普通论文共用全站审核内核。业务字段、版本和全文文件保持独立，提交、逐级审核、退回修改、重新提交和审计留痕由 `content_review_*` 表统一处理。
 
 ## 数据与版本
@@ -44,4 +46,4 @@ Scholar 将学位论文作为独立内容域，但与普通论文共用全站审
 - `GET /v1/theses/review-queue`、`POST /v1/theses/:id/review`：待审队列与逐级审核。
 - `GET/PUT /v1/institutions/:slug/review-workflows/:contentType`：机构默认审核流程。
 
-全站审核的状态机、审核人解析和普通论文兼容投影见 `docs/paper-review-workflow.md`。
+全站审核的状态机、审核人解析和普通论文兼容投影见[论文审核流程](./paper-review-workflow.md)。

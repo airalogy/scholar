@@ -7,6 +7,8 @@ Chinese version: [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)
 ### Changed
 
 - Public paper, scholar, laboratory, and published degree-thesis pages can now be browsed without signing in; account actions request authentication only when invoked.
+- Repository engineering and operations documentation now has complete English and Chinese trees under `docs/en` and `docs/zh`, with automated language-pair, local-link, and product-documentation boundary checks.
+- The versioned product documentation now uses the full Airalogy Scholar name consistently in visible titles and landing pages.
 
 ### Security
 

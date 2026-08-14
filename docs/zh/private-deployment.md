@@ -1,6 +1,8 @@
-# Scholar 私有化部署
+# Airalogy Scholar 私有化部署
 
-本文档说明如何把同一套 Scholar 发布版本部署到不同大学，并保证应用升级与机构数据相互独立。生产部署以一个经过整体验证的 Scholar 发布包为交付物，不以服务器 Git 工作区为运行单元。Web、API、迁移任务和可选数据库是产品内部组件，不分别选择或自由组合版本。
+[English](../en/private-deployment.md) | 简体中文
+
+本文档说明如何把同一套 Airalogy Scholar 发布版本部署到不同大学，并保证应用升级与机构数据相互独立。生产部署以一个经过整体验证的 Airalogy Scholar 发布包为交付物，不以服务器 Git 工作区为运行单元。Web、API、迁移任务和可选数据库是产品内部组件，不分别选择或自由组合版本。
 
 ## 1. 应用与数据的边界
 
@@ -81,7 +83,7 @@ cp deploy/.env.example deploy/.env
 身份服务地址、客户端密钥、用户字段映射和展示名称统一使用
 `INSTITUTION_SSO_*` 配置，回调地址固定为 `/institution_sso_callback`。旧的机构专属变量与路由
 不再接受；升级前必须把私有 `.env` 中的值迁移到新的通用变量。完整字段见
-`docs/institution-auth.md` 和发布包内的 `deploy/.env.example`。
+[机构登录与统一身份认证](./institution-auth.md)和发布包内的 `deploy/.env.example`。
 
 Release 包内的三个镜像地址已经带有经过验证的摘要，通常不应修改。如果将镜像同步到 ACR、TCR 或 Harbor，可以修改仓库域名和版本标签，但必须保留原来的 `@sha256:...`。`SCHOLAR_RELEASE_METADATA_REQUIRED=true` 是正式部署默认值；只有从源码进行本地开发验证时才可临时关闭，学校生产环境不得关闭。
 

@@ -4,7 +4,7 @@ navbar: false
 sidebar: false
 
 hero:
-  name: Scholar Documentation
+  name: Airalogy Scholar Documentation
   text: 选择文档语言 / Choose a language
   actions:
     - theme: brand

@@ -31,6 +31,15 @@ test('documentation configuration is versioned with explicit Chinese and English
   assert.doesNotMatch(config, /Documentation Deployment/u)
 })
 
+test('visible documentation titles use the full Airalogy Scholar brand', async () => {
+  const pages = await Promise.all([
+    readFile(path.join(docsRoot, 'index.md'), 'utf8'),
+    readFile(path.join(docsRoot, 'en/index.md'), 'utf8'),
+    readFile(path.join(docsRoot, 'zh/index.md'), 'utf8'),
+  ])
+  pages.forEach((source) => assert.match(source, /Airalogy Scholar/u))
+})
+
 test('administration guides document server-derived and delegated access', async () => {
   for (const relativePath of [
     'zh/administration/index.md',

@@ -1,4 +1,6 @@
-# Scholar Release Process
+# Airalogy Scholar Release Process
+
+English | [简体中文](../zh/releasing.md)
 
 Scholar is released as one product made up of independently running Web, API, migration, and optional PostgreSQL services. A release must bind these components to one tested product version and immutable image digests.
 
