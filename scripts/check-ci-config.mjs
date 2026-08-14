@@ -201,6 +201,9 @@ for (const fragment of requiredReleaseFragments) {
 
 const ciWorkflowPath = path.join(workflowDirectory, 'ci.yml')
 const ciWorkflow = await readFile(ciWorkflowPath, 'utf8')
+if (!/^on:\n  push:\n    branches:\n      - main\n  pull_request:/m.test(ciWorkflow)) {
+  fail(ciWorkflowPath, 1, 'CI must run branch pushes only on main and use pull_request for changes')
+}
 if (!ciWorkflow.includes('pnpm release:source:verify')) {
   fail(ciWorkflowPath, 1, 'CI must verify the generated release source snapshot')
 }
