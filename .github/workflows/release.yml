@@ -121,7 +121,7 @@ jobs:
           mkdir -p image-metadata
           printf '%s\n' "$IMAGE_REPOSITORY" > "image-metadata/$COMPONENT.repository"
           printf '%s\n' "$IMAGE_DIGEST" > "image-metadata/$COMPONENT.digest"
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: scholar-${{ matrix.component }}-image-metadata
           path: image-metadata
