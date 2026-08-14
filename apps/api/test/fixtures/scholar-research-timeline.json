@@ -1,0 +1,26 @@
+[
+  {
+    "scholar_name": "Example Scholar",
+    "scholar_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "research_timeline": [
+      {
+        "period_start_year": 2020,
+        "period_end_year": 2024,
+        "paper_count": 1,
+        "papers_with_abstract": 1,
+        "papers_without_abstract": 0,
+        "focus_summary": "An anonymized timeline period used only for repository tests.",
+        "focus_tags": ["example", "timeline", "research"],
+        "source_papers": [
+          {
+            "year": 2022,
+            "title": "An Example Research Paper",
+            "doi": "10.0000/example.timeline",
+            "has_abstract": true,
+            "source_status": "fixture"
+          }
+        ]
+      }
+    ]
+  }
+]

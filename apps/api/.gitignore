@@ -1,0 +1,14 @@
+node_modules/
+dist/
+
+# Prisma
+prisma/generated/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+.DS_Store
+.env

@@ -1,0 +1,697 @@
+#!/bin/sh
+
+set -eu
+umask 077
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+env_file=${SCHOLAR_ENV_FILE:-$script_dir/.env}
+base_compose=$script_dir/compose.yaml
+database_compose=$script_dir/compose.database.yaml
+
+fail() {
+  printf 'Error: %s\n' "$*" >&2
+  exit 1
+}
+
+read_env_value() {
+  key=$1
+  if [ ! -f "$env_file" ]; then
+    return 0
+  fi
+
+  awk -F= -v key="$key" '
+    $0 !~ /^[[:space:]]*#/ && $1 == key {
+      sub(/^[^=]*=/, "")
+      print
+      exit
+    }
+  ' "$env_file"
+}
+
+read_release_value() {
+  key=$1
+  metadata_file=$(release_metadata_file)
+  [ -f "$metadata_file" ] || return 0
+
+  awk -F= -v key="$key" '
+    $1 == key {
+      sub(/^[^=]*=/, "")
+      print
+      exit
+    }
+  ' "$metadata_file"
+}
+
+resolve_deploy_path() {
+  configured_path=$1
+  default_path=$2
+  configured_path=${configured_path:-$default_path}
+  case "$configured_path" in
+    /*) printf '%s\n' "$configured_path" ;;
+    *) printf '%s\n' "$script_dir/${configured_path#./}" ;;
+  esac
+}
+
+release_manifest_file() {
+  configured_path=${SCHOLAR_RELEASE_MANIFEST_FILE:-$(read_env_value SCHOLAR_RELEASE_MANIFEST_FILE)}
+  resolve_deploy_path "$configured_path" 'release-manifest.json'
+}
+
+release_metadata_file() {
+  configured_path=${SCHOLAR_RELEASE_METADATA_FILE:-$(read_env_value SCHOLAR_RELEASE_METADATA_FILE)}
+  resolve_deploy_path "$configured_path" 'release-manifest.env'
+}
+
+state_directory() {
+  configured_path=${SCHOLAR_STATE_DIR:-$(read_env_value SCHOLAR_STATE_DIR)}
+  resolve_deploy_path "$configured_path" 'state'
+}
+
+release_operation_lock() {
+  if [ -n "${OPERATION_LOCK_DIRECTORY:-}" ]; then
+    rmdir "$OPERATION_LOCK_DIRECTORY" 2>/dev/null || true
+    OPERATION_LOCK_DIRECTORY=
+  fi
+}
+
+acquire_operation_lock() {
+  operation=$1
+  state_dir=$(state_directory)
+  mkdir -p "$state_dir"
+  OPERATION_LOCK_DIRECTORY=$state_dir/operation.lock
+  if ! mkdir "$OPERATION_LOCK_DIRECTORY" 2>/dev/null; then
+    fail "Another Scholar install, upgrade, backup, or bootstrap operation is already running ($OPERATION_LOCK_DIRECTORY)"
+  fi
+  trap 'release_operation_lock' EXIT INT TERM
+  printf 'Acquired Scholar deployment lock for %s.\n' "$operation"
+}
+
+configured_value() {
+  key=$1
+  case "$key" in
+    SCHOLAR_VERSION) environment_value=${SCHOLAR_VERSION:-} ;;
+    SCHOLAR_API_IMAGE) environment_value=${SCHOLAR_API_IMAGE:-} ;;
+    SCHOLAR_WEB_IMAGE) environment_value=${SCHOLAR_WEB_IMAGE:-} ;;
+    POSTGRES_IMAGE) environment_value=${POSTGRES_IMAGE:-} ;;
+    SCHOLAR_RELEASE_METADATA_REQUIRED) environment_value=${SCHOLAR_RELEASE_METADATA_REQUIRED:-} ;;
+    SCHOLAR_OFFLINE) environment_value=${SCHOLAR_OFFLINE:-} ;;
+    *) fail "Unsupported configured value: $key" ;;
+  esac
+  if [ -n "$environment_value" ]; then
+    printf '%s\n' "$environment_value"
+  else
+    read_env_value "$key"
+  fi
+}
+
+database_mode() {
+  configured_mode=${SCHOLAR_DATABASE_MODE:-$(read_env_value SCHOLAR_DATABASE_MODE)}
+  printf '%s\n' "${configured_mode:-bundled}"
+}
+
+compose_project_name() {
+  configured_name=${SCHOLAR_COMPOSE_PROJECT_NAME:-$(read_env_value SCHOLAR_COMPOSE_PROJECT_NAME)}
+  printf '%s\n' "${configured_name:-scholar}"
+}
+
+compose() {
+  command -v docker >/dev/null 2>&1 || fail 'Docker Engine is required'
+  docker compose version >/dev/null 2>&1 || fail 'Docker Compose v2 is required'
+  project_name=$(compose_project_name)
+
+  offline=$(configured_value SCHOLAR_OFFLINE)
+  offline=${offline:-false}
+  (
+    if [ "$offline" = 'true' ]; then
+      export SCHOLAR_API_IMAGE="$(read_release_value SCHOLAR_RELEASE_API_TAGGED_IMAGE)"
+      export SCHOLAR_WEB_IMAGE="$(read_release_value SCHOLAR_RELEASE_WEB_TAGGED_IMAGE)"
+      export POSTGRES_IMAGE="$(read_release_value SCHOLAR_RELEASE_POSTGRES_TAGGED_IMAGE)"
+    fi
+    export SCHOLAR_RUNTIME_ENV_FILE=$env_file
+    if [ "$(database_mode)" = 'bundled' ]; then
+      docker compose --project-name "$project_name" --env-file "$env_file" -f "$base_compose" -f "$database_compose" "$@"
+    else
+      docker compose --project-name "$project_name" --env-file "$env_file" -f "$base_compose" "$@"
+    fi
+  )
+}
+
+ensure_env_file() {
+  [ -f "$env_file" ] || fail "Missing $env_file; copy deploy/.env.example and configure it"
+}
+
+ensure_secret() {
+  key=$1
+  minimum_length=$2
+  value=$(read_env_value "$key")
+
+  [ "${#value}" -ge "$minimum_length" ] || fail "$key must contain at least $minimum_length characters"
+  case "$value" in
+    *replace-with*) fail "$key still contains the example placeholder" ;;
+  esac
+}
+
+calculate_sha256() {
+  file=$1
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{ print $1 }'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$file" | awk '{ print $1 }'
+  else
+    fail 'sha256sum or shasum is required to verify release metadata'
+  fi
+}
+
+image_digest() {
+  image=$1
+  printf '%s\n' "$image" | sed -n 's/^.*@\(sha256:[0-9a-f]\{64\}\)$/\1/p'
+}
+
+verify_release_image() {
+  configured_key=$1
+  release_digest_key=$2
+  configured_image=$(configured_value "$configured_key")
+  expected_digest=$(read_release_value "$release_digest_key")
+  configured_digest=$(image_digest "$configured_image")
+
+  [ -n "$configured_digest" ] || fail "$configured_key must be pinned with @sha256 in a release deployment"
+  [ "$configured_digest" = "$expected_digest" ] || fail "$configured_key digest does not match the Scholar release manifest"
+}
+
+verify_release_metadata() {
+  metadata_required=$(configured_value SCHOLAR_RELEASE_METADATA_REQUIRED)
+  metadata_required=${metadata_required:-true}
+  manifest_file=$(release_manifest_file)
+  metadata_file=$(release_metadata_file)
+
+  if [ "$metadata_required" != 'true' ]; then
+    printf '%s\n' 'Warning: release metadata verification is explicitly disabled.' >&2
+    return 0
+  fi
+
+  [ -f "$manifest_file" ] || fail "Missing $manifest_file; use a generated Scholar release package"
+  [ -f "$metadata_file" ] || fail "Missing $metadata_file; use a generated Scholar release package"
+
+  schema_version=$(read_release_value SCHOLAR_RELEASE_SCHEMA_VERSION)
+  [ "$schema_version" = '1' ] || fail "Unsupported Scholar release metadata schema: ${schema_version:-missing}"
+  expected_checksum=$(read_release_value SCHOLAR_RELEASE_MANIFEST_SHA256)
+  actual_checksum=$(calculate_sha256 "$manifest_file")
+  [ "$actual_checksum" = "$expected_checksum" ] || fail 'release-manifest.json checksum does not match release-manifest.env'
+
+  configured_version=$(configured_value SCHOLAR_VERSION)
+  release_version=$(read_release_value SCHOLAR_RELEASE_PRODUCT_VERSION)
+  release_tag=$(read_release_value SCHOLAR_RELEASE_TAG)
+  release_commit=$(read_release_value SCHOLAR_RELEASE_COMMIT)
+  [ "$configured_version" = "$release_version" ] || fail 'SCHOLAR_VERSION does not match the Scholar release manifest'
+  [ "$release_tag" = "v$release_version" ] || fail 'Release tag does not match the Scholar product version'
+  printf '%s\n' "$release_commit" | grep -Eq '^[0-9a-f]{40}$' || fail 'Release manifest commit is invalid'
+
+  grep -Fq "\"productVersion\": \"$release_version\"" "$manifest_file" || fail 'Release JSON and environment metadata disagree on product version'
+  grep -Fq "\"gitCommit\": \"$release_commit\"" "$manifest_file" || fail 'Release JSON and environment metadata disagree on Git commit'
+  release_migration=$(read_release_value SCHOLAR_RELEASE_DATABASE_MIGRATION)
+  grep -Fq "\"migration\": \"$release_migration\"" "$manifest_file" || fail 'Release JSON and environment metadata disagree on database migration'
+  for digest_key in SCHOLAR_RELEASE_API_DIGEST SCHOLAR_RELEASE_WEB_DIGEST SCHOLAR_RELEASE_POSTGRES_DIGEST; do
+    release_digest=$(read_release_value "$digest_key")
+    grep -Fq "\"digest\": \"$release_digest\"" "$manifest_file" || fail "Release JSON and environment metadata disagree on $digest_key"
+  done
+
+  verify_release_image SCHOLAR_API_IMAGE SCHOLAR_RELEASE_API_DIGEST
+  verify_release_image SCHOLAR_WEB_IMAGE SCHOLAR_RELEASE_WEB_DIGEST
+  if [ "$(database_mode)" = 'bundled' ]; then
+    verify_release_image POSTGRES_IMAGE SCHOLAR_RELEASE_POSTGRES_DIGEST
+  fi
+}
+
+preflight() {
+  ensure_env_file
+  ensure_secret JWT_SECRET 32
+  ensure_secret DATABASE_URL 20
+  verify_release_metadata
+
+  ai_chat_enabled=${ENABLE_AI_CHAT:-$(read_env_value ENABLE_AI_CHAT)}
+  case "${ai_chat_enabled:-false}" in
+    true)
+      ensure_secret OPENAI_BASE_URL 8
+      ensure_secret OPENAI_API_KEY 1
+      ensure_secret CHAT_MODEL 1
+      ensure_secret OPENAI_EMBEDDING_MODEL 1
+      ;;
+    false) ;;
+    *) fail 'ENABLE_AI_CHAT must be true or false' ;;
+  esac
+
+  institution_login_enabled=${ENABLE_INSTITUTION_LOGIN:-$(read_env_value ENABLE_INSTITUTION_LOGIN)}
+  case "${institution_login_enabled:-false}" in
+    true)
+      institution_login_slug=${INSTITUTION_LOGIN_INSTITUTION_SLUG:-$(read_env_value INSTITUTION_LOGIN_INSTITUTION_SLUG)}
+      institution_login_slug=${institution_login_slug:-$(read_env_value PRIVATE_INSTITUTION_SLUG)}
+      [ -n "$institution_login_slug" ] || fail 'INSTITUTION_LOGIN_INSTITUTION_SLUG is required when institution login is enabled'
+      case "$institution_login_slug" in
+        *replace-with*) fail 'Institution login slug still contains the example placeholder' ;;
+      esac
+      ;;
+    false) ;;
+    *) fail 'ENABLE_INSTITUTION_LOGIN must be true or false' ;;
+  esac
+
+  institution_sso_enabled=${INSTITUTION_SSO_ENABLED:-$(read_env_value INSTITUTION_SSO_ENABLED)}
+  case "${institution_sso_enabled:-false}" in
+    true)
+      institution_sso_type=${INSTITUTION_SSO_TYPE:-$(read_env_value INSTITUTION_SSO_TYPE)}
+      [ "${institution_sso_type:-oauth2}" = 'oauth2' ] || fail 'INSTITUTION_SSO_TYPE must be oauth2'
+      ensure_secret INSTITUTION_SSO_PROVIDER_ID 1
+      ensure_secret INSTITUTION_SSO_AUTHORIZATION_URL 8
+      ensure_secret INSTITUTION_SSO_TOKEN_URL 8
+      ensure_secret INSTITUTION_SSO_USERINFO_URL 8
+      ensure_secret INSTITUTION_SSO_CLIENT_ID 1
+      ensure_secret INSTITUTION_SSO_CLIENT_SECRET 1
+      ensure_secret INSTITUTION_SSO_REDIRECT_URI 8
+      ensure_secret INSTITUTION_SSO_EXTERNAL_ID_FIELD 1
+      ensure_secret INSTITUTION_SSO_EMAIL_FIELD 1
+      ensure_secret INSTITUTION_SSO_NAME_FIELD 1
+      institution_sso_userinfo_token_mode=${INSTITUTION_SSO_USERINFO_TOKEN_MODE:-$(read_env_value INSTITUTION_SSO_USERINFO_TOKEN_MODE)}
+      case "${institution_sso_userinfo_token_mode:-bearer}" in
+        bearer|query) ;;
+        *) fail 'INSTITUTION_SSO_USERINFO_TOKEN_MODE must be bearer or query' ;;
+      esac
+      ;;
+    false) ;;
+    *) fail 'INSTITUTION_SSO_ENABLED must be true or false' ;;
+  esac
+
+  if [ "$(database_mode)" = 'bundled' ]; then
+    ensure_secret POSTGRES_PASSWORD 16
+  elif [ "$(database_mode)" != 'external' ]; then
+    fail 'SCHOLAR_DATABASE_MODE must be bundled or external'
+  fi
+
+  images=$(compose config --images)
+  [ -n "$images" ] || fail 'Compose did not resolve any images'
+  if printf '%s\n' "$images" | grep -Eq '(^|:)latest$'; then
+    fail 'Floating latest image tags are not allowed'
+  fi
+
+  compose config --quiet
+  printf 'Preflight passed for Scholar %s in %s database mode.\n' "$(configured_value SCHOLAR_VERSION)" "$(database_mode)"
+}
+
+pull_images() {
+  offline=$(configured_value SCHOLAR_OFFLINE)
+  offline=${offline:-false}
+  if [ "$offline" = 'true' ]; then
+    for image in $(compose config --images | sort -u); do
+      docker image inspect "$image" >/dev/null 2>&1 || fail "Offline image is not loaded: $image"
+    done
+    printf '%s\n' 'Using verified locally loaded images in offline mode.'
+  else
+    compose pull
+  fi
+}
+
+verify_scholar_image() {
+  image=$1
+  component=$2
+  expected_version=$(read_release_value SCHOLAR_RELEASE_PRODUCT_VERSION)
+  expected_commit=$(read_release_value SCHOLAR_RELEASE_COMMIT)
+  actual_version=$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$image")
+  actual_commit=$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image")
+
+  [ "$actual_version" = "$expected_version" ] || fail "$component image reports version $actual_version; expected $expected_version"
+  [ "$actual_commit" = "$expected_commit" ] || fail "$component image reports commit $actual_commit; expected $expected_commit"
+}
+
+verify_local_images() {
+  metadata_required=$(configured_value SCHOLAR_RELEASE_METADATA_REQUIRED)
+  metadata_required=${metadata_required:-true}
+  [ "$metadata_required" = 'true' ] || return 0
+
+  offline=$(configured_value SCHOLAR_OFFLINE)
+  offline=${offline:-false}
+  if [ "$offline" = 'true' ]; then
+    api_image=$(read_release_value SCHOLAR_RELEASE_API_TAGGED_IMAGE)
+    web_image=$(read_release_value SCHOLAR_RELEASE_WEB_TAGGED_IMAGE)
+  else
+    api_image=$(configured_value SCHOLAR_API_IMAGE)
+    web_image=$(configured_value SCHOLAR_WEB_IMAGE)
+  fi
+  verify_scholar_image "$api_image" 'API'
+  verify_scholar_image "$web_image" 'Web'
+  if [ "$(database_mode)" = 'bundled' ]; then
+    if [ "$offline" = 'true' ]; then
+      postgres_image=$(read_release_value SCHOLAR_RELEASE_POSTGRES_TAGGED_IMAGE)
+    else
+      postgres_image=$(configured_value POSTGRES_IMAGE)
+    fi
+    docker image inspect "$postgres_image" >/dev/null 2>&1 || fail "PostgreSQL image is unavailable: $postgres_image"
+  fi
+}
+
+running_version_payload() {
+  compose exec -T web wget -qO- http://127.0.0.1:8080/api/version
+}
+
+json_string_field() {
+  field=$1
+  sed -n "s/.*\"$field\":\"\([^\"]*\)\".*/\1/p"
+}
+
+verify_running_release() {
+  metadata_required=$(configured_value SCHOLAR_RELEASE_METADATA_REQUIRED)
+  metadata_required=${metadata_required:-true}
+  [ "$metadata_required" = 'true' ] || return 0
+
+  payload=$(running_version_payload)
+  actual_version=$(printf '%s\n' "$payload" | json_string_field version)
+  actual_tag=$(printf '%s\n' "$payload" | json_string_field tag)
+  actual_commit=$(printf '%s\n' "$payload" | json_string_field commit)
+  expected_version=$(read_release_value SCHOLAR_RELEASE_PRODUCT_VERSION)
+  expected_tag=$(read_release_value SCHOLAR_RELEASE_TAG)
+  expected_commit=$(read_release_value SCHOLAR_RELEASE_COMMIT)
+
+  if [ "$actual_version" != "$expected_version" ]; then
+    printf 'Error: Running API reports version %s; expected %s\n' "$actual_version" "$expected_version" >&2
+    return 1
+  fi
+  if [ "$actual_tag" != "$expected_tag" ]; then
+    printf 'Error: Running API reports tag %s; expected %s\n' "$actual_tag" "$expected_tag" >&2
+    return 1
+  fi
+  if [ "$actual_commit" != "$expected_commit" ]; then
+    printf 'Error: Running API reports commit %s; expected %s\n' "$actual_commit" "$expected_commit" >&2
+    return 1
+  fi
+  printf 'Running Scholar release verified: %s (%s).\n' "$actual_version" "$actual_commit"
+}
+
+resolved_backup_directory() {
+  configured_path=${SCHOLAR_BACKUP_DIR:-$(read_env_value SCHOLAR_BACKUP_DIR)}
+  resolve_deploy_path "$configured_path" 'backups'
+}
+
+backup() {
+  ensure_env_file
+  requested_timestamp=${1:-}
+  backup_dir=$(resolved_backup_directory)
+  mkdir -p "$backup_dir"
+
+  timestamp=${requested_timestamp:-$(date -u '+%Y%m%dT%H%M%SZ')}
+  if [ "$(database_mode)" = 'bundled' ]; then
+    database_output=$backup_dir/scholar-$timestamp.dump
+    if ! compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom --no-owner --no-privileges' >"$database_output"; then
+      rm -f "$database_output"
+      fail 'Database backup failed'
+    fi
+    if [ ! -s "$database_output" ]; then
+      rm -f "$database_output"
+      fail 'Database backup is empty'
+    fi
+    printf 'Database backup created: %s\n' "$database_output"
+  else
+    printf '%s\n' 'External PostgreSQL backup is managed by the institution database service.'
+  fi
+
+  storage_provider=${STORAGE_PROVIDER:-$(read_env_value STORAGE_PROVIDER)}
+  storage_provider=${storage_provider:-local}
+  if [ "$storage_provider" = 'local' ]; then
+    uploads_output=$backup_dir/scholar-uploads-$timestamp.tar.gz
+    if ! compose run --rm --no-deps --entrypoint sh api -c 'tar -C "$LOCAL_STORAGE_DIR" -czf - .' >"$uploads_output"; then
+      rm -f "$uploads_output"
+      fail 'Local upload backup failed'
+    fi
+    if [ ! -s "$uploads_output" ]; then
+      rm -f "$uploads_output"
+      fail 'Local upload backup is empty'
+    fi
+    printf 'Local upload backup created: %s\n' "$uploads_output"
+  else
+    printf '%s\n' 'Object storage backup must be completed with the configured OSS service.'
+  fi
+}
+
+container_image() {
+  service=$1
+  container_id=$(compose ps -q "$service")
+  [ -n "$container_id" ] || return 0
+  docker inspect --format '{{.Config.Image}}' "$container_id"
+}
+
+write_current_release() {
+  deployment_action=$1
+  metadata_required=$(configured_value SCHOLAR_RELEASE_METADATA_REQUIRED)
+  metadata_required=${metadata_required:-true}
+  [ "$metadata_required" = 'true' ] || return 0
+
+  state_dir=$(state_directory)
+  mkdir -p "$state_dir/releases"
+  current_file=$state_dir/current-release.env
+  version=$(read_release_value SCHOLAR_RELEASE_PRODUCT_VERSION)
+  commit=$(read_release_value SCHOLAR_RELEASE_COMMIT)
+  manifest_checksum=$(read_release_value SCHOLAR_RELEASE_MANIFEST_SHA256)
+  deployed_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+  {
+    printf 'SCHOLAR_DEPLOYMENT_ACTION=%s\n' "$deployment_action"
+    printf 'SCHOLAR_DEPLOYED_AT=%s\n' "$deployed_at"
+    printf 'SCHOLAR_VERSION=%s\n' "$version"
+    printf 'SCHOLAR_TAG=%s\n' "$(read_release_value SCHOLAR_RELEASE_TAG)"
+    printf 'SCHOLAR_COMMIT=%s\n' "$commit"
+    printf 'SCHOLAR_DATABASE_MIGRATION=%s\n' "$(read_release_value SCHOLAR_RELEASE_DATABASE_MIGRATION)"
+    printf 'SCHOLAR_API_IMAGE=%s\n' "$(configured_value SCHOLAR_API_IMAGE)"
+    printf 'SCHOLAR_WEB_IMAGE=%s\n' "$(configured_value SCHOLAR_WEB_IMAGE)"
+    printf 'POSTGRES_IMAGE=%s\n' "$(configured_value POSTGRES_IMAGE)"
+    printf 'SCHOLAR_RELEASE_MANIFEST_SHA256=%s\n' "$manifest_checksum"
+  } >"$current_file"
+
+  cp "$(release_manifest_file)" "$state_dir/releases/$version-$commit.json"
+  cp "$(release_metadata_file)" "$state_dir/releases/$version-$commit.env"
+}
+
+create_upgrade_record() {
+  upgrade_id=$1
+  state_dir=$(state_directory)
+  mkdir -p "$state_dir/upgrades"
+  UPGRADE_RECORD=$state_dir/upgrades/$upgrade_id.env
+  previous_payload=$(running_version_payload)
+  previous_version=$(printf '%s\n' "$previous_payload" | json_string_field version)
+  previous_commit=$(printf '%s\n' "$previous_payload" | json_string_field commit)
+
+  {
+    printf 'SCHOLAR_UPGRADE_ID=%s\n' "$upgrade_id"
+    printf 'SCHOLAR_UPGRADE_STATUS=prepared\n'
+    printf 'SCHOLAR_PREVIOUS_VERSION=%s\n' "$previous_version"
+    printf 'SCHOLAR_PREVIOUS_COMMIT=%s\n' "$previous_commit"
+    printf 'SCHOLAR_PREVIOUS_API_IMAGE=%s\n' "$(container_image api)"
+    printf 'SCHOLAR_PREVIOUS_WEB_IMAGE=%s\n' "$(container_image web)"
+    printf 'SCHOLAR_TARGET_VERSION=%s\n' "$(read_release_value SCHOLAR_RELEASE_PRODUCT_VERSION)"
+    printf 'SCHOLAR_TARGET_COMMIT=%s\n' "$(read_release_value SCHOLAR_RELEASE_COMMIT)"
+    printf 'SCHOLAR_TARGET_API_IMAGE=%s\n' "$(configured_value SCHOLAR_API_IMAGE)"
+    printf 'SCHOLAR_TARGET_WEB_IMAGE=%s\n' "$(configured_value SCHOLAR_WEB_IMAGE)"
+  } >"$UPGRADE_RECORD"
+}
+
+append_upgrade_record() {
+  key=$1
+  value=$2
+  printf '%s=%s\n' "$key" "$value" >>"$UPGRADE_RECORD"
+}
+
+mark_upgrade_status() {
+  status=$1
+  append_upgrade_record SCHOLAR_UPGRADE_STATUS_EVENT "$status"
+  append_upgrade_record SCHOLAR_UPGRADE_STATUS_AT "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+}
+
+show_recovery_information() {
+  state_dir=$(state_directory)
+  latest_record=$(find "$state_dir/upgrades" -type f -name '*.env' 2>/dev/null | sort | tail -n 1)
+  [ -n "$latest_record" ] || fail "No upgrade recovery record exists in $state_dir/upgrades"
+  printf 'Latest upgrade recovery record: %s\n' "$latest_record"
+  sed -n '/^SCHOLAR_/p' "$latest_record"
+}
+
+audit_integrity() {
+  compose exec -T api node dist/src/scripts/audit-data-integrity.js
+}
+
+show_version() {
+  running_version_payload
+  printf '\n'
+}
+
+prompt_value() {
+  variable_name=$1
+  prompt=$2
+  case "$variable_name" in
+    SCHOLAR_BOOTSTRAP_INSTITUTION_NAME) current_value=${SCHOLAR_BOOTSTRAP_INSTITUTION_NAME:-} ;;
+    SCHOLAR_BOOTSTRAP_INSTITUTION_SLUG) current_value=${SCHOLAR_BOOTSTRAP_INSTITUTION_SLUG:-} ;;
+    SCHOLAR_BOOTSTRAP_OWNER_NAME) current_value=${SCHOLAR_BOOTSTRAP_OWNER_NAME:-} ;;
+    SCHOLAR_BOOTSTRAP_OWNER_EMAIL) current_value=${SCHOLAR_BOOTSTRAP_OWNER_EMAIL:-} ;;
+    SCHOLAR_BOOTSTRAP_OWNER_USERNAME) current_value=${SCHOLAR_BOOTSTRAP_OWNER_USERNAME:-} ;;
+    *) fail "Unsupported prompt variable: $variable_name" ;;
+  esac
+  if [ -z "$current_value" ]; then
+    printf '%s: ' "$prompt" >&2
+    IFS= read -r current_value
+  fi
+  case "$variable_name" in
+    SCHOLAR_BOOTSTRAP_INSTITUTION_NAME) SCHOLAR_BOOTSTRAP_INSTITUTION_NAME=$current_value ;;
+    SCHOLAR_BOOTSTRAP_INSTITUTION_SLUG) SCHOLAR_BOOTSTRAP_INSTITUTION_SLUG=$current_value ;;
+    SCHOLAR_BOOTSTRAP_OWNER_NAME) SCHOLAR_BOOTSTRAP_OWNER_NAME=$current_value ;;
+    SCHOLAR_BOOTSTRAP_OWNER_EMAIL) SCHOLAR_BOOTSTRAP_OWNER_EMAIL=$current_value ;;
+    SCHOLAR_BOOTSTRAP_OWNER_USERNAME) SCHOLAR_BOOTSTRAP_OWNER_USERNAME=$current_value ;;
+  esac
+}
+
+bootstrap() {
+  ensure_env_file
+  prompt_value SCHOLAR_BOOTSTRAP_INSTITUTION_NAME 'Institution name'
+  prompt_value SCHOLAR_BOOTSTRAP_INSTITUTION_SLUG 'Institution slug'
+  prompt_value SCHOLAR_BOOTSTRAP_OWNER_NAME 'Owner display name'
+  prompt_value SCHOLAR_BOOTSTRAP_OWNER_EMAIL 'Owner email'
+  prompt_value SCHOLAR_BOOTSTRAP_OWNER_USERNAME 'Owner username'
+
+  if [ -z "${SCHOLAR_BOOTSTRAP_OWNER_PASSWORD:-}" ]; then
+    printf '%s: ' 'Owner password (at least 12 characters)' >&2
+    trap 'stty echo; release_operation_lock' EXIT INT TERM
+    stty -echo
+    IFS= read -r SCHOLAR_BOOTSTRAP_OWNER_PASSWORD
+    stty echo
+    trap 'release_operation_lock' EXIT INT TERM
+    printf '\n' >&2
+  fi
+
+  compose exec \
+    -e SCHOLAR_BOOTSTRAP_INSTITUTION_NAME="$SCHOLAR_BOOTSTRAP_INSTITUTION_NAME" \
+    -e SCHOLAR_BOOTSTRAP_INSTITUTION_SLUG="$SCHOLAR_BOOTSTRAP_INSTITUTION_SLUG" \
+    -e SCHOLAR_BOOTSTRAP_OWNER_NAME="$SCHOLAR_BOOTSTRAP_OWNER_NAME" \
+    -e SCHOLAR_BOOTSTRAP_OWNER_EMAIL="$SCHOLAR_BOOTSTRAP_OWNER_EMAIL" \
+    -e SCHOLAR_BOOTSTRAP_OWNER_USERNAME="$SCHOLAR_BOOTSTRAP_OWNER_USERNAME" \
+    -e SCHOLAR_BOOTSTRAP_OWNER_PASSWORD="$SCHOLAR_BOOTSTRAP_OWNER_PASSWORD" \
+    -e SCHOLAR_BOOTSTRAP_PLATFORM_ADMIN="${SCHOLAR_BOOTSTRAP_PLATFORM_ADMIN:-false}" \
+    api node dist/src/scripts/bootstrap-deployment.js
+}
+
+usage() {
+  printf '%s\n' \
+    'Usage: deploy/scholarctl <command>' \
+    '' \
+    'Commands:' \
+    '  preflight  Validate environment, image tags, and Compose configuration' \
+    '  install    Pull pinned images, migrate the database, and start Scholar' \
+    '  upgrade    Back up the bundled database, pull, migrate, and restart' \
+    '  backup     Back up the bundled database and local upload storage' \
+    '  audit      Audit database relationships and migration constraints' \
+    '  bootstrap  Create or repair the first institution owner interactively' \
+    '  status     Show service state and the running Scholar version' \
+    '  recovery   Show the latest non-secret upgrade recovery record' \
+    '  logs       Follow API and Web logs' \
+    '  images     Print the exact images required by this deployment' \
+    '  stop       Stop services without deleting data'
+}
+
+command=${1:-}
+case "$command" in
+  preflight)
+    preflight
+    ;;
+  install)
+    ensure_env_file
+    acquire_operation_lock install
+    preflight
+    pull_images
+    verify_local_images
+    compose up -d --wait
+    audit_integrity
+    verify_running_release
+    write_current_release install
+    show_version
+    ;;
+  upgrade)
+    ensure_env_file
+    acquire_operation_lock upgrade
+    preflight
+    if [ "${STORAGE_PROVIDER:-$(read_env_value STORAGE_PROVIDER)}" = 'oss' ]; then
+      [ "${SCHOLAR_OBJECT_STORAGE_BACKUP_CONFIRMED:-false}" = 'true' ] || fail 'Set SCHOLAR_OBJECT_STORAGE_BACKUP_CONFIRMED=true after the object storage backup is complete'
+    fi
+    if [ "$(database_mode)" != 'bundled' ]; then
+      [ "${SCHOLAR_EXTERNAL_BACKUP_CONFIRMED:-false}" = 'true' ] || fail 'Set SCHOLAR_EXTERNAL_BACKUP_CONFIRMED=true after the institution database backup is complete'
+    fi
+    pull_images
+    verify_local_images
+    upgrade_id=$(date -u '+%Y%m%dT%H%M%SZ')
+    create_upgrade_record "$upgrade_id"
+    compose stop web api
+    if ! (backup "$upgrade_id"); then
+      mark_upgrade_status backup_failed
+      compose start api web || true
+      fail "Upgrade backup failed; the previous API and Web containers were restarted. Recovery record: $UPGRADE_RECORD"
+    fi
+    backup_dir=$(resolved_backup_directory)
+    database_backup=
+    uploads_backup=
+    if [ "$(database_mode)" = 'bundled' ]; then
+      database_backup=$backup_dir/scholar-$upgrade_id.dump
+    fi
+    if [ "${STORAGE_PROVIDER:-$(read_env_value STORAGE_PROVIDER)}" = 'local' ]; then
+      uploads_backup=$backup_dir/scholar-uploads-$upgrade_id.tar.gz
+    fi
+    append_upgrade_record SCHOLAR_DATABASE_BACKUP "$database_backup"
+    append_upgrade_record SCHOLAR_UPLOADS_BACKUP "$uploads_backup"
+    mark_upgrade_status backed_up
+    if ! compose up -d --wait; then
+      mark_upgrade_status deployment_failed
+      fail "Upgrade failed while starting the target release. Do not run an older API against a possibly migrated database; inspect $UPGRADE_RECORD and restore the matching backup if required"
+    fi
+    if ! audit_integrity; then
+      mark_upgrade_status integrity_audit_failed
+      fail "Upgrade started but the integrity audit failed. Inspect $UPGRADE_RECORD before restoring or retrying"
+    fi
+    if ! verify_running_release; then
+      mark_upgrade_status release_verification_failed
+      fail "Upgrade started but the running release identity is incorrect. Inspect $UPGRADE_RECORD before restoring or retrying"
+    fi
+    mark_upgrade_status succeeded
+    write_current_release upgrade
+    show_version
+    ;;
+  backup)
+    ensure_env_file
+    acquire_operation_lock backup
+    backup
+    ;;
+  audit)
+    ensure_env_file
+    audit_integrity
+    ;;
+  bootstrap)
+    ensure_env_file
+    acquire_operation_lock bootstrap
+    bootstrap
+    ;;
+  status)
+    ensure_env_file
+    compose ps
+    verify_running_release
+    show_version
+    ;;
+  recovery)
+    ensure_env_file
+    show_recovery_information
+    ;;
+  logs)
+    ensure_env_file
+    compose logs --follow api web
+    ;;
+  images)
+    ensure_env_file
+    compose config --images | sort -u
+    ;;
+  stop)
+    ensure_env_file
+    compose down
+    ;;
+  *)
+    usage
+    [ -z "$command" ] || exit 1
+    ;;
+esac

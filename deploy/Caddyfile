@@ -1,0 +1,59 @@
+:8080 {
+	root * /srv
+	encode zstd gzip
+
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+	}
+
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					replace token [REDACTED]
+					replace client_secret [REDACTED]
+					replace code [REDACTED]
+					replace state [REDACTED]
+					replace access_token [REDACTED]
+					replace id_token [REDACTED]
+					replace refresh_token [REDACTED]
+				}
+			}
+		}
+	}
+
+	route {
+		respond /healthz "ok" 200
+		redir /docs /docs/zh/ 308
+		redir /docs/ /docs/zh/ 308
+
+		handle_path /docs/* {
+			root * /srv/docs
+
+			@docsAssets path /assets/*
+			header @docsAssets Cache-Control "public, max-age=31536000, immutable"
+
+			try_files {path} {path}.html {path}/index.html /404.html
+			file_server
+		}
+
+		handle_path /api/* {
+			reverse_proxy api:3000 {
+				flush_interval -1
+				header_up X-Real-IP {remote_host}
+			}
+		}
+
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+
+		try_files {path} /index.html
+		file_server
+	}
+}

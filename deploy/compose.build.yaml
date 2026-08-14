@@ -1,0 +1,37 @@
+services:
+  migrate:
+    image: airalogy/scholar-api:local
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+      args:
+        NODE_IMAGE: ${SCHOLAR_NODE_BUILD_IMAGE:-node:22.23.0-bookworm-slim@sha256:d9f850096136edbc402debdd8729579a288aac64574ada0ff4db26b6ae58b0b2}
+        APP_VERSION: ${SCHOLAR_VERSION:-dev}
+        GIT_COMMIT: ${GIT_COMMIT:-local}
+        GIT_TAG: ${GIT_TAG:-}
+        BUILD_TIME: ${BUILD_TIME:-}
+
+  api:
+    image: airalogy/scholar-api:local
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+      args:
+        NODE_IMAGE: ${SCHOLAR_NODE_BUILD_IMAGE:-node:22.23.0-bookworm-slim@sha256:d9f850096136edbc402debdd8729579a288aac64574ada0ff4db26b6ae58b0b2}
+        APP_VERSION: ${SCHOLAR_VERSION:-dev}
+        GIT_COMMIT: ${GIT_COMMIT:-local}
+        GIT_TAG: ${GIT_TAG:-}
+        BUILD_TIME: ${BUILD_TIME:-}
+
+  web:
+    image: airalogy/scholar-web:local
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      args:
+        NODE_IMAGE: ${SCHOLAR_NODE_BUILD_IMAGE:-node:22.23.0-bookworm-slim@sha256:d9f850096136edbc402debdd8729579a288aac64574ada0ff4db26b6ae58b0b2}
+        CADDY_IMAGE: ${SCHOLAR_CADDY_BUILD_IMAGE:-caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d}
+        VITE_API_BASE_URL: /api
+        APP_VERSION: ${SCHOLAR_VERSION:-dev}
+        GIT_COMMIT: ${GIT_COMMIT:-local}
+        BUILD_TIME: ${BUILD_TIME:-}

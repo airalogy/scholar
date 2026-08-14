@@ -1,0 +1,14 @@
+#!/bin/sh
+
+set -eu
+
+repository_root=$(git rev-parse --show-toplevel)
+cd "$repository_root"
+
+if ! command -v pnpm >/dev/null 2>&1; then
+  echo "Scholar pre-push: pnpm is required. Run corepack enable and pnpm install." >&2
+  exit 1
+fi
+
+echo "Scholar pre-push: validating CI configuration and repository checks..."
+pnpm prepush
