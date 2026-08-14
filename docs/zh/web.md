@@ -1,5 +1,7 @@
 # Web（apps/web）
 
+[English](../en/web.md) | 简体中文
+
 ## 技术栈与版本（来自 `apps/web/package.json`）
 
 - **Vue**: `^3.5.41`
@@ -50,15 +52,15 @@
   - 基于 Vue Router 4；新增页面/路由时，优先查找项目现有路由组织方式再扩展。
   - 首页、登录入口和功能路由不应再写死为固定能力，当前统一由 `GET /auth/public-config` 返回的公开配置驱动。
 - **内容治理与管理台**
-  - 实验室主页权限边界与角色模型见 `docs/content-governance.md`。
-  - 论文审核状态、公开展示规则和前端展示边界见 `docs/paper-review-workflow.md`。
-  - 学位论文专题、提交人工作区、结构化编辑器和机构审核台见 `docs/degree-thesis-workflow.md`。
+  - 实验室主页权限边界与角色模型见[内容治理](./content-governance.md)。
+  - 论文审核状态、公开展示规则和前端展示边界见[论文审核流程](./paper-review-workflow.md)。
+  - 学位论文专题、提交人工作区、结构化编辑器和机构审核台见[学位论文流程](./degree-thesis-workflow.md)。
   - 学位论文入口必须跟随 `features.degreeTheses`；审核员可进入队列，但只有机构 owner/admin 可配置审核流程。
-  - 机构管理台中的“预开通成员”与登录弹窗中的“机构成员激活”流程见 `docs/content-governance.md`。
+  - 机构管理台中的“预开通成员”与登录弹窗中的“机构成员激活”流程见[内容治理](./content-governance.md)。
   - 登录弹窗中的机构 SSO 若采用 `jit_member`，前端需要明确提示“首次 SSO 自动开通平台账号并加入机构，无需单独注册”，但不能据此暗示管理权限。
   - 私有化部署时，侧边栏中的 AI Chat、上传入口、品牌 logo，以及登录弹窗中的 Airalogy / 机构入口，都应跟随后端公共配置动态显示，而不是在页面里写死。
   - 当 `paperUpload` 被禁用时，上传页入口、空状态里的上传 CTA 等前端跳转都应一并收敛，避免用户落到后端已禁用的接口上。
-  - 如果是面向某一家机构交付私有化版本，具体部署 runbook 与推荐能力组合见 `docs/private-deployment.md`。
-  - 机构论文库中的“作者绑定”弹窗、机构成员页中的论文统计，以及它们对应的权限边界，见 `docs/content-governance.md`。
-  - 机构成员展示与统计口径，例如“绑定论文数”与“已审核论文数”的区别，见 `docs/paper-review-workflow.md`。
-  - 登录弹窗中“先机构、后登录方式”的扩展规则见 `docs/institution-auth.md`。
+  - 如果是面向某一家机构交付私有化版本，具体部署 runbook 与推荐能力组合见[私有化部署](./private-deployment.md)。
+  - 机构论文库中的“作者绑定”弹窗、机构成员页中的论文统计，以及它们对应的权限边界，见[内容治理](./content-governance.md)。
+  - 机构成员展示与统计口径，例如“绑定论文数”与“已审核论文数”的区别，见[论文审核流程](./paper-review-workflow.md)。
+  - 登录弹窗中“先机构、后登录方式”的扩展规则见[机构认证](./institution-auth.md)。

@@ -144,7 +144,7 @@ pnpm type-check
 
 机构 SSO 开启时还需要配置 `INSTITUTION_LOGIN_INSTITUTION_SLUG` 以及完整的
 `INSTITUTION_SSO_*` 身份服务地址、客户端凭证和用户字段映射。完整配置及首次登录的
-账号绑定规则见 [机构登录与统一身份认证](../../docs/institution-auth.md)。
+账号绑定规则见[机构登录与统一身份认证](../../docs/zh/institution-auth.md)。
 
 ### 私有化部署建议
 
@@ -176,4 +176,4 @@ LOCAL_STORAGE_DIR=/var/lib/scholar/uploads
 - [Fastify 文档](https://www.fastify.io/)
 - [Prisma 文档](https://www.prisma.io/docs/)
 - [TypeScript 文档](https://www.typescriptlang.org/)
-- [单机构私有化部署说明](../../docs/private-deployment.md)
+- [单机构私有化部署说明](../../docs/zh/private-deployment.md)

@@ -1,5 +1,7 @@
 # 机构组织结构与审核流
 
+[English](../en/institution-org-structure.md) | 简体中文
+
 本文档说明 Airalogy Scholar 如何管理机构内部的复杂组织结构，并在此基础上解析论文审核流。
 
 目标是同时满足以下场景：
@@ -358,6 +360,6 @@
 
 ## 相关文档
 
-- 论文审核状态机见 `docs/paper-review-workflow.md`
-- 内容治理与角色边界见 `docs/content-governance.md`
-- API 索引见 `docs/api.md`
+- [论文审核状态机](./paper-review-workflow.md)
+- [内容治理与角色边界](./content-governance.md)
+- [API 架构](./api.md)

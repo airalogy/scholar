@@ -29,7 +29,7 @@ Airalogy Scholar is an institution-ready platform for scholarly profiles, papers
 │   └── web/      # Vue 3 web application
 ├── deploy/       # Compose manifests, upgrades, backups, and offline delivery
 ├── docker/       # Development database configuration
-├── docs/         # Architecture, operations, and maintainer documentation
+├── docs/         # Bilingual architecture, operations, and maintainer documentation
 ├── package.json
 └── pnpm-workspace.yaml
 ```
@@ -145,7 +145,7 @@ pnpm release:source:check
 - A release binds the product version, database migration, component images, and exact image digests in `release-manifest.json` and `release-manifest.env`.
 - Production upgrades use the generated deployment package as a unit. Web and API versions are not intended to be mixed independently.
 
-See [docs/releasing.md](./docs/releasing.md) for the maintainer release process.
+See the [release process](./docs/en/releasing.md) for maintainer instructions.
 
 ## Production deployment
 
@@ -166,7 +166,7 @@ PostgreSQL data, uploaded files, and backups remain under the deploying institut
 
 Mainland China and disconnected environments can mirror the API, Web, and PostgreSQL images to ACR, TCR, Harbor, or another institution-managed registry. `deploy/export-images.sh` and `deploy/import-images.sh` support offline delivery.
 
-See [docs/private-deployment.md](./docs/private-deployment.md) for the complete deployment and upgrade guide.
+See [private deployment](./docs/en/private-deployment.md) for the complete deployment and upgrade guide.
 
 ## Documentation
 
@@ -177,7 +177,7 @@ Each Scholar deployment includes version-matched product documentation:
 - `/api/docs` for Swagger UI
 - `/api/docs/json` for the OpenAPI document
 
-The product documentation is bundled with the Web image and remains available in offline installations. Repository-level architecture and operations documentation lives under [`docs/`](./docs/).
+The product documentation is bundled with the Web image and remains available in offline installations. Repository maintainers should use the [English repository documentation](./docs/en/README.md); a separate [Chinese version](./docs/zh/README.md) is also maintained.
 
 ## License, security, and contributions
 

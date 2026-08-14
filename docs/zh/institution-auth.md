@@ -1,8 +1,10 @@
 # 机构登录与统一身份认证
 
+[English](../en/institution-auth.md) | 简体中文
+
 本文档说明 Airalogy Scholar 的通用机构登录模型。任何大学或研究机构都应通过部署配置和机构数据接入，不在产品源码中增加机构专属分支、名称或路由。
 
-单机构私有化部署的安装、初始化与升级流程见 `docs/private-deployment.md`。
+单机构私有化部署的安装、初始化与升级流程见[私有化部署](./private-deployment.md)。
 
 ## 账号与机构身份
 
