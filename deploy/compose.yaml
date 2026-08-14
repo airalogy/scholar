@@ -1,0 +1,67 @@
+name: scholar
+
+services:
+  migrate:
+    image: ${SCHOLAR_API_IMAGE:?Set SCHOLAR_API_IMAGE in deploy/.env}
+    env_file:
+      - ${SCHOLAR_RUNTIME_ENV_FILE:-.env}
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in deploy/.env}
+    command: ["node_modules/.bin/prisma", "migrate", "deploy"]
+    restart: "no"
+    init: true
+    security_opt:
+      - no-new-privileges:true
+
+  api:
+    image: ${SCHOLAR_API_IMAGE:?Set SCHOLAR_API_IMAGE in deploy/.env}
+    env_file:
+      - ${SCHOLAR_RUNTIME_ENV_FILE:-.env}
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      TRUST_PROXY: "true"
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in deploy/.env}
+      LOCAL_STORAGE_DIR: /var/lib/scholar/uploads
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ${SCHOLAR_UPLOADS_STORAGE:-scholar_uploads}:/var/lib/scholar/uploads
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  web:
+    image: ${SCHOLAR_WEB_IMAGE:?Set SCHOLAR_WEB_IMAGE in deploy/.env}
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - ${SCHOLAR_HTTP_BIND:-127.0.0.1}:${SCHOLAR_HTTP_PORT:-8080}:8080
+    volumes:
+      - ${SCHOLAR_BRANDING_STORAGE:-./branding}:/srv/branding:ro
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 15s
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  scholar_uploads:
+    name: ${SCHOLAR_UPLOADS_VOLUME_NAME:-scholar_uploads}

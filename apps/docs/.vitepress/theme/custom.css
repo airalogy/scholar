@@ -1,0 +1,37 @@
+:root {
+  --vp-c-brand-1: #00498f;
+  --vp-c-brand-2: #0b5ca8;
+  --vp-c-brand-3: #2675bd;
+  --vp-c-brand-soft: rgba(0, 73, 143, 0.12);
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(120deg, #003b73 18%, #1686c7 82%);
+  --vp-home-hero-image-background-image: radial-gradient(circle, rgba(38, 117, 189, 0.26), transparent 70%);
+  --vp-home-hero-image-filter: blur(42px);
+}
+
+.VPNavBarTitle .title {
+  letter-spacing: -0.02em;
+}
+
+.VPFeature {
+  border-color: rgba(0, 73, 143, 0.12);
+}
+
+.VPFeature:hover {
+  border-color: rgba(0, 73, 143, 0.32);
+}
+
+.vp-doc table {
+  display: table;
+  width: 100%;
+}
+
+.vp-doc code {
+  word-break: break-word;
+}
+
+.security-boundary {
+  border-left: 4px solid var(--vp-c-warning-1);
+  padding: 12px 16px;
+  background: var(--vp-c-warning-soft);
+}

@@ -1,0 +1,21 @@
+{
+  "name": "@airalogy/scholar-docs",
+  "version": "3.0.0",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vitepress dev --port 5174",
+    "build": "vitepress build",
+    "preview": "vitepress preview --port 4174",
+    "lint": "node scripts/validate-docs.mjs",
+    "type-check": "tsc --noEmit",
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^6.0.2",
+    "vitepress": "^1.6.4",
+    "vue": "^3.5.41"
+  }
+}

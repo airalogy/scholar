@@ -1,0 +1,91 @@
+/* Arco Design 主题变量覆盖 - 匹配 Airalogy Scholar 设计系统 */
+
+:root
+  /* 主色 */
+  --color-primary-6: var(--scholar-primary)
+  --color-primary-5: var(--scholar-primary-hover)
+  --color-primary-4: #0070c4
+  --color-primary-3: #3d94d4
+  --color-primary-2: #7ab8e4
+  --color-primary-1: #b7dcf4
+  --color-primary-7: #003d78
+
+  /* 文字颜色 */
+  --color-text-1: var(--scholar-text-1)
+  --color-text-2: var(--scholar-text-2)
+  --color-text-3: var(--scholar-text-3)
+  --color-text-4: var(--scholar-text-4)
+
+  /* 边框/分割线 */
+  --color-border-1: var(--scholar-border-medium)
+  --color-border-2: var(--scholar-border-input)
+  --color-border-3: var(--scholar-border-light)
+  --color-fill-1: var(--scholar-bg-sidebar)
+  --color-fill-2: var(--scholar-border-light)
+
+  /* 圆角 */
+  --border-radius-small: var(--scholar-radius-sm)
+  --border-radius-medium: var(--scholar-radius-md)
+  --border-radius-large: var(--scholar-radius-lg)
+
+/* 按钮组件覆盖 */
+.arco-btn-primary
+  background-color: var(--scholar-primary)
+  border-color: var(--scholar-primary)
+  // border-radius: var(--scholar-radius-sm)
+
+.arco-btn-primary:hover
+  background-color: var(--scholar-primary-hover)
+  border-color: var(--scholar-primary-hover)
+
+.arco-btn-outline
+  color: var(--scholar-primary)
+  border-color: var(--scholar-primary)
+  // border-radius: var(--scholar-radius-lg)
+
+.arco-btn-outline:hover
+  color: var(--scholar-primary-hover)
+  border-color: var(--scholar-primary-hover)
+  background-color: var(--scholar-primary-light)
+
+/* 输入框组件覆盖 */
+.arco-input-wrapper,
+.arco-textarea-wrapper
+  border-color: var(--scholar-border-input)
+  border-radius: var(--scholar-radius-sm)
+
+.arco-input-wrapper:hover,
+.arco-textarea-wrapper:hover
+  border-color: var(--scholar-primary)
+
+.arco-input-wrapper.arco-input-focus,
+.arco-textarea-wrapper.arco-textarea-focus
+  border-color: var(--scholar-primary)
+  box-shadow: 0 0 0 2px rgba(0, 73, 143, 0.1)
+
+.arco-input::placeholder,
+.arco-textarea::placeholder
+  color: var(--scholar-text-4)
+
+/* 模态框覆盖 */
+.arco-modal
+  border-radius: var(--scholar-radius-xl)
+
+.arco-modal-header
+  border-bottom-color: var(--scholar-border-light)
+
+.arco-modal-footer
+  border-top-color: var(--scholar-border-light)
+
+/* 菜单组件覆盖 */
+.arco-menu-item.arco-menu-selected
+  background-color: var(--scholar-primary)
+  color: #fff
+  border-radius: var(--scholar-radius-md)
+
+/* 消息/通知覆盖 */
+.arco-message
+  border-radius: 12px
+
+.arco-tabs-nav-type-line .arco-tabs-tab
+  margin: 0 26px 0 0

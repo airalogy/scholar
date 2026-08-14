@@ -1,0 +1,8 @@
+export { createPaper } from './service.create'
+export { searchPapers } from './service.search'
+export { listMyPapers } from './service.my'
+export { listInstitutionUploads } from './service.institution-uploads'
+export { listReviewQueue } from './service.review-queue'
+export { listPapers } from './service.list'
+export { reviewPaper } from './service.claim-review'
+export { getPaper, updatePaper, deletePaper } from './service.paper'
