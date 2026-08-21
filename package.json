@@ -23,7 +23,7 @@
     "test:deployment": "node --test scripts/*.test.mjs",
     "check": "pnpm ci:config:check && pnpm version:check && pnpm docs:check && pnpm release:source:check && pnpm db:validate && pnpm db:generate && pnpm format:check && pnpm lint && pnpm type-check && pnpm test && pnpm build && pnpm --filter @airalogy/scholar-server smoke:dist",
     "ci:config:check": "node scripts/check-ci-config.mjs",
-    "prepush": "pnpm check",
+    "prepush": "pnpm audit:prod && pnpm check",
     "audit:prod": "pnpm audit --prod --audit-level high",
     "license:check": "node scripts/check-licenses.mjs",
     "format:check": "pnpm --filter @airalogy/scholar-server run fmt:check",
@@ -51,6 +51,7 @@
   "packageManager": "pnpm@10.33.0+sha512.10568bb4a6afb58c9eb3630da90cc9516417abebd3fabbe6739f0ae795728da1491e9db5a544c76ad8eb7570f5c4bb3d6c637b2cb41bfdcdb47fa823c8649319",
   "pnpm": {
     "overrides": {
+      "@prisma/config>deepmerge-ts": "^8.0.0",
       "brace-expansion@^1.0.0": "^1.1.18",
       "brace-expansion@^2.0.0": "^2.1.4",
       "brace-expansion@^5.0.0": "^5.0.9",

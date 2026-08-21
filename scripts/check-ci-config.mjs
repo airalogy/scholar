@@ -33,6 +33,14 @@ if (!packageManagerMatch) {
   fail(packageJsonPath, 1, 'packageManager must pin an exact pnpm version')
 }
 
+if (packageJson.scripts?.prepush !== 'pnpm audit:prod && pnpm check') {
+  fail(
+    packageJsonPath,
+    1,
+    'prepush must audit production dependencies before running the complete repository checks',
+  )
+}
+
 const apiPackageJsonPath = path.join(repositoryRoot, 'apps', 'api', 'package.json')
 const apiPackageJson = JSON.parse(await readFile(apiPackageJsonPath, 'utf8'))
 

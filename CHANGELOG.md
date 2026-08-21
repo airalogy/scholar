@@ -13,6 +13,7 @@ Chinese version: [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)
 ### Security
 
 - Anonymous API access is limited to approved or published public records, excludes protected file links and private author metadata, and continues to reject integration credentials on user-facing endpoints.
+- Production dependency auditing now runs before every repository push, and the vulnerable Prisma configuration dependency is overridden with the patched `deepmerge-ts` 8 release line.
 
 ### Database and Deployment
 
