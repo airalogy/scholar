@@ -177,6 +177,9 @@ jobs:
           sed -i \
             -e "s/^SCHOLAR_COMPOSE_PROJECT_NAME=.*/SCHOLAR_COMPOSE_PROJECT_NAME=$smoke_project/" \
             -e 's/^SCHOLAR_HTTP_PORT=.*/SCHOLAR_HTTP_PORT=18080/' \
+            -e 's|^SCHOLAR_DOCKER_SUBNET=.*|SCHOLAR_DOCKER_SUBNET=172.30.255.0/28|' \
+            -e 's|^SCHOLAR_DOCKER_GATEWAY=.*|SCHOLAR_DOCKER_GATEWAY=172.30.255.1|' \
+            -e 's|^SCHOLAR_RESERVED_SUBNETS=.*|SCHOLAR_RESERVED_SUBNETS=10.0.0.0/8,192.168.0.0/16|' \
             -e "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$database_password/" \
             -e "s|^DATABASE_URL=.*|DATABASE_URL=postgresql://scholar:$database_password@postgres:5432/scholar?schema=public|" \
             -e "s/^JWT_SECRET=.*/JWT_SECRET=$jwt_secret/" \
@@ -191,6 +194,7 @@ jobs:
               --env-file "$smoke_env" \
               -f release-stage/deploy/compose.yaml \
               -f release-stage/deploy/compose.database.yaml \
+              -f release-stage/deploy/compose.network.yaml \
               down --volumes --remove-orphans
           }
           trap cleanup EXIT

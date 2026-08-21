@@ -7,6 +7,7 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 env_file=${SCHOLAR_ENV_FILE:-$script_dir/.env}
 base_compose=$script_dir/compose.yaml
 database_compose=$script_dir/compose.database.yaml
+network_compose=$script_dir/compose.network.yaml
 
 fail() {
   printf 'Error: %s\n' "$*" >&2
@@ -114,6 +115,11 @@ compose_project_name() {
   printf '%s\n' "${configured_name:-scholar}"
 }
 
+docker_subnet() {
+  configured_subnet=${SCHOLAR_DOCKER_SUBNET:-$(read_env_value SCHOLAR_DOCKER_SUBNET)}
+  printf '%s\n' "$configured_subnet"
+}
+
 compose() {
   command -v docker >/dev/null 2>&1 || fail 'Docker Engine is required'
   docker compose version >/dev/null 2>&1 || fail 'Docker Compose v2 is required'
@@ -128,8 +134,12 @@ compose() {
       export POSTGRES_IMAGE="$(read_release_value SCHOLAR_RELEASE_POSTGRES_TAGGED_IMAGE)"
     fi
     export SCHOLAR_RUNTIME_ENV_FILE=$env_file
-    if [ "$(database_mode)" = 'bundled' ]; then
+    if [ "$(database_mode)" = 'bundled' ] && [ -n "$(docker_subnet)" ]; then
+      docker compose --project-name "$project_name" --env-file "$env_file" -f "$base_compose" -f "$database_compose" -f "$network_compose" "$@"
+    elif [ "$(database_mode)" = 'bundled' ]; then
       docker compose --project-name "$project_name" --env-file "$env_file" -f "$base_compose" -f "$database_compose" "$@"
+    elif [ -n "$(docker_subnet)" ]; then
+      docker compose --project-name "$project_name" --env-file "$env_file" -f "$base_compose" -f "$network_compose" "$@"
     else
       docker compose --project-name "$project_name" --env-file "$env_file" -f "$base_compose" "$@"
     fi
@@ -222,11 +232,170 @@ verify_release_metadata() {
   fi
 }
 
+ipv4_number() {
+  address=$1
+  awk -v address="$address" '
+    BEGIN {
+      if (split(address, octets, ".") != 4) {
+        exit 1
+      }
+      total = 0
+      for (octet_index = 1; octet_index <= 4; octet_index += 1) {
+        if (octets[octet_index] !~ /^[0-9]+$/ || octets[octet_index] < 0 || octets[octet_index] > 255) {
+          exit 1
+        }
+        total = (total * 256) + octets[octet_index]
+      }
+      printf "%.0f\n", total
+    }
+  '
+}
+
+cidr_details() {
+  cidr=$1
+  case "$cidr" in
+    */*)
+      address=${cidr%/*}
+      prefix=${cidr#*/}
+      ;;
+    *)
+      address=$cidr
+      prefix=32
+      ;;
+  esac
+
+  case "$prefix" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  [ "$prefix" -le 32 ] || return 1
+  address_number=$(ipv4_number "$address") || return 1
+  block_size=$(awk -v prefix="$prefix" 'BEGIN { printf "%.0f\n", 2 ^ (32 - prefix) }')
+  network_start=$(awk -v address="$address_number" -v block="$block_size" 'BEGIN { printf "%.0f\n", int(address / block) * block }')
+  network_end=$(awk -v start="$network_start" -v block="$block_size" 'BEGIN { printf "%.0f\n", start + block - 1 }')
+  printf '%s %s %s %s\n' "$address_number" "$network_start" "$network_end" "$prefix"
+}
+
+cidr_overlaps() {
+  first_details=$(cidr_details "$1") || return 2
+  second_details=$(cidr_details "$2") || return 2
+
+  set -- $first_details
+  first_start=$2
+  first_end=$3
+  set -- $second_details
+  second_start=$2
+  second_end=$3
+
+  [ "$first_start" -le "$second_end" ] && [ "$second_start" -le "$first_end" ]
+}
+
+trim_space() {
+  printf '%s\n' "$1" | awk '{ sub(/^[[:space:]]+/, ""); sub(/[[:space:]]+$/, ""); print }'
+}
+
+validate_docker_network() {
+  subnet=$(docker_subnet)
+  gateway=${SCHOLAR_DOCKER_GATEWAY:-$(read_env_value SCHOLAR_DOCKER_GATEWAY)}
+  reserved_subnets=${SCHOLAR_RESERVED_SUBNETS:-$(read_env_value SCHOLAR_RESERVED_SUBNETS)}
+
+  if [ -z "$subnet" ]; then
+    [ -z "$gateway" ] || fail 'SCHOLAR_DOCKER_GATEWAY requires SCHOLAR_DOCKER_SUBNET'
+    [ -z "$reserved_subnets" ] || fail 'SCHOLAR_RESERVED_SUBNETS requires SCHOLAR_DOCKER_SUBNET'
+    return 0
+  fi
+
+  subnet_details=$(cidr_details "$subnet") || fail 'SCHOLAR_DOCKER_SUBNET must be a valid IPv4 CIDR'
+  set -- $subnet_details
+  subnet_address=$1
+  subnet_start=$2
+  subnet_end=$3
+  subnet_prefix=$4
+  [ "$subnet_prefix" -ge 1 ] && [ "$subnet_prefix" -le 30 ] || fail 'SCHOLAR_DOCKER_SUBNET prefix must be between 1 and 30'
+  [ "$subnet_address" -eq "$subnet_start" ] || fail 'SCHOLAR_DOCKER_SUBNET must start at the network address'
+
+  if [ -n "$gateway" ]; then
+    case "$gateway" in
+      */*) fail 'SCHOLAR_DOCKER_GATEWAY must be one IPv4 address without a prefix' ;;
+    esac
+    gateway_number=$(ipv4_number "$gateway") || fail 'SCHOLAR_DOCKER_GATEWAY must be a valid IPv4 address'
+    [ "$gateway_number" -gt "$subnet_start" ] && [ "$gateway_number" -lt "$subnet_end" ] || fail 'SCHOLAR_DOCKER_GATEWAY must be a usable address inside SCHOLAR_DOCKER_SUBNET'
+  fi
+
+  if [ -n "$reserved_subnets" ]; then
+    previous_ifs=$IFS
+    IFS=,
+    set -- $reserved_subnets
+    IFS=$previous_ifs
+    for reserved_subnet in "$@"; do
+      reserved_subnet=$(trim_space "$reserved_subnet")
+      [ -n "$reserved_subnet" ] || fail 'SCHOLAR_RESERVED_SUBNETS contains an empty entry'
+      reserved_details=$(cidr_details "$reserved_subnet") || fail "SCHOLAR_RESERVED_SUBNETS contains an invalid IPv4 CIDR: $reserved_subnet"
+      set -- $reserved_details
+      [ "$1" -eq "$2" ] || fail "SCHOLAR_RESERVED_SUBNETS entry must start at the network address: $reserved_subnet"
+      if cidr_overlaps "$subnet" "$reserved_subnet"; then
+        fail "SCHOLAR_DOCKER_SUBNET $subnet overlaps reserved subnet $reserved_subnet"
+      fi
+    done
+  fi
+
+  command -v docker >/dev/null 2>&1 || fail 'Docker Engine is required'
+  project_name=$(compose_project_name)
+  network_ids=$(docker network ls -q)
+  network_rows=
+  if [ -n "$network_ids" ]; then
+    network_rows=$(docker network inspect $network_ids --format '{{with .Labels}}{{index . "com.docker.compose.project"}}{{end}}|{{with .Labels}}{{index . "com.docker.compose.network"}}{{end}}|{{.Name}}|{{range .IPAM.Config}}{{.Subnet}} {{end}}') || fail 'Unable to inspect existing Docker networks'
+  fi
+
+  own_network_seen=false
+  while IFS='|' read -r compose_project compose_network network_name network_subnets; do
+    [ -n "$network_name" ] || continue
+    for existing_subnet in $network_subnets; do
+      case "$existing_subnet" in
+        *:*) continue ;;
+      esac
+      cidr_details "$existing_subnet" >/dev/null 2>&1 || continue
+      if [ "$compose_project" = "$project_name" ] && [ "$compose_network" = 'default' ]; then
+        own_network_seen=true
+        [ "$existing_subnet" = "$subnet" ] || fail "Existing Scholar network $network_name uses $existing_subnet, not configured subnet $subnet; back up the deployment, run deploy/scholarctl stop, and reinstall without deleting volumes"
+      elif cidr_overlaps "$subnet" "$existing_subnet"; then
+        fail "SCHOLAR_DOCKER_SUBNET $subnet overlaps Docker network $network_name ($existing_subnet)"
+      fi
+    done
+  done <<EOF
+$network_rows
+EOF
+
+  command -v ip >/dev/null 2>&1 || fail 'The ip command is required to validate SCHOLAR_DOCKER_SUBNET against host routes'
+  route_subnets=$(ip -o -4 route show 2>/dev/null | awk '
+    {
+      candidate = $1
+      if ($1 == "blackhole" || $1 == "unreachable" || $1 == "prohibit" || $1 == "throw") {
+        candidate = $2
+      }
+      if (candidate != "default" && candidate ~ /^[0-9]+\./) {
+        print candidate
+      }
+    }
+  ')
+  for route_subnet in $route_subnets; do
+    cidr_details "$route_subnet" >/dev/null 2>&1 || continue
+    if [ "$own_network_seen" = true ] && [ "$route_subnet" = "$subnet" ]; then
+      continue
+    fi
+    if cidr_overlaps "$subnet" "$route_subnet"; then
+      fail "SCHOLAR_DOCKER_SUBNET $subnet overlaps host route $route_subnet"
+    fi
+  done
+
+  printf 'Docker network preflight passed for %s.\n' "$subnet"
+}
+
 preflight() {
   ensure_env_file
   ensure_secret JWT_SECRET 32
   ensure_secret DATABASE_URL 20
   verify_release_metadata
+  validate_docker_network
 
   ai_chat_enabled=${ENABLE_AI_CHAT:-$(read_env_value ENABLE_AI_CHAT)}
   case "${ai_chat_enabled:-false}" in

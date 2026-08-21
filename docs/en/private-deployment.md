@@ -80,13 +80,31 @@ Release package images are already digest-pinned. A mirror in ACR, TCR, or Harbo
 
 `PUBLIC_INSTITUTION_LOGO_URL` and `PUBLIC_INSTITUTION_WATERMARK_URL` may reference HTTPS assets or `/branding/...`. `SCHOLAR_BRANDING_STORAGE` is mounted read-only into Web. Institution names, logos, customer domains, and real data belong on the deployment host, not in the source repository.
 
+### Docker network conflict avoidance
+
+Docker chooses an internal network automatically when `SCHOLAR_DOCKER_SUBNET` is blank. An institution whose campus, VPN, private cloud, or other Docker projects use overlapping private address ranges should instead select an unused IPv4 CIDR with its network administrator:
+
+```dotenv
+SCHOLAR_DOCKER_SUBNET=172.30.240.0/24
+# Optional; Docker chooses the first usable gateway when blank.
+SCHOLAR_DOCKER_GATEWAY=
+# Ranges known to the institution but not necessarily visible in the host route table.
+SCHOLAR_RESERVED_SUBNETS=10.0.0.0/8,192.168.0.0/16
+```
+
+These values configure only Scholar's internal Docker bridge. They do not change `SCHOLAR_HTTP_BIND`, `SCHOLAR_HTTP_PORT`, the server's physical address, or the institution gateway. The example is not a universal safe default; every institution must choose a range outside its own routed and reserved networks.
+
+When an explicit subnet is configured, preflight rejects malformed CIDRs, a gateway outside the subnet, overlap with `SCHOLAR_RESERVED_SUBNETS`, host IPv4 routes, and existing Docker networks. The reserved list is important for VPN pools or private routes that are known to the institution but are not currently installed on the server.
+
+An existing Compose network cannot change its subnet in place. Back up the deployment first, run `deploy/scholarctl stop` to remove containers and the old network without deleting volumes, update `.env`, and run `deploy/scholarctl install`. Perform this network-only maintenance separately from a product-version upgrade. Never add `--volumes` when stopping a production deployment for a network change.
+
 Run preflight before any installation:
 
 ```bash
 deploy/scholarctl preflight
 ```
 
-Preflight rejects example secrets, incomplete SSO, `latest` images, invalid database mode, mismatched release metadata, and invalid Compose configuration.
+Preflight rejects example secrets, incomplete SSO, `latest` images, invalid database mode, mismatched release metadata, unsafe configured Docker networks, and invalid Compose configuration.
 
 ## 4. Connected, mirrored, and offline delivery
 

@@ -14,6 +14,10 @@ Chinese version: [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)
 
 - Anonymous API access is limited to approved or published public records, excludes protected file links and private author metadata, and continues to reject integration credentials on user-facing endpoints.
 
+### Database and Deployment
+
+- Institution deployments can explicitly configure the Scholar Docker IPv4 subnet and optional gateway; preflight rejects overlap with declared reserved ranges, host routes, and existing Docker networks.
+
 ## [3.0.0] - 2026-08-14
 
 ### Added

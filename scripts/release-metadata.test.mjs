@@ -150,7 +150,18 @@ test('deployment preflight accepts one release set and rejects mixed component d
   await writeFile(
     fakeDocker,
     `#!/bin/sh
+if [ -n "$FAKE_DOCKER_LOG" ]; then
+  printf '%s\\n' "$*" >>"$FAKE_DOCKER_LOG"
+fi
 case "$*" in
+  *"network ls -q"*)
+    if [ -n "$FAKE_DOCKER_NETWORK_ROWS" ]; then
+      printf '%s\\n' fake-network
+    fi
+    ;;
+  *"network inspect"*)
+    printf '%s\\n' "$FAKE_DOCKER_NETWORK_ROWS"
+    ;;
   *"config --images"*)
     if [ -n "$SCHOLAR_API_IMAGE" ]; then
       case "$SCHOLAR_API_IMAGE" in
@@ -166,6 +177,16 @@ exit 0
 `,
   )
   await chmod(fakeDocker, 0o755)
+  const fakeIp = path.join(fakeBin, 'ip')
+  await writeFile(
+    fakeIp,
+    `#!/bin/sh
+case "$*" in
+  "-o -4 route show") printf '%s\\n' "$FAKE_IP_ROUTES" ;;
+esac
+`,
+  )
+  await chmod(fakeIp, 0o755)
 
   const envPath = path.join(fixture.outputDirectory, '.env')
   const rendered = await readFile(path.join(fixture.outputDirectory, '.env.example'), 'utf8')
@@ -184,6 +205,13 @@ exit 0
     SCHOLAR_RELEASE_MANIFEST_FILE: path.join(fixture.outputDirectory, 'release-manifest.json'),
     SCHOLAR_RELEASE_METADATA_FILE: path.join(fixture.outputDirectory, 'release-manifest.env'),
   }
+  const runPreflight = (environment = {}) =>
+    execFileSync('sh', [path.join(repositoryRoot, 'deploy', 'scholarctl'), 'preflight'], {
+      cwd: repositoryRoot,
+      env: { ...commandEnvironment, ...environment },
+      encoding: 'utf8',
+      stdio: 'pipe',
+    })
   const output = execFileSync(
     'sh',
     [path.join(repositoryRoot, 'deploy', 'scholarctl'), 'preflight'],
@@ -274,6 +302,79 @@ exit 0
         stdio: 'pipe',
       }),
     /INSTITUTION_SSO_CLIENT_SECRET must contain at least 1 characters/,
+  )
+  await writeFile(envPath, configured)
+
+  const configuredWithDockerNetwork = configured
+    .replace('SCHOLAR_DOCKER_SUBNET=', 'SCHOLAR_DOCKER_SUBNET=172.30.20.0/24')
+    .replace('SCHOLAR_DOCKER_GATEWAY=', 'SCHOLAR_DOCKER_GATEWAY=172.30.20.1')
+    .replace(
+      'SCHOLAR_RESERVED_SUBNETS=',
+      'SCHOLAR_RESERVED_SUBNETS=10.0.0.0/8,192.168.0.0/16',
+    )
+  const dockerLog = path.join(fixture.root, 'docker.log')
+  await writeFile(envPath, configuredWithDockerNetwork)
+  const networkOutput = runPreflight({
+    FAKE_DOCKER_LOG: dockerLog,
+    FAKE_IP_ROUTES: 'default via 192.0.2.1 dev eth0\n192.0.2.0/24 dev eth0',
+  })
+  assert.match(networkOutput, /Docker network preflight passed for 172\.30\.20\.0\/24/)
+  assert.match(await readFile(dockerLog, 'utf8'), /compose\.network\.yaml/)
+
+  await writeFile(
+    envPath,
+    configuredWithDockerNetwork.replace(
+      'SCHOLAR_DOCKER_GATEWAY=172.30.20.1',
+      'SCHOLAR_DOCKER_GATEWAY=172.31.20.1',
+    ),
+  )
+  assert.throws(
+    () => runPreflight({ FAKE_IP_ROUTES: 'default via 192.0.2.1 dev eth0' }),
+    /SCHOLAR_DOCKER_GATEWAY must be a usable address inside SCHOLAR_DOCKER_SUBNET/,
+  )
+
+  await writeFile(
+    envPath,
+    configuredWithDockerNetwork.replace(
+      'SCHOLAR_RESERVED_SUBNETS=10.0.0.0/8,192.168.0.0/16',
+      'SCHOLAR_RESERVED_SUBNETS=172.30.0.0/16',
+    ),
+  )
+  assert.throws(
+    () => runPreflight({ FAKE_IP_ROUTES: 'default via 192.0.2.1 dev eth0' }),
+    /overlaps reserved subnet 172\.30\.0\.0\/16/,
+  )
+
+  await writeFile(envPath, configuredWithDockerNetwork)
+  assert.throws(
+    () =>
+      runPreflight({
+        FAKE_IP_ROUTES:
+          'default via 192.0.2.1 dev eth0\n172.30.20.0/24 via 192.0.2.1 dev eth0',
+      }),
+    /overlaps host route 172\.30\.20\.0\/24/,
+  )
+  assert.throws(
+    () =>
+      runPreflight({
+        FAKE_DOCKER_NETWORK_ROWS: 'other|default|other_default|172.30.20.0/24 ',
+        FAKE_IP_ROUTES: 'default via 192.0.2.1 dev eth0',
+      }),
+    /overlaps Docker network other_default \(172\.30\.20\.0\/24\)/,
+  )
+
+  const existingNetworkOutput = runPreflight({
+    FAKE_DOCKER_NETWORK_ROWS: 'scholar|default|scholar_default|172.30.20.0/24 ',
+    FAKE_IP_ROUTES: 'default via 192.0.2.1 dev eth0\n172.30.20.0/24 dev br-test',
+  })
+  assert.match(existingNetworkOutput, /Docker network preflight passed/)
+  assert.throws(
+    () =>
+      runPreflight({
+        FAKE_DOCKER_NETWORK_ROWS: 'scholar|default|scholar_default|172.30.21.0/24 ',
+        FAKE_IP_ROUTES: 'default via 192.0.2.1 dev eth0\n172.30.21.0/24 dev br-test',
+      }),
+    /Existing Scholar network scholar_default uses 172\.30\.21\.0\/24/,
   )
   await writeFile(envPath, configured)
 

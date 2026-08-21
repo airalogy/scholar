@@ -182,6 +182,8 @@ const requiredReleaseFragments = [
   'scholarctl install',
   'OPENAI_BASE_URL=https://models.example.invalid/v1',
   'OPENAI_API_KEY=release-smoke-model-key',
+  'SCHOLAR_DOCKER_SUBNET=172.30.255.0/28',
+  'compose.network.yaml',
   'http://127.0.0.1:18080/docs/zh/',
   'http://127.0.0.1:18080/docs/en/',
   'http://127.0.0.1:18080/api/docs/json',

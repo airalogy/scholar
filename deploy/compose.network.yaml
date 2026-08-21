@@ -1,0 +1,6 @@
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${SCHOLAR_DOCKER_SUBNET:?Set SCHOLAR_DOCKER_SUBNET}
+          gateway: ${SCHOLAR_DOCKER_GATEWAY:-}

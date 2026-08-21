@@ -89,13 +89,31 @@ Release 包内的三个镜像地址已经带有经过验证的摘要，通常不
 
 `PUBLIC_INSTITUTION_LOGO_URL` 和 `PUBLIC_INSTITUTION_WATERMARK_URL` 可以是 HTTPS URL，也可以是 `/branding/...` 路径。部署包会把 `SCHOLAR_BRANDING_STORAGE`（默认 `deploy/branding`）只读挂载到 Web 容器；机构可在服务器本地放置已授权的图片，但学校名称、校徽和真实数据不应提交到 Scholar 源码仓库。
 
+### Docker 网络冲突避让
+
+`SCHOLAR_DOCKER_SUBNET` 留空时，Docker 会自动选择内部网络。若机构的校园网、VPN、私有云或其他 Docker 项目使用了可能重叠的私有地址，应与网络管理员确认后，为 Scholar 选择一个未被占用的 IPv4 CIDR：
+
+```dotenv
+SCHOLAR_DOCKER_SUBNET=172.30.240.0/24
+# 可选；留空时由 Docker 自动选择第一个可用网关地址。
+SCHOLAR_DOCKER_GATEWAY=
+# 机构已知、但不一定出现在服务器当前路由表中的保留网段。
+SCHOLAR_RESERVED_SUBNETS=10.0.0.0/8,192.168.0.0/16
+```
+
+这些变量只配置 Scholar 内部 Docker 网桥，不改变 `SCHOLAR_HTTP_BIND`、`SCHOLAR_HTTP_PORT`、服务器物理地址或机构真实网关。示例网段不是普遍安全的默认值；每个机构都必须选择不属于自身路由和保留范围的网段。
+
+配置明确子网后，预检会拒绝错误 CIDR、不属于该子网的网关、与 `SCHOLAR_RESERVED_SUBNETS` 重叠的地址，以及与宿主机 IPv4 路由或已有 Docker 网络重叠的地址。对于机构已知但服务器当前尚未安装相应路由的 VPN 地址池或私有路由，必须通过保留网段显式声明。
+
+已有 Compose 网络不能原地更换子网。应先备份部署，执行 `deploy/scholarctl stop`，在不删除 volume 的前提下移除容器和旧网络；修改 `.env` 后再执行 `deploy/scholarctl install`。网络调整应与产品版本升级分开进行；生产网络调整时绝不能为停止命令增加 `--volumes`。
+
 执行预检：
 
 ```bash
 deploy/scholarctl preflight
 ```
 
-预检会拒绝示例密钥、不完整的机构 SSO 配置、无版本的 `latest` 镜像、无效数据库模式和无法解析的 Compose 配置。
+预检会拒绝示例密钥、不完整的机构 SSO 配置、无版本的 `latest` 镜像、无效数据库模式、不安全的显式 Docker 网络和无法解析的 Compose 配置。
 
 ## 4. 联网、国内镜像与离线交付
 
