@@ -20,7 +20,7 @@
     "pdfjs-dist": "^5.5.207",
     "vue": "^3.5.41",
     "vue-i18n": "^11.4.8",
-    "vue-router": "^4.2.0"
+    "vue-router": "^5.2.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
