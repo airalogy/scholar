@@ -15,7 +15,10 @@ export default fp(async (fastify: FastifyInstance) => {
   fastify.decorate('deployment', deployment)
   fastify.log.info(
     {
-      deploymentMode: deployment.mode,
+      tenancyMode: deployment.tenancyMode,
+      managementMode: deployment.managementMode,
+      contentAccess: deployment.contentAccess,
+      institutionSlug: deployment.institution.slug,
       auth: deployment.auth,
       features: deployment.features,
     },

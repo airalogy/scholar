@@ -30,6 +30,7 @@
     "version:check": "node scripts/check-version.mjs",
     "docs:check": "node scripts/check-repository-docs.mjs",
     "release:source:check": "node scripts/create-release-source-snapshot.mjs --check",
+    "release:source:manifest": "node scripts/create-release-source-snapshot.mjs --update-manifest",
     "release:source:verify": "node scripts/create-release-source-snapshot.mjs --verify",
     "release:check": "node scripts/check-release.mjs",
     "db:push": "pnpm --filter @airalogy/scholar-server db:push",

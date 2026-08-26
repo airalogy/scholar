@@ -84,6 +84,7 @@ test('degree thesis record codes are opaque, institution-prefixed, and determini
 test('degree thesis creation rejects a review node from another institution', async (t) => {
   const app = Fastify({ logger: false })
   await app.register(sensible)
+  app.decorate('deployment', { institution: { slug: 'example-university' } } as never)
   t.after(async () => app.close())
   let transactionCalled = false
   app.decorate('prisma', {
@@ -136,6 +137,7 @@ test('degree thesis creation rejects a review node from another institution', as
 test('published thesis responses hide active draft state and private submitter metadata', async (t) => {
   const app = Fastify({ logger: false })
   await app.register(sensible)
+  app.decorate('deployment', { institution: { slug: 'example-university' } } as never)
   t.after(async () => app.close())
   const publishedAt = new Date('2026-08-01T00:00:00.000Z')
   const updatedAt = new Date('2026-08-13T00:00:00.000Z')
@@ -196,6 +198,13 @@ test('published thesis responses hide active draft state and private submitter m
     },
     institution_memberships: {
       findUnique: async () => null,
+    },
+    institutions: {
+      findUnique: async () => ({
+        id: INSTITUTION_ID,
+        slug: 'example-university',
+        name: 'Example University',
+      }),
     },
   } as never)
 
@@ -270,6 +279,7 @@ test('degree thesis routes honor the feature flag and reject integration JWTs', 
 test('an approved degree thesis requires a new draft before it can be resubmitted', async (t) => {
   const app = Fastify({ logger: false })
   await app.register(sensible)
+  app.decorate('deployment', { institution: { slug: 'example-university' } } as never)
   t.after(async () => app.close())
   let transactionCalled = false
   app.decorate('prisma', {
@@ -291,6 +301,13 @@ test('an approved degree thesis requires a new draft before it can be resubmitte
     },
     institution_memberships: {
       findUnique: async () => null,
+    },
+    institutions: {
+      findUnique: async () => ({
+        id: INSTITUTION_ID,
+        slug: 'example-university',
+        name: 'Example University',
+      }),
     },
     $transaction: async () => {
       transactionCalled = true
@@ -384,7 +401,7 @@ test('papers use the shared multi-stage review state machine and audit trail', a
     },
     institution_org_nodes: { findMany: async () => [] },
     institution_org_edges: { findMany: async () => [] },
-    institution_org_people: { findMany: async () => [] },
+    institution_people: { findMany: async () => [] },
     institution_org_positions: { findMany: async () => [] },
     institution_org_appointments: { findMany: async () => [] },
     institution_review_workflows: {

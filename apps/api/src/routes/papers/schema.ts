@@ -57,7 +57,8 @@ export const AuthorSchema = Type.Object({
 export const PaperBoundMemberSchema = Type.Object({
   bindingId: Type.String({ format: 'uuid' }),
   paperId: Type.String({ format: 'uuid' }),
-  userId: Type.String({ format: 'uuid' }),
+  institutionPersonId: Type.String({ format: 'uuid' }),
+  userId: Type.Union([Type.String({ format: 'uuid' }), Type.Null()]),
   name: Type.String(),
   avatar: Type.Union([Type.String(), Type.Null()]),
   authorId: Type.String({ format: 'uuid' }),

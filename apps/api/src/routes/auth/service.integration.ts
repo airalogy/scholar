@@ -33,10 +33,12 @@ export const exchangeIntegrationToken = async (
 
   const credential = await fastify.prisma.institution_api_credentials.findUnique({
     where: { clientId: body.client_id },
+    include: { institution: { select: { slug: true } } },
   })
   const now = new Date()
   const isUsable =
     credential !== null &&
+    credential.institution.slug === fastify.deployment.institution.slug &&
     credential.revokedAt === null &&
     credential.expiresAt.getTime() > now.getTime()
   const secretMatches = isUsable

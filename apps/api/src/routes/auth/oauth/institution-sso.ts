@@ -4,7 +4,6 @@ import {
   buildOauthCallbackResponse,
   createOauthState,
   createUniqueUsername,
-  ensureInstitutionMembershipBySlug,
   getConfiguredOauthRedirectUri,
   normalizeDisplayName,
   pickErrorMessage,
@@ -12,12 +11,16 @@ import {
   trimToNull,
   verifyOauthState,
 } from './shared'
+import {
+  normalizeInstitutionInternalId,
+  upsertInstitutionPerson,
+} from '../../../utils/institution-people'
 
 const INSTITUTION_SSO_CALLBACK_PATH = '/institution_sso_callback'
 
 interface InstitutionSsoProfile {
   email: string
-  externalId: string
+  internalId: string
   name: string
 }
 
@@ -145,21 +148,21 @@ const fetchInstitutionSsoProfile = async (
   }
 
   const email = readProfileString(payload, config.emailField)
-  const externalId = readProfileString(payload, config.externalIdField)
+  const internalId = readProfileString(payload, config.internalIdField)
   const name = readProfileString(payload, config.nameField)
 
   if (!email) {
     throw fastify.httpErrors.badGateway(`Institution SSO user info is missing ${config.emailField}`)
   }
-  if (!externalId) {
+  if (!internalId) {
     throw fastify.httpErrors.badGateway(
-      `Institution SSO user info is missing ${config.externalIdField}`,
+      `Institution SSO user info is missing ${config.internalIdField}`,
     )
   }
 
   return {
     email: email.toLowerCase(),
-    externalId,
+    internalId,
     name: name ?? '',
   }
 }
@@ -170,56 +173,52 @@ const syncInstitutionSsoUser = async (
 ): Promise<InstitutionSsoSyncResult> => {
   const config = fastify.deployment.institutionSso
   const now = new Date()
-  const displayName = normalizeDisplayName(profile.name, profile.email, profile.externalId)
-  const identity = await fastify.prisma.user_external_identities.findUnique({
-    where: {
-      provider_externalId: {
-        provider: config.providerId,
-        externalId: profile.externalId,
-      },
-    },
-    include: {
-      user: true,
-    },
+  const displayName = normalizeDisplayName(profile.name, profile.email, profile.internalId)
+  const normalizedInternalId = normalizeInstitutionInternalId(profile.internalId)
+  const username = await createUniqueUsername(fastify, null, profile.email)
+  const institution = await fastify.prisma.institutions.findUnique({
+    where: { slug: fastify.deployment.institutionLogin.institutionSlug },
+    select: { id: true },
   })
-  let user = identity?.user
-
-  if (!user) {
-    const existingByEmail = await fastify.prisma.users.findUnique({
-      where: { email: profile.email },
-      include: {
-        institution_memberships: {
-          where: {
-            institution: {
-              slug: fastify.deployment.institutionLogin.institutionSlug,
-            },
-          },
-          select: { id: true },
+  if (!institution) {
+    throw fastify.httpErrors.internalServerError('Institution SSO target is not configured')
+  }
+  const user = await fastify.prisma.$transaction(async (tx) => {
+    const person = await tx.institution_people.findUnique({
+      where: {
+        institutionId_normalizedInternalId: {
+          institutionId: institution.id,
+          normalizedInternalId,
         },
       },
     })
-    if (existingByEmail) {
-      if (existingByEmail.institution_memberships.length === 0) {
-        throw fastify.httpErrors.conflict(
-          'A local account already uses this email but is not linked to the SSO institution',
-        )
-      }
-
-      await fastify.prisma.user_external_identities.create({
-        data: {
-          userId: existingByEmail.id,
+    const identity = await tx.user_external_identities.findUnique({
+      where: {
+        provider_externalId: {
           provider: config.providerId,
-          externalId: profile.externalId,
-          createdAt: now,
-          updatedAt: now,
+          externalId: normalizedInternalId,
         },
-      })
-      user = existingByEmail
+      },
+      include: { user: true },
+    })
+    if (identity && person?.userId && identity.userId !== person.userId) {
+      throw fastify.httpErrors.conflict(
+        'Institution SSO identity conflicts with the existing institution person link',
+      )
     }
 
-    if (!user) {
-      const username = await createUniqueUsername(fastify, null, profile.email)
-      user = await fastify.prisma.users.create({
+    let linkedUser = identity?.user
+    if (!linkedUser && person?.userId) {
+      linkedUser = (await tx.users.findUnique({ where: { id: person.userId } })) ?? undefined
+    }
+    if (!linkedUser) {
+      const emailAccount = await tx.users.findUnique({ where: { email: profile.email } })
+      if (emailAccount) {
+        throw fastify.httpErrors.conflict(
+          'This email belongs to an existing account; an administrator must link its institution internal ID before SSO sign-in',
+        )
+      }
+      linkedUser = await tx.users.create({
         data: {
           email: profile.email,
           username,
@@ -227,36 +226,59 @@ const syncInstitutionSsoUser = async (
           name: displayName,
           createdAt: now,
           updatedAt: now,
-          external_identities: {
-            create: {
-              provider: config.providerId,
-              externalId: profile.externalId,
-              createdAt: now,
-              updatedAt: now,
-            },
-          },
         },
       })
     }
+    if (!linkedUser.name.trim()) {
+      linkedUser = await tx.users.update({
+        where: { id: linkedUser.id },
+        data: { name: displayName, updatedAt: now },
+      })
+    }
 
-    return { user }
-  }
+    if (!identity) {
+      await tx.user_external_identities.create({
+        data: {
+          userId: linkedUser.id,
+          provider: config.providerId,
+          externalId: normalizedInternalId,
+          createdAt: now,
+          updatedAt: now,
+        },
+      })
+    } else if (identity.userId !== linkedUser.id) {
+      throw fastify.httpErrors.conflict('Institution SSO identity is linked to another user')
+    }
 
-  const updateData: {
-    name?: string
-    updatedAt?: Date
-  } = {}
-
-  if (!user.name.trim()) {
-    updateData.name = displayName
-  }
-  if (Object.keys(updateData).length > 0) {
-    updateData.updatedAt = now
-    user = await fastify.prisma.users.update({
-      where: { id: user.id },
-      data: updateData,
+    await upsertInstitutionPerson(tx, {
+      institutionId: institution.id,
+      internalId: profile.internalId,
+      name: displayName,
+      email: profile.email,
+      userId: linkedUser.id,
+      source: 'institution_sso',
+      actorUserId: linkedUser.id,
     })
-  }
+
+    await tx.institution_memberships.upsert({
+      where: {
+        institutionId_userId: {
+          institutionId: institution.id,
+          userId: linkedUser.id,
+        },
+      },
+      create: {
+        institutionId: institution.id,
+        userId: linkedUser.id,
+        role: 'member',
+        createdAt: now,
+        updatedAt: now,
+      },
+      update: { updatedAt: now },
+    })
+
+    return linkedUser
+  })
 
   return { user }
 }
@@ -288,11 +310,6 @@ export const completeInstitutionSsoLogin = async (
   const accessToken = await exchangeAuthorizationCode(fastify, data.code)
   const profile = await fetchInstitutionSsoProfile(fastify, accessToken)
   const { user } = await syncInstitutionSsoUser(fastify, profile)
-
-  await ensureInstitutionMembershipBySlug(fastify, {
-    institutionSlug: fastify.deployment.institutionLogin.institutionSlug,
-    userId: user.id,
-  })
 
   return buildOauthCallbackResponse(fastify, user, null, returnTo)
 }

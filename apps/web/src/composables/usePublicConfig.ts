@@ -2,7 +2,12 @@ import { computed, reactive, toRef } from 'vue'
 import { getPublicAppConfig, type PublicAppConfig } from '@/api/public-config'
 
 const DEFAULT_PUBLIC_APP_CONFIG: PublicAppConfig = {
-  deploymentMode: 'public',
+  tenancyMode: 'single_institution',
+  managementMode: 'self_hosted',
+  contentAccess: 'public',
+  institution: {
+    slug: 'example-university',
+  },
   auth: {
     enablePasswordSignin: true,
     enablePublicSignup: false,
@@ -30,7 +35,7 @@ const DEFAULT_PUBLIC_APP_CONFIG: PublicAppConfig = {
   },
   paperLibrary: {
     defaultPath: '/papers',
-    fixedInstitutionSlug: null,
+    fixedInstitutionSlug: 'example-university',
   },
   scholarTimeline: {
     generationMode: 'disabled',

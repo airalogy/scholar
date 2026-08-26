@@ -135,7 +135,7 @@ export const syncPaperImportItem = async (
   institutionId: string,
   actor: ImportActor,
   item: PaperImportItem,
-  isPrivateDeployment: boolean,
+  appliesDirectly: boolean,
   importItemId?: string,
 ): Promise<PaperImportResult> => {
   const doi = requireNormalizedDoi(item.doi)
@@ -170,7 +170,7 @@ export const syncPaperImportItem = async (
         title: paper.title,
         abstract: paper.abstract,
       }
-    } else if (isPrivateDeployment && changed) {
+    } else if (appliesDirectly && changed) {
       paper = await tx.papers.update({
         where: { id: existingPaper.id },
         data: buildPaperUpdate(merged, now),
@@ -193,7 +193,7 @@ export const syncPaperImportItem = async (
       },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     })
-    const canonicalUpdatePending = !isPrivateDeployment && existingPaper !== null && changed
+    const canonicalUpdatePending = !appliesDirectly && existingPaper !== null && changed
     const submission = await tx.paper_submissions.create({
       data: {
         paperId: paper.id,
@@ -223,7 +223,7 @@ export const syncPaperImportItem = async (
       currentVersionId: submission.id,
       submittedBy: actorUserId,
       reviewNodeId: scope.reviewNodeId,
-      initialStatus: isPrivateDeployment ? 'approved' : 'draft',
+      initialStatus: appliesDirectly ? 'approved' : 'draft',
     })
 
     const claim = existingClaim
@@ -261,7 +261,7 @@ export const syncPaperImportItem = async (
       },
     })
 
-    if (isPrivateDeployment) {
+    if (appliesDirectly) {
       await tx.content_review_step_instances.deleteMany({ where: { caseId: reviewCase.id } })
       await tx.content_review_cases.update({
         where: { id: reviewCase.id },
@@ -285,7 +285,7 @@ export const syncPaperImportItem = async (
           from_status: reviewCase.status,
           to_status: 'approved',
           versionId: submission.id,
-          notes: 'Automatically approved by private deployment import policy.',
+          notes: 'Automatically approved by the self-hosted import policy.',
           createdAt: now,
         },
       })
@@ -302,7 +302,7 @@ export const syncPaperImportItem = async (
 
     const importResult = {
       action,
-      status: isPrivateDeployment ? ('completed' as const) : ('pending' as const),
+      status: appliesDirectly ? ('completed' as const) : ('pending' as const),
       targetId: claim.id,
       message: canonicalUpdatePending
         ? 'Metadata differences were saved for platform administrator review'
@@ -325,7 +325,7 @@ export const syncPaperImportItem = async (
     return importResult
   })
 
-  if (isPrivateDeployment && embeddingState.paper) {
+  if (appliesDirectly && embeddingState.paper) {
     const embeddingPaper = embeddingState.paper
     refreshPaperSearchIndex(fastify, embeddingPaper.id).catch((error) => {
       fastify.log.error(

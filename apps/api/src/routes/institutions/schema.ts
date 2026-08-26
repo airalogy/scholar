@@ -23,12 +23,6 @@ export const InstitutionProvisionStatusSchema = Type.Union([
   Type.Literal('disabled'),
 ])
 
-export const InstitutionJoinRequestStatusSchema = Type.Union([
-  Type.Literal('pending'),
-  Type.Literal('approved'),
-  Type.Literal('rejected'),
-])
-
 export const InstitutionParamsSchema = Type.Object({
   slug: Type.String({ minLength: 1 }),
 })
@@ -55,13 +49,6 @@ export const InstitutionApiCredentialParamsSchema = Type.Object({
 })
 
 export type InstitutionApiCredentialParams = Static<typeof InstitutionApiCredentialParamsSchema>
-
-export const InstitutionJoinRequestParamsSchema = Type.Object({
-  slug: Type.String({ minLength: 1 }),
-  requestId: Type.String({ format: 'uuid' }),
-})
-
-export type InstitutionJoinRequestParams = Static<typeof InstitutionJoinRequestParamsSchema>
 
 export const InstitutionPaperBindingParamsSchema = Type.Object({
   slug: Type.String({ minLength: 1 }),
@@ -90,6 +77,8 @@ export const InstitutionLabSchema = Type.Object({
 
 export const InstitutionMembershipSchema = Type.Object({
   userId: Type.String({ format: 'uuid' }),
+  institutionPersonId: Type.Union([Type.String({ format: 'uuid' }), Type.Null()]),
+  internalId: Type.Union([Type.String(), Type.Null()]),
   name: Type.String(),
   email: Type.String(),
   avatar: Type.Union([Type.String(), Type.Null()]),
@@ -105,7 +94,8 @@ export const InstitutionMembershipSchema = Type.Object({
 export const InstitutionPaperBoundMemberSchema = Type.Object({
   bindingId: Type.String({ format: 'uuid' }),
   paperId: Type.String({ format: 'uuid' }),
-  userId: Type.String({ format: 'uuid' }),
+  institutionPersonId: Type.String({ format: 'uuid' }),
+  userId: Type.Union([Type.String({ format: 'uuid' }), Type.Null()]),
   name: Type.String(),
   avatar: Type.Union([Type.String(), Type.Null()]),
   authorId: Type.String({ format: 'uuid' }),
@@ -119,7 +109,7 @@ export const InstitutionProvisionSchema = Type.Object({
   role: InstitutionRoleSchema,
   canReviewContent: Type.Boolean(),
   canImportData: Type.Boolean(),
-  externalId: Type.Union([Type.String(), Type.Null()]),
+  internalId: Type.Union([Type.String(), Type.Null()]),
   college: Type.Union([Type.String(), Type.Null()]),
   major: Type.Union([Type.String(), Type.Null()]),
   laboratory: Type.Union([Type.String(), Type.Null()]),
@@ -129,26 +119,6 @@ export const InstitutionProvisionSchema = Type.Object({
   claimedUserName: Type.Union([Type.String(), Type.Null()]),
   claimedAt: Type.Union([Type.String(), Type.Null()]),
   expiresAt: Type.Union([Type.String(), Type.Null()]),
-  createdAt: Type.String(),
-  updatedAt: Type.String(),
-})
-
-export const InstitutionJoinRequestSchema = Type.Object({
-  id: Type.String({ format: 'uuid' }),
-  userId: Type.String({ format: 'uuid' }),
-  userName: Type.String(),
-  userEmail: Type.String(),
-  userAvatar: Type.Union([Type.String(), Type.Null()]),
-  userDegree: Type.Union([Type.String(), Type.Null()]),
-  userMajor: Type.Union([Type.String(), Type.Null()]),
-  userCollege: Type.Union([Type.String(), Type.Null()]),
-  userLaboratory: Type.Union([Type.String(), Type.Null()]),
-  status: InstitutionJoinRequestStatusSchema,
-  reason: Type.Union([Type.String(), Type.Null()]),
-  reviewNotes: Type.Union([Type.String(), Type.Null()]),
-  reviewedBy: Type.Union([Type.String({ format: 'uuid' }), Type.Null()]),
-  reviewedByName: Type.Union([Type.String(), Type.Null()]),
-  reviewedAt: Type.Union([Type.String(), Type.Null()]),
   createdAt: Type.String(),
   updatedAt: Type.String(),
 })
@@ -183,8 +153,9 @@ export const InstitutionOrgPersonSchema = Type.Object({
   key: Type.String(),
   name: Type.String(),
   email: Type.Union([Type.String(), Type.Null()]),
-  externalId: Type.Union([Type.String(), Type.Null()]),
+  internalId: Type.String(),
   userId: Type.Union([Type.String({ format: 'uuid' }), Type.Null()]),
+  scholarId: Type.Union([Type.String({ format: 'uuid' }), Type.Null()]),
   provisionId: Type.Union([Type.String({ format: 'uuid' }), Type.Null()]),
   provisionStatus: Type.Union([InstitutionProvisionStatusSchema, Type.Null()]),
   isProvisioningEnabled: Type.Boolean(),
@@ -314,16 +285,8 @@ export const InstitutionProvisionListResponseSchema = Type.Object({
   items: Type.Array(InstitutionProvisionSchema),
 })
 
-export const InstitutionJoinRequestListResponseSchema = Type.Object({
-  items: Type.Array(InstitutionJoinRequestSchema),
-})
-
 export const InstitutionPaperBoundMemberListResponseSchema = Type.Object({
   items: Type.Array(InstitutionPaperBoundMemberSchema),
-})
-
-export const MyInstitutionJoinRequestResponseSchema = Type.Object({
-  item: Type.Union([InstitutionJoinRequestSchema, Type.Null()]),
 })
 
 export const InstitutionOrgStructureResponseSchema = Type.Object({
@@ -409,6 +372,7 @@ export type UpdateInstitutionBody = Static<typeof UpdateInstitutionBodySchema>
 
 export const UpsertInstitutionMembershipBodySchema = Type.Object({
   userId: Type.String({ format: 'uuid' }),
+  internalId: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
   role: InstitutionRoleSchema,
   can_review_content: Type.Optional(Type.Boolean({ default: false })),
   can_import_data: Type.Optional(Type.Boolean({ default: false })),
@@ -419,10 +383,10 @@ export type UpsertInstitutionMembershipBody = Static<typeof UpsertInstitutionMem
 export const UpsertInstitutionProvisionBodySchema = Type.Object({
   email: Type.String({ format: 'email' }),
   name: Type.String({ minLength: 1, maxLength: 100 }),
+  internalId: Type.String({ minLength: 1, maxLength: 100 }),
   role: InstitutionRoleSchema,
   can_review_content: Type.Optional(Type.Boolean({ default: false })),
   can_import_data: Type.Optional(Type.Boolean({ default: false })),
-  externalId: Type.Optional(Type.String({ maxLength: 64 })),
   college: Type.Optional(Type.String({ maxLength: 100 })),
   major: Type.Optional(Type.String({ maxLength: 100 })),
   laboratory: Type.Optional(Type.String({ maxLength: 200 })),
@@ -450,9 +414,9 @@ export const InstitutionOrgEdgeInputSchema = Type.Object({
 
 export const InstitutionOrgPersonInputSchema = Type.Object({
   key: Type.String({ minLength: 1, maxLength: 100 }),
+  internalId: Type.String({ minLength: 1, maxLength: 100 }),
   name: Type.String({ minLength: 1, maxLength: 100 }),
   email: Type.Optional(Type.String({ format: 'email' })),
-  externalId: Type.Optional(Type.String({ maxLength: 64 })),
   userId: Type.Optional(Type.String({ format: 'uuid' })),
   createProvision: Type.Optional(Type.Boolean({ default: false })),
   isActive: Type.Optional(Type.Boolean({ default: true })),
@@ -522,23 +486,33 @@ export type UpsertInstitutionOrgStructureBody = Static<
   typeof UpsertInstitutionOrgStructureBodySchema
 >
 
-export const BindInstitutionPaperAuthorBodySchema = Type.Object({
+const BindInstitutionPaperAuthorBaseProperties = {
   paperId: Type.String({ format: 'uuid' }),
   authorId: Type.String({ format: 'uuid' }),
-  userId: Type.String({ format: 'uuid' }),
-})
+}
+
+export const BindInstitutionPaperAuthorBodySchema = Type.Union([
+  Type.Object(
+    {
+      ...BindInstitutionPaperAuthorBaseProperties,
+      institutionPersonId: Type.String({ format: 'uuid' }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...BindInstitutionPaperAuthorBaseProperties,
+      institutionInternalId: Type.String({ minLength: 1, maxLength: 100 }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...BindInstitutionPaperAuthorBaseProperties,
+      scholarId: Type.String({ format: 'uuid' }),
+    },
+    { additionalProperties: false },
+  ),
+])
 
 export type BindInstitutionPaperAuthorBody = Static<typeof BindInstitutionPaperAuthorBodySchema>
-
-export const CreateInstitutionJoinRequestBodySchema = Type.Object({
-  reason: Type.Optional(Type.String({ maxLength: 1000 })),
-})
-
-export type CreateInstitutionJoinRequestBody = Static<typeof CreateInstitutionJoinRequestBodySchema>
-
-export const ReviewInstitutionJoinRequestBodySchema = Type.Object({
-  status: Type.Union([Type.Literal('approved'), Type.Literal('rejected')]),
-  notes: Type.Optional(Type.String({ maxLength: 2000 })),
-})
-
-export type ReviewInstitutionJoinRequestBody = Static<typeof ReviewInstitutionJoinRequestBodySchema>

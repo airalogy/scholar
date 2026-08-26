@@ -42,6 +42,22 @@ export const UserLabMembershipSchema = Type.Object({
   role: Type.String(),
 })
 
+export const UserInstitutionIdentitySchema = Type.Object({
+  id: Type.String({ format: 'uuid' }),
+  institutionId: Type.String({ format: 'uuid' }),
+  institutionName: Type.String(),
+  internalId: Type.String(),
+  scholarId: Type.Union([Type.String({ format: 'uuid' }), Type.Null()]),
+})
+
+export const UserInstitutionPaperSchema = Type.Object({
+  id: Type.String({ format: 'uuid' }),
+  title: Type.String(),
+  doi: Type.String(),
+  publishYear: Type.Union([Type.Integer(), Type.Null()]),
+  authorName: Type.String(),
+})
+
 export const AdminAccessSchema = Type.Object({
   can_access: Type.Boolean(),
   manage_platform: Type.Boolean(),
@@ -75,6 +91,8 @@ export const UserProfileSchema = Type.Object({
   manageable_institutions: Type.Array(ManageableInstitutionSchema),
   institution_memberships: Type.Array(UserInstitutionMembershipSchema),
   lab_memberships: Type.Array(UserLabMembershipSchema),
+  institution_identity: Type.Union([UserInstitutionIdentitySchema, Type.Null()]),
+  institution_papers: Type.Array(UserInstitutionPaperSchema),
 })
 
 export const UserProfileResponseSchema = Type.Object({

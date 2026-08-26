@@ -120,7 +120,15 @@ test('the current-user profile exposes import-only access from the server', asyn
           },
         ],
       },
+      institution_people: {
+        findMany: async () => [],
+      },
       institutions: {
+        findUnique: async () => ({
+          id: INSTITUTION_ID,
+          name: 'Example University',
+          slug: 'example-university',
+        }),
         findMany: async () => [
           {
             id: INSTITUTION_ID,
@@ -129,6 +137,9 @@ test('the current-user profile exposes import-only access from the server', asyn
           },
         ],
       },
+    },
+    deployment: {
+      institution: { slug: 'example-university' },
     },
   } as unknown as FastifyInstance
 
@@ -143,6 +154,97 @@ test('the current-user profile exposes import-only access from the server', asyn
       name: 'Example University',
       slug: 'example-university',
       role: 'member',
+    },
+  ])
+})
+
+test('the current-user profile exposes papers prebound to the institution identity', async () => {
+  const personId = '33333333-3333-4333-8333-333333333333'
+  const scholarId = '44444444-4444-4444-8444-444444444444'
+  const paperId = '55555555-5555-4555-8555-555555555555'
+  const fastify = {
+    prisma: {
+      users: {
+        findUnique: async () => ({
+          id: USER_ID,
+          username: 'faculty-42',
+          email: 'faculty-42@example.edu',
+          name: 'Faculty Member',
+          avatar: null,
+          platform_role: 'member',
+        }),
+      },
+      lab_memberships: { findMany: async () => [] },
+      labs: { findMany: async () => [] },
+      institution_memberships: {
+        findMany: async () => [
+          {
+            institutionId: INSTITUTION_ID,
+            role: 'member',
+            can_review_content: false,
+            can_import_data: false,
+          },
+        ],
+      },
+      institution_people: {
+        findMany: async () => [
+          {
+            id: personId,
+            institutionId: INSTITUTION_ID,
+            internalId: 'FACULTY-42',
+            scholarId,
+          },
+        ],
+      },
+      institution_paper_author_bindings: {
+        findMany: async () => [
+          {
+            paper: {
+              id: paperId,
+              title: 'Prebound Research Paper',
+              doi: '10.1000/prebound',
+              publish_year: 2026,
+            },
+            author: { name: 'Faculty Member' },
+          },
+        ],
+      },
+      institutions: {
+        findUnique: async () => ({
+          id: INSTITUTION_ID,
+          name: 'Example University',
+          slug: 'example-university',
+        }),
+        findMany: async () => [
+          {
+            id: INSTITUTION_ID,
+            name: 'Example University',
+            slug: 'example-university',
+          },
+        ],
+      },
+    },
+    deployment: {
+      institution: { slug: 'example-university' },
+    },
+  } as unknown as FastifyInstance
+
+  const response = await getMyProfile(fastify, USER_ID)
+
+  assert.deepEqual(response.data.institution_identity, {
+    id: personId,
+    institutionId: INSTITUTION_ID,
+    institutionName: 'Example University',
+    internalId: 'FACULTY-42',
+    scholarId,
+  })
+  assert.deepEqual(response.data.institution_papers, [
+    {
+      id: paperId,
+      title: 'Prebound Research Paper',
+      doi: '10.1000/prebound',
+      publishYear: 2026,
+      authorName: 'Faculty Member',
     },
   ])
 })

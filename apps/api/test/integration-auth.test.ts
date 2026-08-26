@@ -82,7 +82,10 @@ const buildPrismaMock = (state: AuthState) => {
     institution_api_credentials: {
       findUnique: async ({ where }: { where: { id?: string; clientId?: string } }) => {
         if (where.id === state.credential.id || where.clientId === state.credential.clientId) {
-          return state.credential
+          return {
+            ...state.credential,
+            institution: { slug: 'test-institution' },
+          }
         }
         return null
       },
@@ -106,6 +109,9 @@ const buildAuthApp = async (state: AuthState): Promise<FastifyInstance> => {
   const app = Fastify({ logger: false })
   await app.register(sensible)
   app.decorate('config', { JWT_SECRET } as never)
+  app.decorate('deployment', {
+    institution: { slug: 'test-institution' },
+  } as never)
   app.decorate('prisma', buildPrismaMock(state) as never)
   await app.register(jwtPlugin)
   await app.register(authRoutes, { prefix: '/auth' })

@@ -82,55 +82,6 @@
         </div>
       </section>
 
-      <section v-if="showInstitutionAccessPanel" class="browse-section">
-        <div class="section-head">
-          <div>
-            <h2 class="section-title">{{ $t('papersPage.libraryAccessTitle') }}</h2>
-            <p class="section-subtitle">
-              {{ $t('papersPage.libraryAccessSubtitle', { app: branding.appName }) }}
-            </p>
-          </div>
-          <a-button v-if="canBindInstitution" class="library-access-btn" @click="openInstitutionBinding">
-            {{ $t('papersPage.bindInstitution') }}
-          </a-button>
-        </div>
-
-        <div v-if="isViewerInstitutionsLoading" class="section-state">{{ $t('common.loading') }}</div>
-        <div v-else class="library-access-card">
-          <div class="browse-group">
-            <div class="browse-label">{{ $t('papersPage.switchInstitutionLabel') }}</div>
-            <a-select
-              :model-value="institutionSwitchValue"
-              class="library-switch"
-              @change="handleInstitutionSwitch"
-            >
-              <a-option :value="PUBLIC_LIBRARY_VALUE">
-                {{ $t('papersPage.defaultLibraryOption', { app: branding.appName }) }}
-              </a-option>
-              <a-option
-                v-for="institution in viewerInstitutionMemberships"
-                :key="institution.id"
-                :value="institution.slug"
-              >
-                {{ institution.name }}
-              </a-option>
-            </a-select>
-          </div>
-
-          <div v-if="!viewerInstitutionMemberships.length" class="section-state section-state--compact">
-            {{
-              canBindInstitution
-                ? $t('papersPage.noBoundInstitution')
-                : $t('papersPage.bindingUnavailable')
-            }}
-          </div>
-
-          <div v-if="viewerInstitutionsError" class="section-state section-state--compact">
-            {{ viewerInstitutionsError }}
-          </div>
-        </div>
-      </section>
-
       <section v-if="institutionQuickBrowse.colleges.length || institutionQuickBrowse.labs.length" class="browse-section">
         <div class="section-head">
           <div>
@@ -230,7 +181,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { Message } from '@arco-design/web-vue'
 import { IconBookmark } from '@arco-design/web-vue/es/icon'
 import { useI18n } from 'vue-i18n'
@@ -248,20 +199,14 @@ import {
 } from '@/api/institutions'
 import { getLab } from '@/api/labs'
 import { getScholar } from '@/api/scholars'
-import { getMyProfile, type UserInstitutionMembershipItem } from '@/api/users'
 import { useAuth } from '@/composables/useAuth'
-import { usePublicConfig } from '@/composables/usePublicConfig'
 import { PAPER_TYPE_LABEL_KEYS } from '@/i18n/helpers'
 import { hasPublishYear } from '@/utils/papers'
 
 const pageSize = 10
-const PUBLIC_LIBRARY_VALUE = '__public__'
-
 const route = useRoute()
-const router = useRouter()
 const { t, locale } = useI18n()
 const { isLoggedIn, token } = useAuth()
-const { branding, publicConfig, paperLibrary } = usePublicConfig()
 
 type PageScope =
   | { kind: 'default' }
@@ -275,13 +220,9 @@ const total = ref(0)
 const papers = ref<PaperResponse[]>([])
 const bookmarkSet = ref<Set<string>>(new Set())
 const authorOptions = ref<AuthorResponse[]>([])
-const viewerInstitutionMemberships = ref<UserInstitutionMembershipItem[]>([])
-
 const isLoading = ref(false)
 const isAuthorLoading = ref(false)
-const isViewerInstitutionsLoading = ref(false)
 const loadError = ref('')
-const viewerInstitutionsError = ref('')
 
 const queryText = ref('')
 const selectedAuthorId = ref('')
@@ -293,20 +234,6 @@ const yearTo = ref<number | undefined>(undefined)
 const pageScope = ref<PageScope>({ kind: 'default' })
 const currentInstitutionSlug = ref('')
 const currentInstitution = ref<InstitutionDetailResponse | null>(null)
-
-const isPublicDeployment = computed(() => publicConfig.value.deploymentMode === 'public')
-
-const showInstitutionAccessPanel = computed(() => {
-  return isPublicDeployment.value && isLoggedIn.value
-})
-
-const canBindInstitution = computed(() => {
-  return publicConfig.value.auth.enableInstitutionLogin
-})
-
-const institutionSwitchValue = computed(() => {
-  return currentInstitutionSlug.value || PUBLIC_LIBRARY_VALUE
-})
 
 const paperTypeOptions = computed(() => {
   return Object.entries(PAPER_TYPE_LABEL_KEYS).map(([value, key]) => ({
@@ -407,14 +334,6 @@ const showPaperSourceBadges = computed(() => {
     pageScope.value.kind === 'lab'
 })
 
-const openInstitutionBinding = (): void => {
-  window.dispatchEvent(new CustomEvent('auth:open-login', {
-    detail: {
-      preferredTab: 'institution' as const,
-    },
-  }))
-}
-
 const getErrorMessage = (error: unknown, fallback: string): string => {
   if (typeof error === 'object' && error !== null && 'response' in error) {
     const response = (error as {
@@ -492,30 +411,6 @@ const handleAuthorSearch = async (keyword: string): Promise<void> => {
   }
 }
 
-const loadViewerInstitutionMemberships = async (): Promise<void> => {
-  if (!isLoggedIn.value || !isPublicDeployment.value) {
-    viewerInstitutionMemberships.value = []
-    viewerInstitutionsError.value = ''
-    return
-  }
-
-  isViewerInstitutionsLoading.value = true
-  try {
-    const profile = await getMyProfile(false)
-    viewerInstitutionMemberships.value = [...profile.institution_memberships]
-      .sort((left, right) => left.name.localeCompare(right.name, locale.value))
-    viewerInstitutionsError.value = ''
-  } catch (error) {
-    viewerInstitutionMemberships.value = []
-    viewerInstitutionsError.value = getErrorMessage(
-      error,
-      t('papersPage.institutionBindingsLoadFailed'),
-    )
-  } finally {
-    isViewerInstitutionsLoading.value = false
-  }
-}
-
 const buildPresetParams = async (): Promise<Partial<ListPapersParams>> => {
   currentInstitutionSlug.value = ''
   currentInstitution.value = null
@@ -557,20 +452,6 @@ const buildPresetParams = async (): Promise<Partial<ListPapersParams>> => {
   }
 
   return {}
-}
-
-const handleInstitutionSwitch = (value: unknown): void => {
-  if (typeof value !== 'string') {
-    return
-  }
-
-  const targetPath = value === PUBLIC_LIBRARY_VALUE
-    ? paperLibrary.value.defaultPath
-    : `/institutions/${value}/papers`
-
-  if (targetPath !== route.path) {
-    void router.push(targetPath)
-  }
 }
 
 const loadPapers = async (): Promise<void> => {
@@ -647,14 +528,6 @@ const toggleBookmark = async (paperId: string): Promise<void> => {
     Message.error(getErrorMessage(error, t('papersPage.bookmarkActionFailed')))
   }
 }
-
-watch(
-  [() => token.value, () => publicConfig.value.deploymentMode],
-  () => {
-    void loadViewerInstitutionMemberships()
-  },
-  { immediate: true },
-)
 
 watch(token, (nextToken, previousToken) => {
   if (!nextToken) {
@@ -801,27 +674,6 @@ watch(
   margin: 8px 0 0
   font-size: 14px
   color: #667085
-
-.library-access-btn
-  border-radius: 12px
-
-.library-access-card
-  display: flex
-  flex-direction: column
-  gap: 14px
-  padding: 18px 20px
-  border-radius: 18px
-  background: linear-gradient(180deg, #f9fbff 0%, #f3f7ff 100%)
-  border: 1px solid rgba(15, 98, 254, 0.08)
-
-.library-switch
-  width: 100%
-  max-width: 420px
-  margin-top: 10px
-
-.library-switch :deep(.arco-select-view)
-  min-height: 42px
-  border-radius: 12px
 
 .browse-group + .browse-group
   margin-top: 16px

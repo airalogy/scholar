@@ -14,7 +14,7 @@ These roles can import without the additional setting:
 
 ## CSV requirements
 
-A file can contain at most 500 rows. A paper requires `title` and `doi`; a scholar requires `external_id` and `name`.
+A file can contain at most 500 rows. A paper requires `title` and `doi`; a scholar requires `external_id` and `name`. For scholar imports, `external_id` is the institution's canonical employee/student identifier. It is not a Scholar UUID, email address, or name.
 
 Common paper columns:
 
@@ -43,4 +43,4 @@ Use Import History to inspect:
 - Each row's `created/updated/unchanged/pending/error` result.
 - Validation errors, review state, and reviewer notes.
 
-Pending records in public multi-institution mode do not overwrite published data. Private single-institution mode applies valid data directly but retains the same audit trail.
+In an Airalogy Managed tenant, imported changes enter the managed review workflow and do not overwrite published data before approval. In a self-hosted instance, valid records apply directly. Both modes retain the same row-level results and audit trail.

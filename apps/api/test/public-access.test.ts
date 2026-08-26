@@ -8,11 +8,15 @@ import degreeThesisRoutes from '../src/routes/v1/theses'
 
 const JWT_SECRET = 'test-jwt-secret-that-is-longer-than-thirty-two-characters'
 
-const buildApp = async (): Promise<FastifyInstance> => {
+const buildApp = async (
+  contentAccess: 'public' | 'authenticated' = 'public',
+): Promise<FastifyInstance> => {
   const app = Fastify({ logger: false })
   await app.register(sensible)
   app.decorate('config', { JWT_SECRET } as never)
   app.decorate('deployment', {
+    contentAccess,
+    institution: { slug: 'example-university' },
     features: {
       degreeTheses: true,
       paperUpload: true,
@@ -26,6 +30,13 @@ const buildApp = async (): Promise<FastifyInstance> => {
     },
     users: {
       findUnique: async () => null,
+    },
+    institutions: {
+      findUnique: async () => ({
+        id: '22222222-2222-4222-8222-222222222222',
+        slug: 'example-university',
+        name: 'Example University',
+      }),
     },
   } as never)
   await app.register(jwtPlugin)
@@ -70,6 +81,17 @@ test('private collections still require a user session', async (t) => {
 
   const myTheses = await app.inject({ method: 'GET', url: '/v1/theses/mine' })
   assert.equal(myTheses.statusCode, 401)
+})
+
+test('configured authenticated content requires login for the institution collection', async (t) => {
+  const app = await buildApp('authenticated')
+  t.after(async () => app.close())
+
+  const papers = await app.inject({ method: 'GET', url: '/papers' })
+  const theses = await app.inject({ method: 'GET', url: '/v1/theses' })
+
+  assert.equal(papers.statusCode, 401)
+  assert.equal(theses.statusCode, 401)
 })
 
 test('stale user tokens fall back to public access but integration tokens are rejected', async (t) => {

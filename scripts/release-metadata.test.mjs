@@ -194,6 +194,7 @@ esac
     .replace('replace-with-a-long-random-database-password', 'release-test-database-password')
     .replace('replace-with-a-long-random-database-password', 'release-test-database-password')
     .replace('replace-with-at-least-32-random-characters', 'a'.repeat(48))
+    .replace('INSTITUTION_SLUG=replace-with-institution-slug', 'INSTITUTION_SLUG=release-test')
     .replace('OPENAI_BASE_URL=', 'OPENAI_BASE_URL=https://models.example.invalid/v1')
     .replace('OPENAI_API_KEY=', 'OPENAI_API_KEY=release-test-model-key')
   await writeFile(envPath, configured)
@@ -252,10 +253,6 @@ esac
 
   const configuredWithInstitutionSso = configured
     .replace('ENABLE_INSTITUTION_LOGIN=false', 'ENABLE_INSTITUTION_LOGIN=true')
-    .replace(
-      'INSTITUTION_LOGIN_INSTITUTION_SLUG=',
-      'INSTITUTION_LOGIN_INSTITUTION_SLUG=example-university',
-    )
     .replace('INSTITUTION_SSO_ENABLED=false', 'INSTITUTION_SSO_ENABLED=true')
     .replace(
       'INSTITUTION_SSO_AUTHORIZATION_URL=',

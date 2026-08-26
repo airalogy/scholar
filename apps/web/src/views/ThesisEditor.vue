@@ -29,12 +29,8 @@
           </label>
           <label class="field field--wide" v-if="!isEditing">
             <span>{{ $t('degreeTheses.institutionLabel') }} *</span>
-            <select v-model="institutionId" required>
-              <option value="" disabled>{{ $t('degreeTheses.institutionPlaceholder') }}</option>
-              <option v-for="institution in institutions" :key="institution.id" :value="institution.id">
-                {{ institution.name }}
-              </option>
-            </select>
+            <div v-if="institution" class="field-static-value">{{ institution.name }}</div>
+            <small v-else>{{ $t('upload.noInstitutionMembership') }}</small>
           </label>
           <label class="field">
             <span>{{ $t('degreeTheses.institutionReferenceLabel') }}</span>
@@ -153,6 +149,7 @@ const loading = ref(false)
 const saving = ref(false)
 const errorMessage = ref('')
 const institutions = ref<UserInstitutionMembershipItem[]>([])
+const institution = computed(() => institutions.value[0] ?? null)
 const institutionId = ref('')
 const selectedFile = ref<File | null>(null)
 const editorForm = ref<HTMLFormElement | null>(null)
@@ -317,6 +314,7 @@ h1 { margin: 0 0 10px; font-size: 32px; }
 .field { display: grid; gap: 8px; color: var(--scholar-text-secondary); font-size: 14px; }
 .field--wide { grid-column: 1 / -1; }
 .field input, .field select, .field textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--scholar-border-input); border-radius: 8px; padding: 10px 12px; color: var(--scholar-text-primary); background: #fff; font: inherit; }
+.field-static-value { width: 100%; box-sizing: border-box; border: 1px solid var(--scholar-border-light); border-radius: 8px; padding: 10px 12px; color: var(--scholar-text-primary); background: var(--scholar-bg-sidebar); }
 .field textarea { resize: vertical; }
 .file-field small { color: var(--scholar-text-secondary); }
 .form-actions { display: flex; justify-content: flex-end; gap: 12px; }

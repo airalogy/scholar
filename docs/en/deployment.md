@@ -1,6 +1,6 @@
-# Airalogy Scholar Private Deployment
+# Airalogy Scholar Deployment
 
-English | [简体中文](../zh/private-deployment.md)
+English | [简体中文](../zh/deployment.md)
 
 This guide deploys one tested Airalogy Scholar release to a university while keeping application upgrades independent from institution-owned data. Production uses a complete release package, not a server Git checkout. Web, API, migrations, documentation, and an optional database are internal components of one product version and are not freely mixed.
 
@@ -67,7 +67,7 @@ At minimum configure:
 - `SCHOLAR_API_IMAGE`, `SCHOLAR_WEB_IMAGE`, and `POSTGRES_IMAGE`;
 - `POSTGRES_PASSWORD` and `DATABASE_URL`;
 - a random `JWT_SECRET` of at least 32 characters;
-- `DEPLOYMENT_MODE` and `PRIVATE_INSTITUTION_SLUG`;
+- `MANAGEMENT_MODE`, `INSTITUTION_SLUG`, and `CONTENT_ACCESS_MODE`;
 - login methods and AI, upload, forum, thesis, and timeline features;
 - local or object-storage settings;
 - application display name and institution-authorized branding URLs.

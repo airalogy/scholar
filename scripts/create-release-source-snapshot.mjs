@@ -19,9 +19,15 @@ import { fileURLToPath } from 'node:url'
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url))
 const checkOnly = process.argv.includes('--check')
 const verifyOnly = process.argv.includes('--verify')
+const updateManifest = process.argv.includes('--update-manifest')
 const targetArgument = process.argv
   .slice(2)
-  .find((argument) => argument !== '--check' && argument !== '--verify')
+  .find(
+    (argument) =>
+      argument !== '--check' &&
+      argument !== '--verify' &&
+      argument !== '--update-manifest',
+  )
 const initialMigrationPath =
   'apps/api/prisma/migrations/00000000000000_v3_initial/migration.sql'
 const migrationLockPath = 'apps/api/prisma/migrations/migration_lock.toml'
@@ -207,6 +213,16 @@ const createManifest = async (targetRoot, files) => {
   return `${JSON.stringify({ version, files: entries }, null, 2)}\n`
 }
 
+const createRepositoryManifest = async (files, initialMigration) => {
+  const entries = {}
+  for (const file of files) {
+    entries[file] = sha256(await readFile(path.join(repositoryRoot, file)))
+  }
+  entries[initialMigrationPath] = sha256(initialMigration)
+  const version = (await readFile(path.join(repositoryRoot, 'VERSION'), 'utf8')).trim()
+  return `${JSON.stringify({ version, files: Object.fromEntries(Object.entries(entries).sort()) }, null, 2)}\n`
+}
+
 const writeSnapshot = async (targetRoot, files, initialMigration) => {
   await assertTargetDoesNotExist(targetRoot)
   await mkdir(targetRoot, { recursive: true })
@@ -292,15 +308,37 @@ const verifySnapshot = (targetRoot) => {
   }
 }
 
+const initializeVerificationGitIndex = (targetRoot) => {
+  run('git', ['init', '--quiet'], { cwd: targetRoot })
+  run('git', ['add', '--all'], { cwd: targetRoot })
+}
+
 const main = async () => {
-  if (checkOnly && verifyOnly) {
-    throw new Error('--check and --verify cannot be used together')
+  if ([checkOnly, verifyOnly, updateManifest].filter(Boolean).length > 1) {
+    throw new Error('--check, --verify, and --update-manifest cannot be used together')
   }
   const files = listCandidateFiles()
   const initialMigration = await generateInitialMigration()
   await auditCandidates(files, initialMigration)
 
+  if (updateManifest) {
+    const manifest = await createRepositoryManifest(files, initialMigration)
+    await writeFile(path.join(repositoryRoot, releaseManifestPath), manifest)
+    console.log(`Updated ${releaseManifestPath} for ${files.length + 1} files`)
+    return
+  }
+
   if (checkOnly) {
+    const expectedManifest = await createRepositoryManifest(files, initialMigration)
+    const actualManifest = await readFile(
+      path.join(repositoryRoot, releaseManifestPath),
+      'utf8',
+    )
+    if (actualManifest !== expectedManifest) {
+      throw new Error(
+        `${releaseManifestPath} is stale; run pnpm release:source:manifest`,
+      )
+    }
     console.log(`Release source audit passed for ${files.length + 1} files`)
     return
   }
@@ -310,6 +348,7 @@ const main = async () => {
     const targetRoot = path.join(temporaryRoot, 'source')
     try {
       await writeSnapshot(targetRoot, files, initialMigration)
+      initializeVerificationGitIndex(targetRoot)
       verifySnapshot(targetRoot)
       console.log(`Verified release source snapshot with ${files.length + 1} files`)
     } finally {
@@ -320,7 +359,7 @@ const main = async () => {
 
   if (!targetArgument) {
     throw new Error(
-      'Usage: node scripts/create-release-source-snapshot.mjs <new-target-directory> | --check | --verify',
+      'Usage: node scripts/create-release-source-snapshot.mjs <new-target-directory> | --check | --verify | --update-manifest',
     )
   }
   const status = run('git', ['status', '--porcelain=v1', '--untracked-files=all'])

@@ -97,6 +97,39 @@
             </a-form>
           </div>
 
+          <div v-if="institutionIdentity" class="section-card profile-section">
+            <div class="section-header">
+              <div>
+                <div class="section-title">{{ $t('settings.institutionIdentityTitle') }}</div>
+                <div class="institution-identity-meta">
+                  {{ institutionIdentity.institutionName }} · {{ institutionIdentity.internalId }}
+                </div>
+              </div>
+              <router-link
+                v-if="institutionIdentity.scholarId"
+                :to="`/scholars/${institutionIdentity.scholarId}`"
+                class="identity-link"
+              >
+                {{ $t('settings.viewScholarProfile') }}
+              </router-link>
+            </div>
+            <p class="institution-identity-hint">{{ $t('settings.institutionIdentityHint') }}</p>
+            <div v-if="institutionPapers.length" class="institution-paper-list">
+              <router-link
+                v-for="paper in institutionPapers"
+                :key="paper.id"
+                :to="`/papers/${paper.id}`"
+                class="institution-paper-item"
+              >
+                <span>{{ paper.title }}</span>
+                <span class="institution-paper-meta">
+                  {{ paper.authorName }}<template v-if="paper.publishYear"> · {{ paper.publishYear }}</template>
+                </span>
+              </router-link>
+            </div>
+            <a-empty v-else :description="$t('settings.noInstitutionPapers')" />
+          </div>
+
           <div class="section-card profile-section">
             <div class="section-header">
               <div class="section-title">{{ $t('settings.projects') }}</div>
@@ -212,6 +245,8 @@ import {
   uploadAvatar,
   type ProjectExperienceItem,
   type PublicationItem,
+  type UserInstitutionIdentity,
+  type UserInstitutionPaper,
 } from '@/api/users'
 
 const activeTab = ref('profile')
@@ -220,6 +255,8 @@ const savingProfile = ref(false)
 const savingPassword = ref(false)
 const showPasswordModal = ref(false)
 const avatarPreview = ref('')
+const institutionIdentity = ref<UserInstitutionIdentity | null>(null)
+const institutionPapers = ref<UserInstitutionPaper[]>([])
 const { updateName, updateAvatar } = useAuth()
 const { t } = useI18n()
 
@@ -331,6 +368,8 @@ const fillProfile = async (): Promise<void> => {
       id: item.id || createItemId(),
       title: item.title || '',
     }))
+    institutionIdentity.value = data.institution_identity
+    institutionPapers.value = data.institution_papers
     updateAvatar(avatarPreview.value)
   } finally {
     isLoading.value = false
@@ -555,6 +594,36 @@ onMounted(() => {
 
 .list-row-period
   width: 220px
+
+.institution-identity-meta, .institution-identity-hint, .institution-paper-meta
+  color: var(--scholar-text-3)
+  font-size: 13px
+
+.institution-identity-hint
+  margin: 0 0 14px
+
+.identity-link
+  color: var(--scholar-primary)
+  font-weight: 600
+  text-decoration: none
+
+.institution-paper-list
+  display: flex
+  flex-direction: column
+  gap: 8px
+
+.institution-paper-item
+  display: flex
+  flex-direction: column
+  gap: 4px
+  padding: 12px 14px
+  border: 1px solid var(--scholar-border-light)
+  border-radius: 10px
+  color: var(--scholar-text-1)
+  text-decoration: none
+
+.institution-paper-item:hover
+  border-color: var(--scholar-primary)
 
 .security-card
   background: transparent

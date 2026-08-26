@@ -1,6 +1,6 @@
-# Airalogy Scholar 私有化部署
+# Airalogy Scholar 部署
 
-[English](../en/private-deployment.md) | 简体中文
+[English](../en/deployment.md) | 简体中文
 
 本文档说明如何把同一套 Airalogy Scholar 发布版本部署到不同大学，并保证应用升级与机构数据相互独立。生产部署以一个经过整体验证的 Airalogy Scholar 发布包为交付物，不以服务器 Git 工作区为运行单元。Web、API、迁移任务和可选数据库是产品内部组件，不分别选择或自由组合版本。
 
@@ -67,7 +67,7 @@ cp deploy/.env.example deploy/.env
 - `SCHOLAR_API_IMAGE`、`SCHOLAR_WEB_IMAGE`、`POSTGRES_IMAGE`；
 - `POSTGRES_PASSWORD` 和 `DATABASE_URL`；
 - `JWT_SECRET`（至少 32 个随机字符）；
-- `DEPLOYMENT_MODE` 和 `PRIVATE_INSTITUTION_SLUG`；
+- `MANAGEMENT_MODE`、`INSTITUTION_SLUG` 和 `CONTENT_ACCESS_MODE`；
 - 登录方式、AI、上传、论坛和年谱开关；
 - 本地文件或对象存储配置；
 - 应用名称及经机构授权的品牌资源 URL。

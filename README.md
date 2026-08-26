@@ -2,7 +2,12 @@
 
 English | [简体中文](./README.zh-CN.md)
 
-Airalogy Scholar is an institution-ready platform for scholarly profiles, papers, degree theses, research timelines, discovery, and AI-assisted reading.
+Airalogy Scholar is a single-institution knowledge platform for scholarly profiles, papers, degree theses, research timelines, discovery, and AI-assisted reading. Each deployment or managed tenant serves exactly one institution; institution data and identity boundaries are never selected by end users.
+
+The same source supports two operating models:
+
+- **Self-hosted:** the institution operates Scholar and valid imports take effect directly.
+- **Airalogy Managed:** Airalogy operates an isolated institution tenant and imported changes enter the managed review workflow.
 
 ## What is included
 
@@ -166,7 +171,7 @@ PostgreSQL data, uploaded files, and backups remain under the deploying institut
 
 Mainland China and disconnected environments can mirror the API, Web, and PostgreSQL images to ACR, TCR, Harbor, or another institution-managed registry. `deploy/export-images.sh` and `deploy/import-images.sh` support offline delivery.
 
-See [private deployment](./docs/en/private-deployment.md) for the complete deployment and upgrade guide.
+See the [deployment guide](./docs/en/deployment.md) for the complete installation and upgrade process.
 
 ## Documentation
 

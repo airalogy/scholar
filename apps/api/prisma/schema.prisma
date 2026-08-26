@@ -46,7 +46,6 @@ model users {
   reviewed_imports               institution_data_imports[]              @relation("ImportReviewedBy")
   join_requests                  institution_join_requests[]             @relation("JoinRequestUser")
   reviewed_join_requests         institution_join_requests[]             @relation("JoinRequestReviewedBy")
-  paper_author_bindings          institution_paper_author_bindings[]     @relation("PaperAuthorBindingUser")
   created_paper_author_bindings  institution_paper_author_bindings[]     @relation("PaperAuthorBindingCreatedBy")
   file_access_audits             file_access_audits[]
   chats                          chats[]
@@ -58,7 +57,8 @@ model users {
   external_identities            user_external_identities[]
   created_api_credentials        institution_api_credentials[]
   created_org_nodes              institution_org_nodes[]
-  linked_org_people              institution_org_people[]
+  linked_institution_people      institution_people[]
+  institution_person_events      institution_person_events[]             @relation("InstitutionPersonEventActor")
   created_review_workflows       institution_review_workflows[]
   submitted_content_reviews      content_review_cases[]                  @relation("ContentReviewSubmittedBy")
   decided_content_reviews        content_review_cases[]                  @relation("ContentReviewDecidedBy")
@@ -90,6 +90,7 @@ model authors {
   updatedAt                  DateTime                            @db.Timestamp(6)
   paper_links                paper_authors[]
   institution_paper_bindings institution_paper_author_bindings[]
+  institution_person_events  institution_person_events[]
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -196,6 +197,7 @@ model papers {
   forum_posts                     forum_posts[]
   file_access_audits              file_access_audits[]
   institution_author_bindings     institution_paper_author_bindings[]
+  institution_person_events       institution_person_events[]
 
   @@index([doi])
 }
@@ -267,7 +269,7 @@ model scholars {
   research_timeline_generations scholar_research_timeline_generations[]
   research_timeline_periods     scholar_research_periods[]
   paper_links                   scholar_papers[]
-  institution_mappings          institution_scholar_mappings[]
+  institution_people            institution_people[]
   subject_links                 scholar_subjects[]
 }
 
@@ -397,7 +399,6 @@ model institutions {
   updatedAt              DateTime                               @default(now()) @db.Timestamp(6)
   labs                   labs[]
   memberships            institution_memberships[]
-  scholar_mappings       institution_scholar_mappings[]
   imports                institution_data_imports[]
   join_requests          institution_join_requests[]
   paper_author_bindings  institution_paper_author_bindings[]
@@ -409,7 +410,8 @@ model institutions {
   stored_files           oss_files[]
   org_nodes              institution_org_nodes[]
   org_edges              institution_org_edges[]
-  org_people             institution_org_people[]
+  people                 institution_people[]
+  person_events          institution_person_events[]
   org_positions          institution_org_positions[]
   org_appointments       institution_org_appointments[]
   review_workflows       institution_review_workflows[]
@@ -440,29 +442,28 @@ model institution_memberships {
 }
 
 model institution_user_provisions {
-  id                 String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  institutionId      String                   @db.Uuid
-  createdBy          String                   @db.Uuid
-  claimedUserId      String?                  @db.Uuid
-  email              String                   @db.VarChar(100)
-  name               String                   @db.VarChar(100)
-  role               String                   @default("member") @db.VarChar(16)
-  externalId         String?                  @db.VarChar(64)
-  college            String?                  @db.VarChar(100)
-  major              String?                  @db.VarChar(100)
-  laboratory         String?                  @db.VarChar(200)
-  inviteToken        String                   @unique(map: "institution_user_provisions_inviteToken_idx") @db.VarChar(128)
-  status             String                   @default("pending_activation") @db.VarChar(32)
-  claimedAt          DateTime?                @db.Timestamp(6)
-  expiresAt          DateTime?                @db.Timestamp(6)
-  createdAt          DateTime                 @default(now()) @db.Timestamp(6)
-  updatedAt          DateTime                 @default(now()) @db.Timestamp(6)
-  can_review_content Boolean                  @default(false)
-  can_import_data    Boolean                  @default(false)
-  institution        institutions             @relation(fields: [institutionId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_user_provisions_institutionId_fkey")
-  created_by         users                    @relation("ProvisionCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "institution_user_provisions_createdBy_fkey")
-  claimed_user       users?                   @relation("ProvisionClaimedBy", fields: [claimedUserId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "institution_user_provisions_claimedUserId_fkey")
-  org_people         institution_org_people[]
+  id                 String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  institutionId      String               @db.Uuid
+  createdBy          String               @db.Uuid
+  claimedUserId      String?              @db.Uuid
+  email              String               @db.VarChar(100)
+  name               String               @db.VarChar(100)
+  role               String               @default("member") @db.VarChar(16)
+  college            String?              @db.VarChar(100)
+  major              String?              @db.VarChar(100)
+  laboratory         String?              @db.VarChar(200)
+  inviteToken        String               @unique(map: "institution_user_provisions_inviteToken_idx") @db.VarChar(128)
+  status             String               @default("pending_activation") @db.VarChar(32)
+  claimedAt          DateTime?            @db.Timestamp(6)
+  expiresAt          DateTime?            @db.Timestamp(6)
+  createdAt          DateTime             @default(now()) @db.Timestamp(6)
+  updatedAt          DateTime             @default(now()) @db.Timestamp(6)
+  can_review_content Boolean              @default(false)
+  can_import_data    Boolean              @default(false)
+  institution        institutions         @relation(fields: [institutionId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_user_provisions_institutionId_fkey")
+  created_by         users                @relation("ProvisionCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "institution_user_provisions_createdBy_fkey")
+  claimed_user       users?               @relation("ProvisionClaimedBy", fields: [claimedUserId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "institution_user_provisions_claimedUserId_fkey")
+  people             institution_people[]
 
   @@unique([institutionId, email], map: "institution_user_provisions_institutionId_email_idx")
   @@index([status])
@@ -493,21 +494,6 @@ model institution_api_credentials {
   @@index([createdBy])
   @@index([expiresAt])
   @@index([revokedAt])
-}
-
-model institution_scholar_mappings {
-  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  institutionId String       @db.Uuid
-  externalId    String       @db.VarChar(100)
-  scholarId     String       @db.Uuid
-  createdAt     DateTime     @default(now()) @db.Timestamp(6)
-  updatedAt     DateTime     @default(now()) @db.Timestamp(6)
-  institution   institutions @relation(fields: [institutionId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_scholar_mappings_institutionId_fkey")
-  scholar       scholars     @relation(fields: [scholarId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_scholar_mappings_scholarId_fkey")
-
-  @@unique([institutionId, externalId], map: "institution_scholar_mappings_inst_external_idx")
-  @@unique([institutionId, scholarId], map: "institution_scholar_mappings_inst_scholar_idx")
-  @@index([scholarId], map: "institution_scholar_mappings_scholarId_idx")
 }
 
 model institution_data_imports {
@@ -589,25 +575,25 @@ model institution_join_requests {
 }
 
 model institution_paper_author_bindings {
-  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  institutionId String       @db.Uuid
-  paperId       String       @db.Uuid
-  authorId      String       @db.Uuid
-  userId        String       @db.Uuid
-  boundBy       String       @db.Uuid
-  createdAt     DateTime     @default(now()) @db.Timestamp(6)
-  updatedAt     DateTime     @default(now()) @db.Timestamp(6)
-  institution   institutions @relation(fields: [institutionId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_paper_author_bindings_institutionId_fkey")
-  paper         papers       @relation(fields: [paperId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_paper_author_bindings_paperId_fkey")
-  author        authors      @relation(fields: [authorId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_paper_author_bindings_authorId_fkey")
-  user          users        @relation("PaperAuthorBindingUser", fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_paper_author_bindings_userId_fkey")
-  bound_by      users        @relation("PaperAuthorBindingCreatedBy", fields: [boundBy], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_paper_author_bindings_boundBy_fkey")
+  id            String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  institutionId String             @db.Uuid
+  paperId       String             @db.Uuid
+  authorId      String             @db.Uuid
+  personId      String             @db.Uuid
+  boundBy       String             @db.Uuid
+  createdAt     DateTime           @default(now()) @db.Timestamp(6)
+  updatedAt     DateTime           @default(now()) @db.Timestamp(6)
+  institution   institutions       @relation(fields: [institutionId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_paper_author_bindings_institutionId_fkey")
+  paper         papers             @relation(fields: [paperId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_paper_author_bindings_paperId_fkey")
+  author        authors            @relation(fields: [authorId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_paper_author_bindings_authorId_fkey")
+  person        institution_people @relation(fields: [personId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_paper_author_bindings_personId_fkey")
+  bound_by      users              @relation("PaperAuthorBindingCreatedBy", fields: [boundBy], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_paper_author_bindings_boundBy_fkey")
 
   @@unique([institutionId, paperId, authorId], map: "inst_paper_author_bindings_inst_paper_author_uidx")
-  @@unique([institutionId, paperId, userId], map: "inst_paper_author_bindings_inst_paper_user_uidx")
+  @@unique([institutionId, paperId, personId], map: "inst_paper_author_bindings_inst_paper_person_uidx")
   @@index([institutionId])
   @@index([paperId])
-  @@index([userId])
+  @@index([personId])
 }
 
 model institution_org_nodes {
@@ -657,30 +643,65 @@ model institution_org_edges {
   @@index([toNodeId])
 }
 
-model institution_org_people {
-  id                      String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  institutionId           String                         @db.Uuid
-  key                     String                         @db.VarChar(100)
-  name                    String                         @db.VarChar(100)
-  email                   String?                        @db.VarChar(100)
-  externalId              String?                        @db.VarChar(64)
-  userId                  String?                        @db.Uuid
-  provisionId             String?                        @db.Uuid
-  is_provisioning_enabled Boolean                        @default(false)
-  is_active               Boolean                        @default(true)
+model institution_people {
+  id                      String                              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  institutionId           String                              @db.Uuid
+  key                     String                              @db.VarChar(100)
+  internalId              String                              @db.VarChar(100)
+  normalizedInternalId    String                              @db.VarChar(100)
+  name                    String                              @db.VarChar(100)
+  email                   String?                             @db.VarChar(100)
+  userId                  String?                             @db.Uuid
+  scholarId               String?                             @db.Uuid
+  provisionId             String?                             @db.Uuid
+  is_provisioning_enabled Boolean                             @default(false)
+  is_active               Boolean                             @default(true)
   metadata                Json?
-  createdAt               DateTime                       @default(now()) @db.Timestamp(6)
-  updatedAt               DateTime                       @default(now()) @db.Timestamp(6)
-  institution             institutions                   @relation(fields: [institutionId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_org_people_institutionId_fkey")
-  user                    users?                         @relation(fields: [userId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "institution_org_people_userId_fkey")
-  provision               institution_user_provisions?   @relation(fields: [provisionId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "institution_org_people_provisionId_fkey")
+  createdAt               DateTime                            @default(now()) @db.Timestamp(6)
+  updatedAt               DateTime                            @default(now()) @db.Timestamp(6)
+  userLinkedAt            DateTime?                           @db.Timestamp(6)
+  scholarLinkedAt         DateTime?                           @db.Timestamp(6)
+  institution             institutions                        @relation(fields: [institutionId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_people_institutionId_fkey")
+  user                    users?                              @relation(fields: [userId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "institution_people_userId_fkey")
+  scholar                 scholars?                           @relation(fields: [scholarId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "institution_people_scholarId_fkey")
+  provision               institution_user_provisions?        @relation(fields: [provisionId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "institution_people_provisionId_fkey")
   appointments            institution_org_appointments[]
+  paper_author_bindings   institution_paper_author_bindings[]
+  events                  institution_person_events[]
 
-  @@unique([institutionId, key], map: "institution_org_people_institutionId_key_idx")
+  @@unique([institutionId, key], map: "institution_people_institutionId_key_idx")
+  @@unique([institutionId, normalizedInternalId], map: "institution_people_inst_internal_id_idx")
+  @@unique([institutionId, userId], map: "institution_people_inst_user_idx")
+  @@unique([institutionId, scholarId], map: "institution_people_inst_scholar_idx")
+  @@unique([institutionId, provisionId], map: "institution_people_inst_provision_idx")
   @@index([institutionId])
-  @@index([institutionId, userId])
   @@index([institutionId, email])
   @@index([provisionId])
+  @@index([is_active])
+}
+
+model institution_person_events {
+  id             String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  institutionId  String              @db.Uuid
+  personId       String?             @db.Uuid
+  actorUserId    String?             @db.Uuid
+  event_type     String              @db.VarChar(64)
+  source         String              @default("system") @db.VarChar(64)
+  paperId        String?             @db.Uuid
+  authorId       String?             @db.Uuid
+  previousUserId String?             @db.Uuid
+  nextUserId     String?             @db.Uuid
+  createdAt      DateTime            @default(now()) @db.Timestamp(6)
+  institution    institutions        @relation(fields: [institutionId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_person_events_institutionId_fkey")
+  person         institution_people? @relation(fields: [personId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "institution_person_events_personId_fkey")
+  actor          users?              @relation("InstitutionPersonEventActor", fields: [actorUserId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "institution_person_events_actorUserId_fkey")
+  paper          papers?             @relation(fields: [paperId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "institution_person_events_paperId_fkey")
+  author         authors?            @relation(fields: [authorId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "institution_person_events_authorId_fkey")
+
+  @@index([institutionId, createdAt])
+  @@index([personId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([paperId])
 }
 
 model institution_org_positions {
@@ -720,7 +741,7 @@ model institution_org_appointments {
   createdAt     DateTime                  @default(now()) @db.Timestamp(6)
   updatedAt     DateTime                  @default(now()) @db.Timestamp(6)
   institution   institutions              @relation(fields: [institutionId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_org_appointments_institutionId_fkey")
-  person        institution_org_people    @relation(fields: [personId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_org_appointments_personId_fkey")
+  person        institution_people        @relation(fields: [personId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_org_appointments_personId_fkey")
   position      institution_org_positions @relation(fields: [positionId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_org_appointments_positionId_fkey")
 
   @@unique([institutionId, key], map: "institution_org_appointments_institutionId_key_idx")

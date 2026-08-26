@@ -3,6 +3,7 @@ import test from 'node:test'
 import Fastify, { type FastifyInstance } from 'fastify'
 import sensible from '@fastify/sensible'
 import jwtPlugin from '../src/plugins/global/jwt'
+import scholarTimelineAdminRoutes from '../src/routes/v1/scholar-timeline'
 import scholarTimelineRoutes from '../src/routes/v1/scholars'
 import type { ScholarTimelineGenerationMode } from '../src/utils/deployment'
 
@@ -123,6 +124,23 @@ const matchesStatus = (generation: StoredGeneration, status: unknown): boolean =
   return true
 }
 
+const matchesGenerationWhere = (
+  generation: StoredGeneration,
+  where: Record<string, unknown>,
+): boolean => {
+  if (!matchesStatus(generation, where.status)) {
+    return false
+  }
+  const scholarFilter = where.scholar_id
+  if (typeof scholarFilter === 'object' && scholarFilter !== null) {
+    const ids = Reflect.get(scholarFilter, 'in')
+    if (Array.isArray(ids) && !ids.includes(generation.scholar_id)) {
+      return false
+    }
+  }
+  return true
+}
+
 const buildPrismaMock = (state: TimelineRouteState) => {
   const prisma = {
     users: {
@@ -149,8 +167,9 @@ const buildPrismaMock = (state: TimelineRouteState) => {
         return role ? { role, can_review_content: false, can_import_data: false } : null
       },
     },
-    institution_scholar_mappings: {
+    institution_people: {
       findFirst: async () => (state.mapped ? { id: 'mapping' } : null),
+      findMany: async () => (state.mapped ? [{ scholarId: SCHOLAR_ID }] : []),
     },
     scholars: {
       findUnique: async (args: unknown) => {
@@ -232,7 +251,17 @@ const buildPrismaMock = (state: TimelineRouteState) => {
           }) ?? null
         )
       },
-      count: async () => 0,
+      findMany: async (args: unknown) => {
+        const where = Reflect.get(args as object, 'where') as Record<string, unknown>
+        return state.generations
+          .filter((generation) => matchesGenerationWhere(generation, where))
+          .map((generation) => ({ id: generation.id }))
+      },
+      count: async (args: unknown) => {
+        const where = Reflect.get(args as object, 'where') as Record<string, unknown>
+        return state.generations.filter((generation) => matchesGenerationWhere(generation, where))
+          .length
+      },
       create: async (args: unknown) => {
         const data = Reflect.get(args as object, 'data') as Partial<StoredGeneration> & {
           scholar_id: string
@@ -295,7 +324,7 @@ const buildPrismaMock = (state: TimelineRouteState) => {
 
 const buildApp = async (
   mode: ScholarTimelineGenerationMode,
-  deploymentMode: 'public' | 'private' = 'public',
+  managementMode: 'airalogy_managed' | 'self_hosted' = 'airalogy_managed',
   stateOverrides: Partial<TimelineRouteState> = {},
 ): Promise<{ app: FastifyInstance; state: TimelineRouteState }> => {
   const state: TimelineRouteState = {
@@ -322,15 +351,17 @@ const buildApp = async (
     TIMELINE_DAILY_USER_LIMIT: 3,
   } as never)
   app.decorate('deployment', {
-    mode: deploymentMode,
+    managementMode,
+    institution: { slug: 'test-institution' },
     paperLibrary: {
-      fixedInstitutionSlug: deploymentMode === 'private' ? 'test-institution' : null,
+      fixedInstitutionSlug: 'test-institution',
     },
     scholarTimeline: { generationMode: mode },
   } as never)
   app.decorate('prisma', buildPrismaMock(state) as never)
   await app.register(jwtPlugin)
   await app.register(scholarTimelineRoutes, { prefix: '/v1/scholars' })
+  await app.register(scholarTimelineAdminRoutes, { prefix: '/v1/scholar-timeline' })
   await app.ready()
   return { app, state }
 }
@@ -371,6 +402,39 @@ test('timeline generation modes enforce disabled, request-only, preview, and adm
       }
     })
   }
+})
+
+test('even platform administrators cannot generate a timeline for an unmapped scholar', async (t) => {
+  const { app } = await buildApp('admin', 'airalogy_managed', { mapped: false })
+  t.after(async () => app.close())
+
+  const response = await createGeneration(app, ADMIN_ID, 'unmapped-scholar')
+  assert.equal(response.statusCode, 403)
+})
+
+test('the administrator timeline queue is limited to the configured institution', async (t) => {
+  const inScope = makeGeneration('77777777-7777-4777-8777-777777777777', 'ready', USER_ID)
+  const outOfScope = {
+    ...makeGeneration('88888888-8888-4888-8888-888888888888', 'ready', USER_ID),
+    scholar_id: '99999999-9999-4999-8999-999999999999',
+  }
+  const { app } = await buildApp('admin', 'airalogy_managed', {
+    generations: [inScope, outOfScope],
+  })
+  t.after(async () => app.close())
+
+  const response = await app.inject({
+    method: 'GET',
+    url: '/v1/scholar-timeline/generations',
+    headers: userHeaders(app, ADMIN_ID),
+  })
+
+  assert.equal(response.statusCode, 200)
+  assert.equal(response.json().data.total, 1)
+  assert.deepEqual(
+    response.json().data.items.map((item: { id: string }) => item.id),
+    [inScope.id],
+  )
 })
 
 test('ordinary users can read only previews attached to their account', async (t) => {
@@ -436,9 +500,9 @@ test('integration JWTs cannot access timeline generation endpoints', async (t) =
   assert.equal(response.statusCode, 403)
 })
 
-test('publication requires a platform admin publicly or mapped owner/admin privately', async (t) => {
+test('publication requires a platform admin when managed or mapped owner/admin when self-hosted', async (t) => {
   const publicGenerationId = '88888888-8888-4888-8888-888888888888'
-  const publicSetup = await buildApp('admin', 'public', {
+  const publicSetup = await buildApp('admin', 'airalogy_managed', {
     generations: [makeGeneration(publicGenerationId, 'ready', USER_ID)],
   })
   t.after(async () => publicSetup.app.close())
@@ -459,7 +523,7 @@ test('publication requires a platform admin publicly or mapped owner/admin priva
   assert.equal(admin.json().data.status, 'published')
 
   const privateGenerationId = '99999999-9999-4999-8999-999999999999'
-  const privateSetup = await buildApp('admin', 'private', {
+  const privateSetup = await buildApp('admin', 'self_hosted', {
     institutionRoles: { [USER_ID]: 'owner' },
     generations: [makeGeneration(privateGenerationId, 'ready', USER_ID)],
   })

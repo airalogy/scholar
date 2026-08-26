@@ -40,6 +40,7 @@ declare module 'fastify' {
 
   interface FastifyContextConfig {
     publicRoute?: boolean
+    publicContentRoute?: boolean
     allowIntegrationAuth?: boolean
     integrationScopes?: IntegrationScope[]
   }
@@ -117,7 +118,14 @@ export default fp(async (fastify: FastifyInstance) => {
   })
 
   fastify.addHook('onRequest', async (request) => {
-    if (isPublicRoute(request.url, request.routeOptions.config.publicRoute === true)) {
+    const isConfiguredPublicRoute = isPublicRoute(
+      request.url,
+      request.routeOptions.config.publicRoute === true,
+    )
+    const requiresContentLogin =
+      request.routeOptions.config.publicContentRoute === true &&
+      fastify.deployment.contentAccess === 'authenticated'
+    if (isConfiguredPublicRoute && !requiresContentLogin) {
       return
     }
 

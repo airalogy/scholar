@@ -17,6 +17,7 @@ import { verifySignedStorageAccessToken } from '../../utils/storage-access'
 import { assertTokenUserExists } from '../../utils/auth'
 import { getInstitutionAccessById } from '../../utils/permissions'
 import { lockMutationScope } from '../../utils/advisory-lock'
+import { assertConfiguredInstitutionId } from '../../utils/institution-scope'
 
 const DOWNLOAD_LIMIT_PER_10_MINUTES = 20
 const DOWNLOAD_LIMIT_PER_DAY = 100
@@ -69,6 +70,7 @@ const resolveUploadPolicy = async (
     if (!UUID_RE.test(institutionId)) {
       throw fastify.httpErrors.badRequest('A valid institution_id is required for document uploads')
     }
+    await assertConfiguredInstitutionId(fastify, institutionId)
     const access = await getInstitutionAccessById(fastify, userId, institutionId)
     if (access.platform_role !== 'platform_admin' && access.institution_role === null) {
       throw fastify.httpErrors.forbidden('You can only upload documents for your institution')
@@ -195,6 +197,9 @@ const assertCanAccessProtectedOssFile = async (
   })
   if (!ossFile) {
     throw fastify.httpErrors.notFound('File not found')
+  }
+  if (ossFile.institutionId) {
+    await assertConfiguredInstitutionId(fastify, ossFile.institutionId)
   }
 
   const { submission, claim, thesisVersions } = await resolveProtectedFileContext(fastify, fileId)

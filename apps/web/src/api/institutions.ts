@@ -87,6 +87,8 @@ export interface InstitutionLabItem {
 
 export interface InstitutionMembershipItem {
   userId: string
+  institutionPersonId: string | null
+  internalId: string | null
   name: string
   email: string
   avatar: string | null
@@ -102,15 +104,30 @@ export interface InstitutionMembershipItem {
 export interface InstitutionPaperBoundMember {
   bindingId: string
   paperId: string
-  userId: string
+  institutionPersonId: string
+  userId: string | null
   name: string
   avatar: string | null
   authorId: string
   authorName: string
 }
 
+export interface InstitutionPersonItem {
+  id: string
+  key: string
+  internalId: string
+  name: string
+  email: string | null
+  userId: string | null
+  scholarId: string | null
+  isActive: boolean
+}
+
+interface InstitutionOrgStructurePeopleResponse {
+  people: InstitutionPersonItem[]
+}
+
 export type InstitutionProvisionStatus = 'pending_activation' | 'claimed' | 'disabled'
-export type InstitutionJoinRequestStatus = 'pending' | 'approved' | 'rejected'
 
 export interface InstitutionProvisionItem {
   id: string
@@ -119,7 +136,7 @@ export interface InstitutionProvisionItem {
   role: InstitutionRole
   canReviewContent: boolean
   canImportData: boolean
-  externalId: string | null
+  internalId: string | null
   college: string | null
   major: string | null
   laboratory: string | null
@@ -129,26 +146,6 @@ export interface InstitutionProvisionItem {
   claimedUserName: string | null
   claimedAt: string | null
   expiresAt: string | null
-  createdAt: string
-  updatedAt: string
-}
-
-export interface InstitutionJoinRequestItem {
-  id: string
-  userId: string
-  userName: string
-  userEmail: string
-  userAvatar: string | null
-  userDegree: string | null
-  userMajor: string | null
-  userCollege: string | null
-  userLaboratory: string | null
-  status: InstitutionJoinRequestStatus
-  reason: string | null
-  reviewNotes: string | null
-  reviewedBy: string | null
-  reviewedByName: string | null
-  reviewedAt: string | null
   createdAt: string
   updatedAt: string
 }
@@ -181,16 +178,8 @@ interface InstitutionProvisionListResponse {
   items: InstitutionProvisionItem[]
 }
 
-interface InstitutionJoinRequestListResponse {
-  items: InstitutionJoinRequestItem[]
-}
-
 interface InstitutionPaperBoundMemberListResponse {
   items: InstitutionPaperBoundMember[]
-}
-
-interface MyInstitutionJoinRequestResponse {
-  item: InstitutionJoinRequestItem | null
 }
 
 export interface UpdateInstitutionBody {
@@ -201,30 +190,26 @@ export interface UpdateInstitutionBody {
 export interface UpsertInstitutionProvisionBody {
   email: string
   name: string
+  internalId: string
   role: InstitutionRole
   can_review_content?: boolean
   can_import_data?: boolean
-  externalId?: string
   college?: string
   major?: string
   laboratory?: string
   expiresInDays?: number
 }
 
-export interface CreateInstitutionJoinRequestBody {
-  reason?: string
-}
-
-export interface ReviewInstitutionJoinRequestBody {
-  status: 'approved' | 'rejected'
-  notes?: string
-}
-
-export interface BindInstitutionPaperAuthorBody {
+interface BindInstitutionPaperAuthorBase {
   paperId: string
   authorId: string
-  userId: string
 }
+
+export type BindInstitutionPaperAuthorBody = BindInstitutionPaperAuthorBase & (
+  | { institutionPersonId: string }
+  | { institutionInternalId: string }
+  | { scholarId: string }
+)
 
 export type InstitutionImportKind = 'papers' | 'scholars'
 export type InstitutionImportStatus =
@@ -371,10 +356,19 @@ export const listInstitutionMemberships = (slug: string): Promise<InstitutionMem
   ).then((r) => r.data.items)
 }
 
+export const listInstitutionPeople = (slug: string): Promise<InstitutionPersonItem[]> => {
+  return apiClient
+    .get<InstitutionOrgStructurePeopleResponse>(
+      `/institutions/${encodeURIComponent(slug)}/org-structure`,
+    )
+    .then((response) => response.data.people.filter((person) => person.isActive))
+}
+
 export const upsertInstitutionMembership = (
   slug: string,
   payload: {
     userId: string
+    internalId?: string
     role: InstitutionRole
     can_review_content?: boolean
     can_import_data?: boolean
@@ -544,41 +538,6 @@ export const revokeInstitutionApiCredential = async (
 export const listInstitutionProvisions = (slug: string): Promise<InstitutionProvisionItem[]> => {
   return apiClient.get<InstitutionProvisionListResponse>(
     `/institutions/${encodeURIComponent(slug)}/provisions`,
-  ).then((r) => r.data.items)
-}
-
-export const getMyInstitutionJoinRequest = (
-  slug: string,
-): Promise<InstitutionJoinRequestItem | null> => {
-  return apiClient.get<MyInstitutionJoinRequestResponse>(
-    `/institutions/${encodeURIComponent(slug)}/join-requests/me`,
-  ).then((r) => r.data.item)
-}
-
-export const createInstitutionJoinRequest = (
-  slug: string,
-  payload: CreateInstitutionJoinRequestBody,
-): Promise<InstitutionJoinRequestItem | null> => {
-  return apiClient.post<MyInstitutionJoinRequestResponse>(
-    `/institutions/${encodeURIComponent(slug)}/join-requests`,
-    payload,
-  ).then((r) => r.data.item)
-}
-
-export const listInstitutionJoinRequests = (slug: string): Promise<InstitutionJoinRequestItem[]> => {
-  return apiClient.get<InstitutionJoinRequestListResponse>(
-    `/institutions/${encodeURIComponent(slug)}/join-requests`,
-  ).then((r) => r.data.items)
-}
-
-export const reviewInstitutionJoinRequest = (
-  slug: string,
-  requestId: string,
-  payload: ReviewInstitutionJoinRequestBody,
-): Promise<InstitutionJoinRequestItem[]> => {
-  return apiClient.post<InstitutionJoinRequestListResponse>(
-    `/institutions/${encodeURIComponent(slug)}/join-requests/${encodeURIComponent(requestId)}/review`,
-    payload,
   ).then((r) => r.data.items)
 }
 

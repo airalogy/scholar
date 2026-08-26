@@ -394,6 +394,21 @@ preflight() {
   ensure_env_file
   ensure_secret JWT_SECRET 32
   ensure_secret DATABASE_URL 20
+  institution_slug=${INSTITUTION_SLUG:-$(read_env_value INSTITUTION_SLUG)}
+  [ -n "$institution_slug" ] || fail 'INSTITUTION_SLUG is required'
+  case "$institution_slug" in
+    *replace-with*) fail 'INSTITUTION_SLUG still contains the example placeholder' ;;
+  esac
+  content_access_mode=${CONTENT_ACCESS_MODE:-$(read_env_value CONTENT_ACCESS_MODE)}
+  case "${content_access_mode:-public}" in
+    public|authenticated) ;;
+    *) fail 'CONTENT_ACCESS_MODE must be public or authenticated' ;;
+  esac
+  management_mode=${MANAGEMENT_MODE:-$(read_env_value MANAGEMENT_MODE)}
+  case "$management_mode" in
+    airalogy_managed|self_hosted) ;;
+    *) fail 'MANAGEMENT_MODE must be airalogy_managed or self_hosted' ;;
+  esac
   verify_release_metadata
   validate_docker_network
 
@@ -412,9 +427,7 @@ preflight() {
   institution_login_enabled=${ENABLE_INSTITUTION_LOGIN:-$(read_env_value ENABLE_INSTITUTION_LOGIN)}
   case "${institution_login_enabled:-false}" in
     true)
-      institution_login_slug=${INSTITUTION_LOGIN_INSTITUTION_SLUG:-$(read_env_value INSTITUTION_LOGIN_INSTITUTION_SLUG)}
-      institution_login_slug=${institution_login_slug:-$(read_env_value PRIVATE_INSTITUTION_SLUG)}
-      [ -n "$institution_login_slug" ] || fail 'INSTITUTION_LOGIN_INSTITUTION_SLUG is required when institution login is enabled'
+      institution_login_slug=$institution_slug
       case "$institution_login_slug" in
         *replace-with*) fail 'Institution login slug still contains the example placeholder' ;;
       esac
@@ -435,7 +448,7 @@ preflight() {
       ensure_secret INSTITUTION_SSO_CLIENT_ID 1
       ensure_secret INSTITUTION_SSO_CLIENT_SECRET 1
       ensure_secret INSTITUTION_SSO_REDIRECT_URI 8
-      ensure_secret INSTITUTION_SSO_EXTERNAL_ID_FIELD 1
+      ensure_secret INSTITUTION_SSO_INTERNAL_ID_FIELD 1
       ensure_secret INSTITUTION_SSO_EMAIL_FIELD 1
       ensure_secret INSTITUTION_SSO_NAME_FIELD 1
       institution_sso_userinfo_token_mode=${INSTITUTION_SSO_USERINFO_TOKEN_MODE:-$(read_env_value INSTITUTION_SSO_USERINFO_TOKEN_MODE)}
@@ -696,6 +709,7 @@ prompt_value() {
     SCHOLAR_BOOTSTRAP_OWNER_NAME) current_value=${SCHOLAR_BOOTSTRAP_OWNER_NAME:-} ;;
     SCHOLAR_BOOTSTRAP_OWNER_EMAIL) current_value=${SCHOLAR_BOOTSTRAP_OWNER_EMAIL:-} ;;
     SCHOLAR_BOOTSTRAP_OWNER_USERNAME) current_value=${SCHOLAR_BOOTSTRAP_OWNER_USERNAME:-} ;;
+    SCHOLAR_BOOTSTRAP_OWNER_INTERNAL_ID) current_value=${SCHOLAR_BOOTSTRAP_OWNER_INTERNAL_ID:-} ;;
     *) fail "Unsupported prompt variable: $variable_name" ;;
   esac
   if [ -z "$current_value" ]; then
@@ -708,16 +722,19 @@ prompt_value() {
     SCHOLAR_BOOTSTRAP_OWNER_NAME) SCHOLAR_BOOTSTRAP_OWNER_NAME=$current_value ;;
     SCHOLAR_BOOTSTRAP_OWNER_EMAIL) SCHOLAR_BOOTSTRAP_OWNER_EMAIL=$current_value ;;
     SCHOLAR_BOOTSTRAP_OWNER_USERNAME) SCHOLAR_BOOTSTRAP_OWNER_USERNAME=$current_value ;;
+    SCHOLAR_BOOTSTRAP_OWNER_INTERNAL_ID) SCHOLAR_BOOTSTRAP_OWNER_INTERNAL_ID=$current_value ;;
   esac
 }
 
 bootstrap() {
   ensure_env_file
+  SCHOLAR_BOOTSTRAP_INSTITUTION_SLUG=${SCHOLAR_BOOTSTRAP_INSTITUTION_SLUG:-$(read_env_value INSTITUTION_SLUG)}
   prompt_value SCHOLAR_BOOTSTRAP_INSTITUTION_NAME 'Institution name'
   prompt_value SCHOLAR_BOOTSTRAP_INSTITUTION_SLUG 'Institution slug'
   prompt_value SCHOLAR_BOOTSTRAP_OWNER_NAME 'Owner display name'
   prompt_value SCHOLAR_BOOTSTRAP_OWNER_EMAIL 'Owner email'
   prompt_value SCHOLAR_BOOTSTRAP_OWNER_USERNAME 'Owner username'
+  prompt_value SCHOLAR_BOOTSTRAP_OWNER_INTERNAL_ID 'Owner institution internal ID'
 
   if [ -z "${SCHOLAR_BOOTSTRAP_OWNER_PASSWORD:-}" ]; then
     printf '%s: ' 'Owner password (at least 12 characters)' >&2
@@ -735,6 +752,7 @@ bootstrap() {
     -e SCHOLAR_BOOTSTRAP_OWNER_NAME="$SCHOLAR_BOOTSTRAP_OWNER_NAME" \
     -e SCHOLAR_BOOTSTRAP_OWNER_EMAIL="$SCHOLAR_BOOTSTRAP_OWNER_EMAIL" \
     -e SCHOLAR_BOOTSTRAP_OWNER_USERNAME="$SCHOLAR_BOOTSTRAP_OWNER_USERNAME" \
+    -e SCHOLAR_BOOTSTRAP_OWNER_INTERNAL_ID="$SCHOLAR_BOOTSTRAP_OWNER_INTERNAL_ID" \
     -e SCHOLAR_BOOTSTRAP_OWNER_PASSWORD="$SCHOLAR_BOOTSTRAP_OWNER_PASSWORD" \
     -e SCHOLAR_BOOTSTRAP_PLATFORM_ADMIN="${SCHOLAR_BOOTSTRAP_PLATFORM_ADMIN:-false}" \
     api node dist/src/scripts/bootstrap-deployment.js

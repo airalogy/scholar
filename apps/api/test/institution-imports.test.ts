@@ -54,18 +54,25 @@ interface StoredImportItem {
 
 interface ImportTestState {
   canImportData: boolean
-  deploymentMode: 'public' | 'private'
+  managementMode: 'airalogy_managed' | 'self_hosted'
   imports: StoredImport[]
   items: StoredImportItem[]
   importCreateCount: number
 }
 
 const buildImportPrismaMock = (state: ImportTestState) => {
-  const scholarMappings: Array<{
+  const institutionPeople: Array<{
     id: string
     institutionId: string
-    externalId: string
-    scholarId: string
+    key: string
+    internalId: string
+    normalizedInternalId: string
+    scholarId: string | null
+    userId: string | null
+    provisionId: string | null
+    email: string | null
+    userLinkedAt: Date | null
+    scholarLinkedAt: Date | null
     createdAt: Date
     updatedAt: Date
   }> = []
@@ -267,34 +274,39 @@ const buildImportPrismaMock = (state: ImportTestState) => {
         }).length
       },
     },
-    institution_scholar_mappings: {
+    institution_people: {
       findUnique: async ({
         where,
       }: {
         where: {
-          institutionId_externalId: {
+          institutionId_normalizedInternalId: {
             institutionId: string
-            externalId: string
+            normalizedInternalId: string
           }
         }
       }) => {
         return (
-          scholarMappings.find((mapping) => {
+          institutionPeople.find((person) => {
             return (
-              mapping.institutionId === where.institutionId_externalId.institutionId &&
-              mapping.externalId === where.institutionId_externalId.externalId
+              person.institutionId === where.institutionId_normalizedInternalId.institutionId &&
+              person.normalizedInternalId ===
+                where.institutionId_normalizedInternalId.normalizedInternalId
             )
           }) ?? null
         )
       },
-      create: async ({ data }: { data: Omit<(typeof scholarMappings)[number], 'id'> }) => {
-        const mapping = {
+      findFirst: async () => null,
+      create: async ({ data }: { data: Omit<(typeof institutionPeople)[number], 'id'> }) => {
+        const person = {
           ...data,
           id: 'cccccccc-cccc-4ccc-8ccc-000000000001',
         }
-        scholarMappings.push(mapping)
-        return mapping
+        institutionPeople.push(person)
+        return person
       },
+    },
+    institution_person_events: {
+      create: async ({ data }: { data: object }) => data,
     },
     scholars: {
       create: async ({
@@ -353,9 +365,10 @@ const buildImportApp = async (state: ImportTestState): Promise<FastifyInstance> 
   app.decorate('config', { JWT_SECRET } as never)
   app.decorate('prisma', buildImportPrismaMock(state) as never)
   app.decorate('deployment', {
-    mode: state.deploymentMode,
+    managementMode: state.managementMode,
+    institution: { slug: 'test' },
     paperLibrary: {
-      fixedInstitutionSlug: null,
+      fixedInstitutionSlug: 'test',
     },
   } as never)
   await app.register(jwtPlugin)
@@ -385,10 +398,10 @@ test('DOIs are normalized consistently for idempotent paper identity', () => {
   assert.equal(normalizeDoi('doi: 10.1000/ABC'), '10.1000/abc')
 })
 
-test('public imports enforce permission, institution scope, validation, and idempotency', async (t) => {
+test('managed imports enforce permission, institution scope, validation, and idempotency', async (t) => {
   const state: ImportTestState = {
     canImportData: false,
-    deploymentMode: 'public',
+    managementMode: 'airalogy_managed',
     imports: [],
     items: [],
     importCreateCount: 0,
@@ -427,11 +440,11 @@ test('public imports enforce permission, institution scope, validation, and idem
       headers: buildUserHeaders(app, 'cross-inst-test'),
       payload: body,
     })
-    assert.equal(response.statusCode, 403)
+    assert.equal(response.statusCode, 404)
   })
 
   let firstImportId = ''
-  await t.test('public scholar imports remain pending with partial row errors', async () => {
+  await t.test('managed scholar imports remain pending with partial row errors', async () => {
     const response = await app.inject({
       method: 'POST',
       url: '/v1/institutions/test/imports/scholars',
@@ -537,10 +550,10 @@ test('public imports enforce permission, institution scope, validation, and idem
   })
 })
 
-test('private scholar imports apply immediately through external_id mapping', async (t) => {
+test('self-hosted scholar imports apply immediately through external_id mapping', async (t) => {
   const state: ImportTestState = {
     canImportData: true,
-    deploymentMode: 'private',
+    managementMode: 'self_hosted',
     imports: [],
     items: [],
     importCreateCount: 0,

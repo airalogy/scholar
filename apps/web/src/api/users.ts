@@ -43,6 +43,22 @@ export interface UserLabMembershipItem {
   role: string
 }
 
+export interface UserInstitutionIdentity {
+  id: string
+  institutionId: string
+  institutionName: string
+  internalId: string
+  scholarId: string | null
+}
+
+export interface UserInstitutionPaper {
+  id: string
+  title: string
+  doi: string
+  publishYear: number | null
+  authorName: string
+}
+
 export interface UserSearchItem {
   id: string
   username: string
@@ -79,6 +95,8 @@ export interface UserProfile {
   manageable_institutions: ManageableInstitutionItem[]
   institution_memberships: UserInstitutionMembershipItem[]
   lab_memberships: UserLabMembershipItem[]
+  institution_identity: UserInstitutionIdentity | null
+  institution_papers: UserInstitutionPaper[]
 }
 
 export interface UpdateUserProfileBody {

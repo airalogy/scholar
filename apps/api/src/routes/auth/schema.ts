@@ -56,7 +56,7 @@ export const InstitutionProvisionPreviewSchema = Type.Object({
   email: Type.String({ format: 'email' }),
   name: Type.String(),
   role: Type.String(),
-  externalId: Type.Union([Type.String(), Type.Null()]),
+  internalId: Type.String(),
   college: Type.Union([Type.String(), Type.Null()]),
   major: Type.Union([Type.String(), Type.Null()]),
   laboratory: Type.Union([Type.String(), Type.Null()]),
@@ -92,7 +92,6 @@ export type OauthCallbackResponse = Static<typeof OauthCallbackResponseSchema>
 
 export const InstitutionAuthMethodSchema = Type.Union([
   Type.Literal('provision_token'),
-  Type.Literal('platform_account'),
   Type.Literal('sso'),
 ])
 
@@ -118,8 +117,6 @@ export const AuthInstitutionSchema = Type.Object({
 export const AuthInstitutionListResponseSchema = Type.Object({
   items: Type.Array(AuthInstitutionSchema),
 })
-
-export const DeploymentModeSchema = Type.Union([Type.Literal('public'), Type.Literal('private')])
 
 export const PublicAuthConfigSchema = Type.Object({
   enablePasswordSignin: Type.Boolean(),
@@ -152,7 +149,7 @@ export const PublicNavigationConfigSchema = Type.Object({
 
 export const PublicPaperLibraryConfigSchema = Type.Object({
   defaultPath: Type.String({ minLength: 1 }),
-  fixedInstitutionSlug: Type.Union([Type.String(), Type.Null()]),
+  fixedInstitutionSlug: Type.String({ minLength: 1 }),
 })
 
 export const PublicScholarTimelineConfigSchema = Type.Object({
@@ -165,7 +162,12 @@ export const PublicScholarTimelineConfigSchema = Type.Object({
 })
 
 export const PublicAppConfigSchema = Type.Object({
-  deploymentMode: DeploymentModeSchema,
+  tenancyMode: Type.Literal('single_institution'),
+  managementMode: Type.Union([Type.Literal('airalogy_managed'), Type.Literal('self_hosted')]),
+  contentAccess: Type.Union([Type.Literal('public'), Type.Literal('authenticated')]),
+  institution: Type.Object({
+    slug: Type.String({ minLength: 1 }),
+  }),
   auth: PublicAuthConfigSchema,
   features: PublicFeatureConfigSchema,
   branding: PublicBrandingConfigSchema,

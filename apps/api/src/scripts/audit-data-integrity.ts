@@ -80,9 +80,19 @@ const run = async (): Promise<void> => {
     LEFT JOIN "papers" parent ON parent."id" = child."paperId"
     WHERE parent."id" IS NULL
     UNION ALL
-    SELECT 'institution_scholar_mappings.orphan_scholar', count(*)::bigint
-    FROM "institution_scholar_mappings" child
+    SELECT 'institution_people.orphan_scholar', count(*)::bigint
+    FROM "institution_people" child
     LEFT JOIN "scholars" parent ON parent."id" = child."scholarId"
+    WHERE child."scholarId" IS NOT NULL AND parent."id" IS NULL
+    UNION ALL
+    SELECT 'institution_people.orphan_user', count(*)::bigint
+    FROM "institution_people" child
+    LEFT JOIN "users" parent ON parent."id" = child."userId"
+    WHERE child."userId" IS NOT NULL AND parent."id" IS NULL
+    UNION ALL
+    SELECT 'institution_paper_author_bindings.orphan_person', count(*)::bigint
+    FROM "institution_paper_author_bindings" child
+    LEFT JOIN "institution_people" parent ON parent."id" = child."personId"
     WHERE parent."id" IS NULL
     UNION ALL
     SELECT 'institution_memberships.orphan_institution', count(*)::bigint

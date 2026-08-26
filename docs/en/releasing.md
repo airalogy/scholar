@@ -20,8 +20,8 @@ Run the standard repository checks before creating a tag:
 pnpm install --frozen-lockfile
 pnpm audit:prod
 pnpm license:check
+pnpm release:source:manifest
 pnpm check
-pnpm release:source:check
 pnpm release:check
 ```
 
@@ -32,7 +32,7 @@ RELEASE_SOURCE_DATABASE_URL='postgresql://.../scholar?schema=release_source' \
   pnpm release:source:verify
 ```
 
-The release-source check reconstructs the initial migration from the current Prisma schema, scans source files for credential-shaped values, validates the changelog baseline, and records file hashes in `RELEASE-SOURCE-MANIFEST.json`.
+The manifest command reconstructs the initial migration from the current Prisma schema, scans source files for credential-shaped values, validates the changelog baseline, and records file hashes in `RELEASE-SOURCE-MANIFEST.json`. The release-source check fails when the committed manifest no longer matches the source tree.
 
 ## Create a release
 

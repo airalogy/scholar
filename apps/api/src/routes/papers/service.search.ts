@@ -5,6 +5,7 @@ import type { ClaimRecord } from './service.shared'
 import { tokenizeText } from '../../utils/document'
 import { embedTexts } from '../../ai/embeddings'
 import { formatPapers } from './service.paper'
+import { getConfiguredInstitution } from '../../utils/institution-scope'
 
 export async function searchPapers(fastify: FastifyInstance, userId: string, query: SearchQuery) {
   const limit = query.limit ?? 20
@@ -28,6 +29,7 @@ async function searchByFulltext(
   limit: number,
   offset: number,
 ) {
+  const institution = await getConfiguredInstitution(fastify)
   const queryText = tokenizeText(q)
     .filter((token) => token.trim())
     .join(' ')
@@ -48,14 +50,16 @@ async function searchByFulltext(
              JOIN content_review_cases review_case ON review_case.id = claim."reviewCaseId"
              WHERE claim."paperId" = e."paperId"
                AND review_case.status = 'approved'
+               AND claim."institutionId" = $2
            )
        )
        SELECT "paperId", text, score
        FROM ranked
        WHERE row_number = 1
        ORDER BY score DESC, "paperId"
-       LIMIT $2 OFFSET $3`,
+       LIMIT $3 OFFSET $4`,
       queryText,
+      institution.id,
       limit,
       offset,
     )
@@ -70,6 +74,7 @@ async function searchByVector(
   limit: number,
   offset: number,
 ) {
+  const institution = await getConfiguredInstitution(fastify)
   const [queryEmbedding] = await embedTexts(fastify, [q])
   const vectorStr = `[${queryEmbedding.join(',')}]`
 
@@ -90,14 +95,16 @@ async function searchByVector(
              JOIN content_review_cases review_case ON review_case.id = claim."reviewCaseId"
              WHERE claim."paperId" = e."paperId"
                AND review_case.status = 'approved'
+               AND claim."institutionId" = $2
            )
        )
        SELECT "paperId", text, score
        FROM ranked
        WHERE row_number = 1
        ORDER BY score DESC, "paperId"
-       LIMIT $2 OFFSET $3`,
+       LIMIT $3 OFFSET $4`,
       vectorStr,
+      institution.id,
       limit,
       offset,
     )
@@ -110,6 +117,7 @@ async function hydrateSearchResults(
   userId: string,
   results: Array<{ paperId: string; text: string; score: number }>,
 ) {
+  const institution = await getConfiguredInstitution(fastify)
   const paperIds = [...new Set(results.map((result) => result.paperId))]
   const approvedClaims =
     paperIds.length > 0
@@ -133,6 +141,7 @@ async function hydrateSearchResults(
         FROM paper_claims pc
         JOIN content_review_cases crc ON crc.id = pc."reviewCaseId"
         WHERE pc."paperId" IN (${Prisma.join(paperIds)})
+          AND pc."institutionId" = ${institution.id}
           AND crc.status = 'approved'
         ORDER BY pc."paperId", crc."decidedAt" DESC, pc."updatedAt" DESC, pc."createdAt" DESC
       `)

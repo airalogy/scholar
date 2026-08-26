@@ -12,7 +12,7 @@ const authorRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.get(
     '/',
     {
-      config: { publicRoute: true },
+      config: { publicRoute: true, publicContentRoute: true },
       schema: {
         tags: ['authors'],
         querystring: AuthorSearchQuerySchema,
@@ -28,7 +28,7 @@ const authorRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.get(
     '/:id',
     {
-      config: { publicRoute: true },
+      config: { publicRoute: true, publicContentRoute: true },
       schema: {
         tags: ['authors'],
         params: AuthorParamsSchema,

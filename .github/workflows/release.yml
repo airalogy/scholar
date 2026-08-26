@@ -155,11 +155,12 @@ jobs:
           merge-multiple: true
       - name: Assemble immutable Scholar release
         run: |
-          mkdir -p release-stage/docs
+          mkdir -p release-stage/docs/en release-stage/docs/zh
           cp -R deploy release-stage/deploy
           cp README.md release-stage/README.md
           cp README.zh-CN.md release-stage/README.zh-CN.md
-          cp docs/private-deployment.md release-stage/docs/private-deployment.md
+          cp docs/en/deployment.md release-stage/docs/en/deployment.md
+          cp docs/zh/deployment.md release-stage/docs/zh/deployment.md
           cp LICENSE NOTICE TRADEMARKS.md ASSETS.md SECURITY.md CHANGELOG.md CHANGELOG.zh-CN.md VERSION release-stage/
           node scripts/create-release-metadata.mjs \
             --metadata-directory image-metadata \
@@ -183,7 +184,7 @@ jobs:
             -e "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$database_password/" \
             -e "s|^DATABASE_URL=.*|DATABASE_URL=postgresql://scholar:$database_password@postgres:5432/scholar?schema=public|" \
             -e "s/^JWT_SECRET=.*/JWT_SECRET=$jwt_secret/" \
-            -e 's/^PRIVATE_INSTITUTION_SLUG=.*/PRIVATE_INSTITUTION_SLUG=release-smoke/' \
+            -e 's/^INSTITUTION_SLUG=.*/INSTITUTION_SLUG=release-smoke/' \
             -e 's|^OPENAI_BASE_URL=.*|OPENAI_BASE_URL=https://models.example.invalid/v1|' \
             -e 's/^OPENAI_API_KEY=.*/OPENAI_API_KEY=release-smoke-model-key/' \
             -e "s|^SCHOLAR_STATE_DIR=.*|SCHOLAR_STATE_DIR=$RUNNER_TEMP/$smoke_project-state|" \

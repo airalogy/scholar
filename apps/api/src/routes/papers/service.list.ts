@@ -12,6 +12,7 @@ import {
   normalizeSearchText,
 } from './service.shared'
 import { formatPapers } from './service.paper'
+import { assertConfiguredInstitutionId } from '../../utils/institution-scope'
 
 const resolvePaperListScope = async (
   fastify: FastifyInstance,
@@ -19,8 +20,8 @@ const resolvePaperListScope = async (
   query: ListQuery,
 ): Promise<ResolvedPaperListScope> => {
   const scope = normalizePaperBrowseScope(query.scope)
-  let institutionId = query.institution_id ?? null
-  let labId = query.lab_id ?? null
+  const institutionId = await assertConfiguredInstitutionId(fastify, query.institution_id)
+  const labId = query.lab_id ?? null
   let labInstitutionId: string | null = null
   let institutionAccess: Awaited<ReturnType<typeof getInstitutionAccessById>> | null = null
   let platformRole: Awaited<ReturnType<typeof getUserPlatformRole>> | null = null
@@ -48,25 +49,10 @@ const resolvePaperListScope = async (
     }
 
     labInstitutionId = lab.institutionId ?? null
-    if (institutionId && labInstitutionId && institutionId !== labInstitutionId) {
+    if (labInstitutionId !== institutionId) {
       throw fastify.httpErrors.badRequest(
         'The selected lab does not belong to the selected institution',
       )
-    }
-  }
-
-  if (!institutionId && labInstitutionId) {
-    institutionId = labInstitutionId
-  }
-
-  if (institutionId) {
-    const institution = await fastify.prisma.institutions.findUnique({
-      where: { id: institutionId },
-      select: { id: true },
-    })
-
-    if (!institution) {
-      throw fastify.httpErrors.notFound('Institution not found')
     }
   }
 

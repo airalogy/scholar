@@ -214,7 +214,7 @@ export const importPapers = async (
   context: ImportRequestContext,
 ) => {
   const institution = await loadImportInstitution(fastify, slug)
-  const isPrivateDeployment = fastify.deployment.mode === 'private'
+  const appliesDirectly = fastify.deployment.managementMode === 'self_hosted'
 
   return executeImport(fastify, {
     slug,
@@ -230,7 +230,7 @@ export const importPapers = async (
         institution.id,
         context.actor,
         item,
-        isPrivateDeployment,
+        appliesDirectly,
         importItemId,
       )
       return {
@@ -251,7 +251,7 @@ export const importScholars = async (
   context: ImportRequestContext,
 ) => {
   const institution = await loadImportInstitution(fastify, slug)
-  const isPrivateDeployment = fastify.deployment.mode === 'private'
+  const appliesDirectly = fastify.deployment.managementMode === 'self_hosted'
 
   return executeImport(fastify, {
     slug,
@@ -262,7 +262,7 @@ export const importScholars = async (
     requiredScope: 'scholars:import',
     resolveKey: (item) => item.external_id.trim(),
     process: async (item, importItemId) => {
-      if (!isPrivateDeployment) {
+      if (!appliesDirectly) {
         await validateScholarImportItem(fastify, item)
         return {
           targetId: null,

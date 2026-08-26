@@ -118,7 +118,7 @@ const paperRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.get(
     '/',
     {
-      config: { publicRoute: true },
+      config: { publicRoute: true, publicContentRoute: true },
       schema: {
         tags: ['papers'],
         querystring: ListQuerySchema,
@@ -153,7 +153,7 @@ const paperRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.get(
     '/:id',
     {
-      config: { publicRoute: true },
+      config: { publicRoute: true, publicContentRoute: true },
       schema: {
         tags: ['papers'],
         params: PaperParamsSchema,

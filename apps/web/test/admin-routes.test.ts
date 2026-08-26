@@ -33,7 +33,7 @@ describe('admin route policies', () => {
     ])
   })
 
-  it('matches timeline review access to public and private deployment policy', () => {
+  it('matches timeline review access to managed and self-hosted policy', () => {
     const route = routeByName('AdminScholarTimelines')
     expect(route.meta?.adminCapabilities).toEqual(['manage_platform', 'manage_institutions'])
     expect(route.meta?.platformOnlyInPublic).toBe(true)

@@ -31,7 +31,7 @@ export interface PublicNavigationConfig {
 
 export interface PublicPaperLibraryConfig {
   defaultPath: string
-  fixedInstitutionSlug: string | null
+  fixedInstitutionSlug: string
 }
 
 export type ScholarTimelineGenerationMode = 'disabled' | 'request_only' | 'preview' | 'admin'
@@ -41,7 +41,12 @@ export interface PublicScholarTimelineConfig {
 }
 
 export interface PublicAppConfig {
-  deploymentMode: 'public' | 'private'
+  tenancyMode: 'single_institution'
+  managementMode: 'airalogy_managed' | 'self_hosted'
+  contentAccess: 'public' | 'authenticated'
+  institution: {
+    slug: string
+  }
   auth: PublicAuthConfig
   features: PublicFeatureConfig
   branding: PublicBrandingConfig

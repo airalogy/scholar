@@ -8,6 +8,7 @@ import {
   normalizeLabRole,
 } from '../../utils/permissions'
 import { lockMutationScope } from '../../utils/advisory-lock'
+import { assertConfiguredInstitutionId } from '../../utils/institution-scope'
 
 interface ResearchDirectionItem {
   name: string
@@ -91,7 +92,8 @@ const getLabBySlug = async (fastify: FastifyInstance, slug: string): Promise<Lab
     where: { slug },
   })
 
-  if (!lab) {
+  const configuredInstitutionId = await assertConfiguredInstitutionId(fastify, lab?.institutionId)
+  if (!lab || lab.institutionId !== configuredInstitutionId) {
     throw fastify.httpErrors.notFound('Lab not found')
   }
 

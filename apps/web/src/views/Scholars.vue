@@ -252,7 +252,7 @@ async function load(): Promise<void> {
       college: selectedCollege.value || undefined,
       subject_id: selectedSubject.value || undefined,
       letter: selectedLetter.value || undefined,
-      institution_slug: paperLibrary.value.fixedInstitutionSlug || undefined,
+      institution_slug: paperLibrary.value.fixedInstitutionSlug,
       limit: 100,
     })
     if (requestId === scholarRequestId) {
@@ -273,7 +273,7 @@ async function loadFacets(): Promise<void> {
       college: selectedCollege.value || undefined,
       subject_id: selectedSubject.value || undefined,
       letter: selectedLetter.value || undefined,
-      institution_slug: paperLibrary.value.fixedInstitutionSlug || undefined,
+      institution_slug: paperLibrary.value.fixedInstitutionSlug,
     })
     if (requestId === facetRequestId) {
       subjectOptions.value = facets.subjects

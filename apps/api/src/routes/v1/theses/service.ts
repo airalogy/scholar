@@ -9,6 +9,7 @@ import {
 } from '../../../review/service'
 import { lockMutationScope } from '../../../utils/advisory-lock'
 import { getInstitutionAccessById, getUserPlatformRole } from '../../../utils/permissions'
+import { assertConfiguredInstitutionId } from '../../../utils/institution-scope'
 import {
   PROTECTED_FILE_SECURITY_PROFILE,
   buildProtectedFileAccessUrls,
@@ -130,6 +131,7 @@ const findThesis = async (fastify: FastifyInstance, id: string): Promise<ThesisR
   if (!thesis) {
     throw fastify.httpErrors.notFound('Degree thesis not found')
   }
+  await assertConfiguredInstitutionId(fastify, thesis.institutionId)
   return thesis
 }
 
@@ -144,6 +146,7 @@ const findThesisByRecordCode = async (
   if (!thesis) {
     throw fastify.httpErrors.notFound('Degree thesis not found')
   }
+  await assertConfiguredInstitutionId(fastify, thesis.institutionId)
   return thesis
 }
 
@@ -356,6 +359,7 @@ const loadCreateInstitution = async (
   userId: string,
   institutionId: string,
 ): Promise<{ id: string; slug: string }> => {
+  await assertConfiguredInstitutionId(fastify, institutionId)
   const [access, institution] = await Promise.all([
     getInstitutionAccessById(fastify, userId, institutionId),
     fastify.prisma.institutions.findUnique({
@@ -668,6 +672,7 @@ const publishedWhere = async (
   userId: string | null,
   query: DegreeThesisListQuery,
 ): Promise<Prisma.degree_thesesWhereInput> => {
+  const configuredInstitutionId = await assertConfiguredInstitutionId(fastify, query.institution_id)
   const [platformRole, memberships] = userId
     ? await Promise.all([
         getUserPlatformRole(fastify, userId),
@@ -701,7 +706,7 @@ const publishedWhere = async (
   const q = query.q?.trim()
   return {
     publishedVersionId: { not: null },
-    institutionId: query.institution_id,
+    institutionId: configuredInstitutionId,
     published_version: {
       is: {
         ...visibility,
@@ -763,8 +768,9 @@ export const listDegreeTheses = async (
 }
 
 export const listMyDegreeTheses = async (fastify: FastifyInstance, userId: string) => {
+  const institutionId = await assertConfiguredInstitutionId(fastify, null)
   const items = await fastify.prisma.degree_theses.findMany({
-    where: { submittedBy: userId },
+    where: { submittedBy: userId, institutionId },
     include: thesisInclude,
     orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }],
   })
@@ -782,6 +788,7 @@ export const listDegreeThesisReviewQueue = async (
   query: DegreeThesisReviewQueueQuery,
   userId: string,
 ) => {
+  const configuredInstitutionId = await assertConfiguredInstitutionId(fastify, query.institution_id)
   const [platformRole, memberships] = await Promise.all([
     getUserPlatformRole(fastify, userId),
     fastify.prisma.institution_memberships.findMany({
@@ -795,7 +802,7 @@ export const listDegreeThesisReviewQueue = async (
   const reviewInstitutionIds = memberships.map((membership) => membership.institutionId)
   const q = query.q?.trim()
   const where: Prisma.degree_thesesWhereInput = {
-    institutionId: query.institution_id,
+    institutionId: configuredInstitutionId,
     review_case: {
       is: {
         status: 'pending_review',

@@ -20,7 +20,7 @@ const labRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.get(
     '/:slug',
     {
-      config: { publicRoute: true },
+      config: { publicRoute: true, publicContentRoute: true },
       schema: {
         tags: ['labs'],
         params: LabParamsSchema,

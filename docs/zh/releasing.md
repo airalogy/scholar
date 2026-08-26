@@ -20,8 +20,8 @@ Airalogy Scholar 作为一个完整产品发布，内部由独立运行的 Web�
 pnpm install --frozen-lockfile
 pnpm audit:prod
 pnpm license:check
+pnpm release:source:manifest
 pnpm check
-pnpm release:source:check
 pnpm release:check
 ```
 
@@ -32,7 +32,7 @@ RELEASE_SOURCE_DATABASE_URL='postgresql://.../scholar?schema=release_source' \
   pnpm release:source:verify
 ```
 
-发布源码检查会根据当前 Prisma schema 重建初始迁移，扫描形似凭证的内容，校验 Changelog 基线，并在 `RELEASE-SOURCE-MANIFEST.json` 中记录文件摘要。
+清单命令会根据当前 Prisma schema 重建初始迁移，扫描形似凭证的内容，校验 Changelog 基线，并在 `RELEASE-SOURCE-MANIFEST.json` 中记录文件摘要。发布源码检查会在已提交清单与当前源码不一致时失败。
 
 ## 创建发布
 

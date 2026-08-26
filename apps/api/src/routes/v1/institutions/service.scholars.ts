@@ -13,6 +13,10 @@ import {
   replaceScholarSubjectLinks,
   resolveAcademicSubjects,
 } from '../../../utils/academic-subjects'
+import {
+  normalizeInstitutionInternalId,
+  upsertInstitutionPerson,
+} from '../../../utils/institution-people'
 
 interface ScholarImportResult {
   action: ImportAction
@@ -114,11 +118,11 @@ export const applyScholarImportItem = async (
 
   return fastify.prisma.$transaction(async (tx) => {
     const now = new Date()
-    const mapping = await tx.institution_scholar_mappings.findUnique({
+    const person = await tx.institution_people.findUnique({
       where: {
-        institutionId_externalId: {
+        institutionId_normalizedInternalId: {
           institutionId,
-          externalId,
+          normalizedInternalId: normalizeInstitutionInternalId(externalId),
         },
       },
     })
@@ -133,7 +137,7 @@ export const applyScholarImportItem = async (
         })
       : undefined
 
-    if (!mapping) {
+    if (!person?.scholarId) {
       const scholar = await tx.scholars.create({
         data: {
           name: item.name.trim(),
@@ -166,14 +170,14 @@ export const applyScholarImportItem = async (
         })
       }
 
-      await tx.institution_scholar_mappings.create({
-        data: {
-          institutionId,
-          externalId,
-          scholarId: scholar.id,
-          createdAt: now,
-          updatedAt: now,
-        },
+      await upsertInstitutionPerson(tx, {
+        institutionId,
+        internalId: externalId,
+        name: scholar.name,
+        email: scholar.email,
+        scholarId: scholar.id,
+        source: 'institution_import',
+        actorUserId: actorId,
       })
 
       if (linkedPaperIds && linkedPaperIds.length > 0) {
@@ -208,10 +212,10 @@ export const applyScholarImportItem = async (
     }
 
     const scholar = await tx.scholars.findUnique({
-      where: { id: mapping.scholarId },
+      where: { id: person.scholarId },
     })
     if (!scholar) {
-      throw new Error('Scholar mapping references a missing scholar')
+      throw new Error('Institution person is not linked to a scholar')
     }
 
     const updateData: Prisma.scholarsUpdateInput = {}
@@ -358,8 +362,8 @@ export const applyScholarImportItem = async (
       await replaceScholarSubjectLinks(tx, scholar.id, resolvedSubjects, 'institution_import')
     }
 
-    await tx.institution_scholar_mappings.update({
-      where: { id: mapping.id },
+    await tx.institution_people.update({
+      where: { id: person.id },
       data: { updatedAt: now },
     })
 

@@ -307,10 +307,10 @@
           {{ $t('adminInstitutionContent.bindingModalDesc') }}
         </div>
 
-        <div v-if="isMembershipLoading && !institutionMembers.length" class="admin-state">
+        <div v-if="isMembershipLoading && !institutionPeople.length" class="admin-state">
           {{ $t('common.loading') }}
         </div>
-        <div v-else-if="!institutionMembers.length" class="admin-state">
+        <div v-else-if="!institutionPeople.length" class="admin-state">
           {{ $t('adminInstitutionContent.noMembersAvailableForBinding') }}
         </div>
         <div v-else class="binding-list">
@@ -341,14 +341,11 @@
                 @change="handleBindingSelection(author.id, $event)"
               >
                 <a-option
-                  v-for="member in getSelectableMembers(author.id)"
-                  :key="member.userId"
-                  :value="member.userId"
+                  v-for="person in getSelectablePeople(author.id)"
+                  :key="person.id"
+                  :value="person.id"
                 >
-                  {{ member.name }} · {{ $t('adminInstitutionContent.memberOptionPaperStats', {
-                    total: member.paperCount,
-                    approved: member.approvedPaperCount,
-                  }) }}
+                  {{ person.name }} · {{ person.internalId }}
                 </a-option>
               </a-select>
               <a-button
@@ -388,10 +385,10 @@ import InstitutionImportPanel from '@/components/InstitutionImportPanel.vue'
 import {
   bindInstitutionPaperAuthor,
   getInstitution,
-  listInstitutionMemberships,
+  listInstitutionPeople,
   removeInstitutionPaperAuthorBinding,
   type InstitutionDetailResponse,
-  type InstitutionMembershipItem,
+  type InstitutionPersonItem,
   type InstitutionPaperBoundMember,
 } from '@/api/institutions'
 import {
@@ -424,7 +421,7 @@ const isUploadLoading = ref(false)
 const isMembershipLoading = ref(false)
 const loadError = ref('')
 
-const institutionMembers = ref<InstitutionMembershipItem[]>([])
+const institutionPeople = ref<InstitutionPersonItem[]>([])
 const bindingModalVisible = ref(false)
 const selectedBindingPaper = ref<PaperResponse | null>(null)
 const bindingSelections = ref<Record<string, string>>({})
@@ -522,16 +519,16 @@ const loadInstitution = async (slug: string): Promise<void> => {
   institution.value = await getInstitution(slug)
 }
 
-const loadInstitutionMembers = async (slug: string): Promise<void> => {
+const loadInstitutionPeople = async (slug: string): Promise<void> => {
   if (!institution.value?.access.can_manage_members) {
     isMembershipLoading.value = false
-    institutionMembers.value = []
+    institutionPeople.value = []
     return
   }
 
   isMembershipLoading.value = true
   try {
-    institutionMembers.value = await listInstitutionMemberships(slug)
+    institutionPeople.value = await listInstitutionPeople(slug)
   } catch (error) {
     Message.error(getErrorMessage(error, t('adminInstitutionContent.loadFailed')))
   } finally {
@@ -573,7 +570,7 @@ const syncPaperBindings = (
   }
 
   bindingSelections.value = bindings.reduce<Record<string, string>>((result, binding) => {
-    result[binding.authorId] = binding.userId
+    result[binding.authorId] = binding.institutionPersonId
     return result
   }, {})
 }
@@ -584,7 +581,7 @@ const openBindingModal = (paper: PaperResponse): void => {
     boundMembers: [...paper.boundMembers],
   }
   bindingSelections.value = paper.boundMembers.reduce<Record<string, string>>((result, binding) => {
-    result[binding.authorId] = binding.userId
+    result[binding.authorId] = binding.institutionPersonId
     return result
   }, {})
   bindingActionAuthorId.value = ''
@@ -608,16 +605,19 @@ const getAuthorBinding = (authorId: string): InstitutionPaperBoundMember | null 
   return selectedBindingPaper.value.boundMembers.find((binding) => binding.authorId === authorId) ?? null
 }
 
-const getSelectableMembers = (authorId: string): InstitutionMembershipItem[] => {
+const getSelectablePeople = (authorId: string): InstitutionPersonItem[] => {
   const currentBinding = getAuthorBinding(authorId)
-  const occupiedUserIds = new Set(
+  const occupiedPersonIds = new Set(
     (selectedBindingPaper.value?.boundMembers ?? [])
       .filter((binding) => binding.authorId !== authorId)
-      .map((binding) => binding.userId),
+      .map((binding) => binding.institutionPersonId),
   )
 
-  return institutionMembers.value.filter((member) => {
-    return currentBinding?.userId === member.userId || !occupiedUserIds.has(member.userId)
+  return institutionPeople.value.filter((person) => {
+    return (
+      currentBinding?.institutionPersonId === person.id ||
+      (person.isActive && !occupiedPersonIds.has(person.id))
+    )
   })
 }
 
@@ -636,19 +636,19 @@ const handleBindingSelection = (
 }
 
 const canSaveAuthorBinding = (authorId: string): boolean => {
-  const selectedUserId = bindingSelections.value[authorId] ?? ''
-  if (!selectedUserId) {
+  const selectedPersonId = bindingSelections.value[authorId] ?? ''
+  if (!selectedPersonId) {
     return false
   }
 
-  return getAuthorBinding(authorId)?.userId !== selectedUserId
+  return getAuthorBinding(authorId)?.institutionPersonId !== selectedPersonId
 }
 
 const saveAuthorBinding = async (authorId: string): Promise<void> => {
   const slug = String(route.params.slug ?? '')
   const paper = selectedBindingPaper.value
-  const userId = bindingSelections.value[authorId] ?? ''
-  if (!slug || !paper || !userId) {
+  const institutionPersonId = bindingSelections.value[authorId] ?? ''
+  if (!slug || !paper || !institutionPersonId) {
     return
   }
 
@@ -658,10 +658,10 @@ const saveAuthorBinding = async (authorId: string): Promise<void> => {
     const bindings = await bindInstitutionPaperAuthor(slug, {
       paperId: paper.id,
       authorId,
-      userId,
+      institutionPersonId,
     })
     syncPaperBindings(paper.id, bindings)
-    await loadInstitutionMembers(slug)
+    await loadInstitutionPeople(slug)
     Message.success(t('adminInstitutionContent.bindingSaveSuccess'))
   } catch (error) {
     Message.error(getErrorMessage(error, t('adminInstitutionContent.bindingSaveFailed')))
@@ -684,7 +684,7 @@ const removeAuthorBinding = async (authorId: string): Promise<void> => {
   try {
     const bindings = await removeInstitutionPaperAuthorBinding(slug, binding.bindingId)
     syncPaperBindings(paper.id, bindings)
-    await loadInstitutionMembers(slug)
+    await loadInstitutionPeople(slug)
     Message.success(t('adminInstitutionContent.bindingRemoveSuccess'))
   } catch (error) {
     Message.error(getErrorMessage(error, t('adminInstitutionContent.bindingRemoveFailed')))
@@ -754,14 +754,14 @@ const load = async (slug: string): Promise<void> => {
   loadError.value = ''
   papers.value = []
   uploads.value = []
-  institutionMembers.value = []
+  institutionPeople.value = []
 
   try {
     await loadInstitution(slug)
     await Promise.all([
       loadPapers(),
       loadUploads(),
-      loadInstitutionMembers(slug),
+      loadInstitutionPeople(slug),
     ])
   } catch (error) {
     institution.value = null
@@ -820,7 +820,7 @@ watch(
       institution.value = null
       papers.value = []
       uploads.value = []
-      institutionMembers.value = []
+      institutionPeople.value = []
       paperTotal.value = 0
       uploadTotal.value = 0
       paperStatusTotals.value = createEmptyStatusTotals()

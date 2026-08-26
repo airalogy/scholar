@@ -10,7 +10,8 @@ import {
 export interface InstitutionPaperBoundMember {
   bindingId: string
   paperId: string
-  userId: string
+  institutionPersonId: string
+  userId: string | null
   name: string
   avatar: string | null
   authorId: string
@@ -103,17 +104,18 @@ export const resolveInstitutionPaperBoundMembersMap = async (
     return new Map()
   }
 
-  const [users, authors, paperAuthors] = await Promise.all([
-    fastify.prisma.users.findMany({
+  const [people, authors, paperAuthors] = await Promise.all([
+    fastify.prisma.institution_people.findMany({
       where: {
+        institutionId,
         id: {
-          in: [...new Set(bindings.map((binding) => binding.userId))],
+          in: [...new Set(bindings.map((binding) => binding.personId))],
         },
       },
       select: {
         id: true,
+        userId: true,
         name: true,
-        avatar: true,
       },
     }),
     fastify.prisma.authors.findMany({
@@ -142,6 +144,18 @@ export const resolveInstitutionPaperBoundMembersMap = async (
     }),
   ])
 
+  const userIds = people
+    .map((person) => person.userId)
+    .filter((userId): userId is string => Boolean(userId))
+  const users =
+    userIds.length > 0
+      ? await fastify.prisma.users.findMany({
+          where: { id: { in: userIds } },
+          select: { id: true, avatar: true },
+        })
+      : []
+
+  const personMap = new Map(people.map((person) => [person.id, person]))
   const userMap = new Map(users.map((user) => [user.id, user]))
   const authorMap = new Map(authors.map((author) => [author.id, author.name]))
   const orderMap = new Map(
@@ -157,17 +171,19 @@ export const resolveInstitutionPaperBoundMembersMap = async (
 
   const resolved = await Promise.all(
     bindings.map(async (binding) => {
-      const user = userMap.get(binding.userId)
-      if (!user) {
+      const person = personMap.get(binding.personId)
+      if (!person) {
         return null
       }
+      const user = person.userId ? userMap.get(person.userId) : null
 
       return {
         bindingId: binding.id,
         paperId: binding.paperId,
-        userId: binding.userId,
-        name: user.name,
-        avatar: user.avatar ? (avatarMap.get(user.avatar) ?? null) : null,
+        institutionPersonId: binding.personId,
+        userId: person.userId,
+        name: person.name,
+        avatar: user?.avatar ? (avatarMap.get(user.avatar) ?? null) : null,
         authorId: binding.authorId,
         authorName: authorMap.get(binding.authorId) ?? '',
         order: orderMap.get(`${binding.paperId}:${binding.authorId}`) ?? Number.MAX_SAFE_INTEGER,
@@ -185,6 +201,7 @@ export const resolveInstitutionPaperBoundMembersMap = async (
     current.push({
       bindingId: item.bindingId,
       paperId: item.paperId,
+      institutionPersonId: item.institutionPersonId,
       userId: item.userId,
       name: item.name,
       avatar: item.avatar,
@@ -229,13 +246,32 @@ export const resolveInstitutionMemberPaperStats = async (
     return statsMap
   }
 
-  const bindings = await fastify.prisma.institution_paper_author_bindings.findMany({
+  const people = await fastify.prisma.institution_people.findMany({
     where: {
       institutionId,
       userId: { in: uniqueUserIds },
     },
     select: {
+      id: true,
       userId: true,
+    },
+  })
+  const personIds = people.map((person) => person.id)
+  if (personIds.length === 0) {
+    return statsMap
+  }
+  const userIdByPersonId = new Map(
+    people
+      .filter((person): person is typeof person & { userId: string } => Boolean(person.userId))
+      .map((person) => [person.id, person.userId]),
+  )
+  const bindings = await fastify.prisma.institution_paper_author_bindings.findMany({
+    where: {
+      institutionId,
+      personId: { in: personIds },
+    },
+    select: {
+      personId: true,
       paperId: true,
     },
   })
@@ -259,7 +295,11 @@ export const resolveInstitutionMemberPaperStats = async (
   const approvedPaperIdSet = new Set(approvedClaims.map((claim) => claim.paperId))
 
   for (const binding of bindings) {
-    const current = statsMap.get(binding.userId) ?? {
+    const userId = userIdByPersonId.get(binding.personId)
+    if (!userId) {
+      continue
+    }
+    const current = statsMap.get(userId) ?? {
       paperCount: 0,
       approvedPaperCount: 0,
     }
@@ -268,7 +308,7 @@ export const resolveInstitutionMemberPaperStats = async (
     if (approvedPaperIdSet.has(binding.paperId)) {
       current.approvedPaperCount += 1
     }
-    statsMap.set(binding.userId, current)
+    statsMap.set(userId, current)
   }
 
   return statsMap

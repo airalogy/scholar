@@ -77,13 +77,10 @@
 
             <div class="form-row">
               <label class="form-label">{{ $t('upload.institutionLabel') }} <span class="required">*</span></label>
-              <select v-model="form.institution_id" class="form-select" :disabled="isScopeLoading || !institutionOptions.length">
-                <option value="" disabled>{{ $t('upload.institutionPlaceholder') }}</option>
-                <option v-for="institution in institutionOptions" :key="institution.id" :value="institution.id">
-                  {{ institution.name }}
-                </option>
-              </select>
-              <div v-if="!institutionOptions.length" class="form-hint form-hint--warning">
+              <div v-if="selectedInstitutionMembership" class="form-static-value">
+                {{ selectedInstitutionMembership.name }}
+              </div>
+              <div v-else class="form-hint form-hint--warning">
                 {{ $t('upload.noInstitutionMembership') }}
               </div>
             </div>
@@ -213,10 +210,6 @@ const form = ref({
   citation_count: undefined as number | undefined,
   pages: '',
   abstract: '',
-})
-
-const institutionOptions = computed(() => {
-  return [...institutionMemberships.value].sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'))
 })
 
 const selectedInstitutionMembership = computed(() => {
@@ -368,9 +361,7 @@ async function loadSubmissionScopes() {
       }))
     }
 
-    if (institutionMemberships.value.length === 1) {
-      form.value.institution_id = institutionMemberships.value[0].id
-    }
+    form.value.institution_id = institutionMemberships.value[0]?.id ?? ''
   } catch (error) {
     scopeLoadError.value = getErrorMessage(error, t('upload.institutionLoadFailed'))
   } finally {
@@ -620,6 +611,17 @@ onMounted(() => {
 
 .form-hint--warning
   color: #b45309
+
+.form-static-value
+  min-height: 38px
+  box-sizing: border-box
+  display: flex
+  align-items: center
+  padding: 0 12px
+  border: 1px solid var(--scholar-border-light)
+  border-radius: 10px
+  color: var(--scholar-text-1)
+  background: var(--scholar-bg-sidebar)
 
 .required
   color: #ef4444

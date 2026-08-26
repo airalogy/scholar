@@ -14,7 +14,7 @@ const scholarRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.get(
     '/',
     {
-      config: { publicRoute: true },
+      config: { publicRoute: true, publicContentRoute: true },
       schema: {
         tags: ['scholars'],
         querystring: ScholarListQuerySchema,
@@ -27,7 +27,7 @@ const scholarRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.get(
     '/:id',
     {
-      config: { publicRoute: true },
+      config: { publicRoute: true, publicContentRoute: true },
       schema: {
         tags: ['scholars'],
         params: ScholarParamsSchema,

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { normalizeInstitutionRole } from './permissions'
+import { linkInstitutionPersonToUser } from './institution-people'
 
 export type InstitutionProvisionStatus = 'pending_activation' | 'claimed' | 'disabled'
 
@@ -43,31 +44,6 @@ export const syncInstitutionProvisionToUser = async (
   userId: string,
 ): Promise<void> => {
   const now = new Date()
-
-  await fastify.prisma.institution_memberships.upsert({
-    where: {
-      institutionId_userId: {
-        institutionId: provision.institutionId,
-        userId,
-      },
-    },
-    create: {
-      institutionId: provision.institutionId,
-      userId,
-      role: normalizeInstitutionRole(provision.role),
-      can_review_content: provision.can_review_content,
-      can_import_data: provision.can_import_data,
-      createdAt: now,
-      updatedAt: now,
-    },
-    update: {
-      role: normalizeInstitutionRole(provision.role),
-      can_review_content: provision.can_review_content,
-      can_import_data: provision.can_import_data,
-      updatedAt: now,
-    },
-  })
-
   const user = await fastify.prisma.users.findUnique({
     where: { id: userId },
   })
@@ -96,10 +72,58 @@ export const syncInstitutionProvisionToUser = async (
     shouldUpdateUser = true
   }
 
-  if (shouldUpdateUser) {
-    await fastify.prisma.users.update({
-      where: { id: user.id },
-      data,
+  await fastify.prisma.$transaction(async (tx) => {
+    const person = await tx.institution_people.findUnique({
+      where: {
+        institutionId_provisionId: {
+          institutionId: provision.institutionId,
+          provisionId: provision.id,
+        },
+      },
     })
-  }
+    if (!person) {
+      throw fastify.httpErrors.conflict(
+        'Institution provision is not linked to an institution person',
+      )
+    }
+
+    await linkInstitutionPersonToUser(tx, {
+      institutionId: provision.institutionId,
+      personId: person.id,
+      userId,
+      source: 'provision_activation',
+      actorUserId: userId,
+    })
+
+    await tx.institution_memberships.upsert({
+      where: {
+        institutionId_userId: {
+          institutionId: provision.institutionId,
+          userId,
+        },
+      },
+      create: {
+        institutionId: provision.institutionId,
+        userId,
+        role: normalizeInstitutionRole(provision.role),
+        can_review_content: provision.can_review_content,
+        can_import_data: provision.can_import_data,
+        createdAt: now,
+        updatedAt: now,
+      },
+      update: {
+        role: normalizeInstitutionRole(provision.role),
+        can_review_content: provision.can_review_content,
+        can_import_data: provision.can_import_data,
+        updatedAt: now,
+      },
+    })
+
+    if (shouldUpdateUser) {
+      await tx.users.update({
+        where: { id: user.id },
+        data,
+      })
+    }
+  })
 }

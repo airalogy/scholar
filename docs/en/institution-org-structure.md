@@ -33,7 +33,7 @@ This prevents roster imports from creating incorrect accounts and supports provi
 
 - `institution_org_nodes`: institution, college, department, laboratory, office, committee, or other nodes.
 - `institution_org_edges`: relationships between nodes; the recommended direction is child in `fromNodeId` and parent in `toNodeId`.
-- `institution_org_people`: institution directory people, optionally bound to a platform user or provision.
+- `institution_people`: institution directory identities keyed by one canonical internal ID and optionally linked to a platform user, scholar, or provision.
 - `institution_org_positions`: positions on a node, such as dean, research secretary, PI, or reviewer.
 - `institution_org_appointments`: a person's appointments to positions.
 - `institution_review_workflows`: workflow templates.

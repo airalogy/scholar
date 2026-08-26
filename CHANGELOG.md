@@ -6,17 +6,25 @@ Chinese version: [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)
 
 ### Changed
 
+- Scholar now has an explicit single-institution product boundary: every self-hosted deployment or Airalogy Managed tenant serves one configured institution, and runtime routes no longer expose institution switching.
+- Institution people now use one canonical, case-insensitive internal ID that can exist before a user account, link independently to user and scholar records, and retain prebound paper authorship after first verified login.
+- Institution SSO now resolves the canonical internal-ID claim, creates or links accounts transactionally, grants only the default member role, and rejects email-only or conflicting identity claims.
+- Managed tenants and self-hosted instances share one codebase while applying managed-review and direct-apply import policies respectively.
 - Public paper, scholar, laboratory, and published degree-thesis pages can now be browsed without signing in; account actions request authentication only when invoked.
 - Repository engineering and operations documentation now has complete English and Chinese trees under `docs/en` and `docs/zh`, with automated language-pair, local-link, and product-documentation boundary checks.
 - The versioned product documentation now uses the full Airalogy Scholar name consistently in visible titles and landing pages.
 
 ### Security
 
+- All content, review, file, import, timeline, and integration-credential routes are constrained to the configured institution, including platform-administrator queues and historical records.
+- Public scholar and paper APIs do not expose institution internal IDs; integration JWTs remain excluded from user and timeline endpoints.
 - Anonymous API access is limited to approved or published public records, excludes protected file links and private author metadata, and continues to reject integration credentials on user-facing endpoints.
 - Production dependency auditing now runs before every repository push, and the vulnerable Prisma configuration dependency is overridden with the patched `deepmerge-ts` 8 release line.
 
 ### Database and Deployment
 
+- Added a loss-preserving migration from legacy organization people and scholar mappings to `institution_people`, structured identity-link audit events, and person-based paper-author bindings.
+- Replaced legacy deployment variables with `MANAGEMENT_MODE`, `INSTITUTION_SLUG`, `CONTENT_ACCESS_MODE`, and `INSTITUTION_SSO_INTERNAL_ID_FIELD`; the deployment and product documentation now describe the single-institution model consistently.
 - Institution deployments can explicitly configure the Scholar Docker IPv4 subnet and optional gateway; preflight rejects overlap with declared reserved ranges, host routes, and existing Docker networks.
 
 ## [3.0.0] - 2026-08-14

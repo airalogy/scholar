@@ -132,7 +132,8 @@ test('subject catalog routes separate platform and institution administration', 
   await app.register(sensible)
   app.decorate('config', { JWT_SECRET: TEST_JWT_SECRET } as never)
   app.decorate('deployment', {
-    paperLibrary: { fixedInstitutionSlug: null },
+    institution: { slug: 'example-university' },
+    paperLibrary: { fixedInstitutionSlug: 'example-university' },
   } as never)
   app.decorate('prisma', {
     users: {
