@@ -57,7 +57,7 @@ This installs dependencies for the API, Web application, and documentation site.
 
 Copy `apps/api/.env.example` to `apps/api/.env` and update the environment variables for your local environment.
 
-The API provides both conversational AI and Scholar retrieval. To enable them, configure `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `CHAT_MODEL`, and `OPENAI_EMBEDDING_MODEL` in `apps/api/.env`.
+The API provides both conversational AI and Scholar retrieval. To enable them, configure `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `CHAT_MODEL`, and `OPENAI_EMBEDDING_MODEL` in `apps/api/.env`. Approved PDFs are extracted and indexed locally for BM25 retrieval; sending PDF excerpts to the configured model service remains disabled unless the institution explicitly sets `ALLOW_APPROVED_PDF_MODEL_PROCESSING=true`.
 
 ## Start a local database
 

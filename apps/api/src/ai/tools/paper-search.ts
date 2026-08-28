@@ -4,7 +4,14 @@ import type {
   ChatCompletionTool,
 } from 'openai/resources/chat/completions'
 import type { AiRuntime } from '../client'
-import { embedTexts } from '../embeddings'
+import {
+  reciprocalRankFuse,
+  searchPaperSegmentsByBm25,
+  searchPaperSegmentsByVector,
+  type PaperRetrievalResult,
+} from '../../search/paper-retrieval'
+import { buildPaperIndexText } from '../../utils/document'
+import { getConfiguredInstitution } from '../../utils/institution-scope'
 
 export interface PaperSearchResult {
   paperId: string
@@ -37,35 +44,108 @@ export const searchPaperEmbeddings = async (
   query: string,
   limit = 3,
 ): Promise<PaperSearchResult[]> => {
-  const [queryEmbedding] = await embedTexts(fastify, [query])
-  const vector = `[${queryEmbedding.join(',')}]`
+  const institution = await getConfiguredInstitution(fastify)
+  const candidateLimit = Math.max(limit * 4, 12)
+  const bm25Results = await searchPaperSegmentsByBm25(fastify, query, {
+    institutionId: institution.id,
+    limit: candidateLimit,
+    distinctPapers: true,
+  })
+  let vectorResults: PaperRetrievalResult[] = []
+  try {
+    vectorResults = await searchPaperSegmentsByVector(fastify, query, {
+      institutionId: institution.id,
+      limit: candidateLimit,
+      distinctPapers: true,
+    })
+  } catch (error) {
+    fastify.log.warn({ err: error }, 'Vector retrieval failed; using BM25 paper ranking only')
+  }
 
-  return fastify.prisma.$queryRawUnsafe<PaperSearchResult[]>(
-    `WITH ranked AS (
-       SELECT e."paperId", e.text,
-              1 - (e.embedding <=> $1::vector) AS score,
-              row_number() OVER (
-                PARTITION BY e."paperId"
-                ORDER BY e.embedding <=> $1::vector
-              ) AS row_number
-       FROM embeddings e
-       WHERE e.embedding IS NOT NULL
-         AND EXISTS (
-           SELECT 1
-             FROM paper_claims claim
-             JOIN content_review_cases review_case ON review_case.id = claim."reviewCaseId"
-             WHERE claim."paperId" = e."paperId"
-             AND review_case.status = 'approved'
-         )
-     )
-     SELECT "paperId", text, score
-     FROM ranked
-     WHERE row_number = 1
-     ORDER BY score DESC, "paperId"
-     LIMIT $2`,
-    vector,
+  const fused = reciprocalRankFuse([bm25Results, vectorResults], (result) => result.paperId, limit)
+  if (fastify.config.ALLOW_APPROVED_PDF_MODEL_PROCESSING || fused.length === 0) {
+    return fused
+  }
+
+  const papers = await fastify.prisma.papers.findMany({
+    where: { id: { in: fused.map((result) => result.paperId) } },
+    select: { id: true, title: true, abstract: true },
+  })
+  const paperById = new Map(papers.map((paper) => [paper.id, paper]))
+  return fused.flatMap((result) => {
+    const paper = paperById.get(result.paperId)
+    const text = paper ? buildPaperIndexText(paper.title, paper.abstract) : null
+    return text ? [{ ...result, text }] : []
+  })
+}
+
+const loadPaperOpeningSegments = async (
+  fastify: FastifyInstance,
+  institutionId: string,
+  paperId: string,
+  limit: number,
+): Promise<PaperRetrievalResult[]> => {
+  return fastify.prisma.$queryRawUnsafe<PaperRetrievalResult[]>(
+    `SELECT e."paperId", e."segmentIndex", e.text, 0::double precision AS score
+     FROM embeddings e
+     WHERE e."paperId" = $1::uuid
+       AND EXISTS (
+         SELECT 1
+         FROM paper_claims claim
+         JOIN content_review_cases review_case ON review_case.id = claim."reviewCaseId"
+         WHERE claim."paperId" = e."paperId"
+           AND claim."institutionId" = $2::uuid
+           AND review_case.status = 'approved'
+       )
+     ORDER BY e."segmentIndex"
+     LIMIT $3`,
+    paperId,
+    institutionId,
     limit,
   )
+}
+
+export const searchPaperContextPassages = async (
+  fastify: FastifyInstance,
+  paperId: string,
+  query: string,
+  limit = 4,
+): Promise<PaperSearchResult[]> => {
+  if (!fastify.config.ALLOW_APPROVED_PDF_MODEL_PROCESSING) {
+    return []
+  }
+
+  const institution = await getConfiguredInstitution(fastify)
+  const candidateLimit = Math.max(limit * 3, 12)
+  const bm25Results = await searchPaperSegmentsByBm25(fastify, query, {
+    institutionId: institution.id,
+    paperId,
+    limit: candidateLimit,
+  })
+  let vectorResults: PaperRetrievalResult[] = []
+  try {
+    vectorResults = await searchPaperSegmentsByVector(fastify, query, {
+      institutionId: institution.id,
+      paperId,
+      limit: candidateLimit,
+    })
+  } catch (error) {
+    fastify.log.warn(
+      { err: error, paperId },
+      'Vector retrieval failed; using BM25 paper passages only',
+    )
+  }
+
+  const passages = reciprocalRankFuse(
+    [bm25Results, vectorResults],
+    (result) => `${result.paperId}:${result.segmentIndex}`,
+    limit,
+  )
+  if (passages.length > 0) {
+    return passages
+  }
+
+  return loadPaperOpeningSegments(fastify, institution.id, paperId, limit)
 }
 
 const formatPaperSearchResults = (results: PaperSearchResult[]): string => {

@@ -76,7 +76,7 @@ cp deploy/.env.example deploy/.env
 问答页和论文详情右侧的 AI 阅读助手。部署前必须填写 `OPENAI_BASE_URL`、
 `OPENAI_API_KEY`、`CHAT_MODEL` 和 `OPENAI_EMBEDDING_MODEL`；若学校本期不交付 AI
 能力，可显式改为 `false`。源码开发模板和服务端代码默认值仍保持关闭，避免在未配置
-模型凭证时误启动 AI 服务。
+模型凭证时误启动 AI 服务。审核通过的 PDF 文本默认只在机构服务内建立 BM25 索引。只有机构已同意将检索到的 PDF 片段交给所配置的对话和嵌入模型服务时，才设置 `ALLOW_APPROVED_PDF_MODEL_PROCESSING=true`；源码和正式部署模板均默认为 `false`。
 
 如果部署仅允许机构统一身份认证，设置
 `ENABLE_INSTITUTION_LOGIN=true`、`INSTITUTION_SSO_ENABLED=true`，并关闭账号密码登录与公开注册。

@@ -64,7 +64,7 @@ pnpm install
 
 后端通过环境变量启动。请复制 `apps/api/.env.example` 为 `apps/api/.env` 并根据实际环境修改。
 
-AI 对话与学者推荐都由 `apps/api` 提供。启用时需在 `apps/api/.env` 配置 `OPENAI_BASE_URL`、`OPENAI_API_KEY`、`CHAT_MODEL` 和 `OPENAI_EMBEDDING_MODEL`。
+AI 对话与学者推荐都由 `apps/api` 提供。启用时需在 `apps/api/.env` 配置 `OPENAI_BASE_URL`、`OPENAI_API_KEY`、`CHAT_MODEL` 和 `OPENAI_EMBEDDING_MODEL`。审核通过的 PDF 会在机构服务内解析并建立 BM25 索引；只有机构明确设置 `ALLOW_APPROVED_PDF_MODEL_PROCESSING=true` 后，才会把 PDF 片段交给所配置的模型服务。
 
 ## 本地开发数据库
 

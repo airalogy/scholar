@@ -22,6 +22,7 @@ declare module 'fastify' {
       ENABLE_INSTITUTION_PROVISION_LOGIN: boolean
       INSTITUTION_SSO_ENABLED: boolean
       ENABLE_AI_CHAT: boolean
+      ALLOW_APPROVED_PDF_MODEL_PROCESSING: boolean
       SCHOLAR_TIMELINE_GENERATION_MODE: 'disabled' | 'request_only' | 'preview' | 'admin'
       TIMELINE_MODEL: string
       TIMELINE_CONCURRENCY: number
@@ -100,6 +101,7 @@ const schema = Type.Object({
   ENABLE_INSTITUTION_PROVISION_LOGIN: Type.Boolean({ default: false }),
   INSTITUTION_SSO_ENABLED: Type.Boolean({ default: false }),
   ENABLE_AI_CHAT: Type.Boolean({ default: false }),
+  ALLOW_APPROVED_PDF_MODEL_PROCESSING: Type.Boolean({ default: false }),
   SCHOLAR_TIMELINE_GENERATION_MODE: Type.Union(
     [
       Type.Literal('disabled'),

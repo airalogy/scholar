@@ -72,7 +72,7 @@ At minimum configure:
 - local or object-storage settings;
 - application display name and institution-authorized branding URLs.
 
-The formal product template enables `ENABLE_AI_CHAT=true` for the chat page and paper-reading assistant. Configure `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `CHAT_MODEL`, and `OPENAI_EMBEDDING_MODEL`, or explicitly disable AI when it is not part of the deployment. Source-development defaults remain disabled to avoid starting AI without valid credentials.
+The formal product template enables `ENABLE_AI_CHAT=true` for the chat page and paper-reading assistant. Configure `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `CHAT_MODEL`, and `OPENAI_EMBEDDING_MODEL`, or explicitly disable AI when it is not part of the deployment. Source-development defaults remain disabled to avoid starting AI without valid credentials. Approved PDF text is indexed locally for BM25 by default. Set `ALLOW_APPROVED_PDF_MODEL_PROCESSING=true` only after the institution has approved sending retrieved PDF excerpts to the configured model and embedding service; it is otherwise kept `false` in both source and product templates.
 
 For institution-only SSO, enable institution login and SSO and disable password login and public registration. Use only generic `INSTITUTION_SSO_*` configuration. The callback is `/institution_sso_callback`; migrate any legacy customer-specific variables before upgrade. See [institution authentication](./institution-auth.md) and `deploy/.env.example`.
 

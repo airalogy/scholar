@@ -102,10 +102,13 @@ model embeddings {
   embedding    Unsupported("vector")?
   createdAt    DateTime                @db.Timestamp(6)
   tsv          Unsupported("tsvector")
+  bm25Length   Int                     @default(0) @map("bm25_length")
+  bm25Terms    Json                    @default("{}") @map("bm25_terms")
   paper        papers                  @relation(fields: [paperId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "embeddings_paperId_fkey")
 
   @@unique([paperId, segmentIndex], map: "embeddings_paperId_segmentIndex_idx")
   @@index([embedding], map: "idx_embeddings_hnsw_cosine")
+  @@index([bm25Terms], type: Gin, map: "idx_embeddings_bm25_terms")
 }
 
 model oss_files {

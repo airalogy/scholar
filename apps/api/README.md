@@ -101,48 +101,61 @@ pnpm type-check
 
 普通对话与学者推荐统一使用 `POST /chat`。不传 `mode` 时为普通对话；学者推荐传入 `mode: "scholar_recommendation"`，后端会从 `scholar_embeddings` 检索候选论文和学者。两种模式均复用登录鉴权与 SSE 协议，但会话历史相互隔离。
 
+### 论文全文索引与检索
+
+内容审核通过后，后端从主 submission 关联的 PDF 提取可搜索文本，将标题、摘要和全文按 1,000 字符分段（相邻段重叠 100 字符），并保存 BM25 词频统计。当配置嵌入模型时，论文检索会将 BM25 和 pgvector 排名通过 reciprocal-rank fusion 合并。PDF 在机构服务内解析；默认只把标题和摘要用于外部嵌入和对话模型。机构明确同意将审核通过的 PDF 片段交给所配置的模型服务后，再设置 `ALLOW_APPROVED_PDF_MODEL_PROCESSING=true`。
+
+升级数据库后可重建已有论文的索引：
+
+```bash
+pnpm --filter @airalogy/scholar-server embeddings:papers
+```
+
+扫描件和复杂排版 PDF 可能无法完整提取文本；当前流程不包含 OCR，解析失败时会回退到标题和摘要索引。
+
 `GET /health` 只验证 API 进程存活；`GET /health/ready` 还会执行 PostgreSQL 查询，数据库不可用时返回 `503`。容器就绪和负载均衡检查应使用后者。
 
 ## 环境变量
 
-| 变量名                               | 说明                                             | `.env.example` 示例值 |
-| ------------------------------------ | ------------------------------------------------ | --------------------- |
-| `NODE_ENV`                           | 运行环境：`development` / `test` / `production`  | `development`         |
-| `LOG_LEVEL`                          | Fastify / Pino 日志级别                          | `info`                |
-| `TRUST_PROXY`                        | 明确信任的反向代理配置；未配置时不信任转发头     | 空                    |
-| `MANAGEMENT_MODE`                    | 运营方式：`self_hosted` / `airalogy_managed`     | `self_hosted`         |
-| `INSTITUTION_SLUG`                   | 当前实例唯一机构的 slug                          | `example-university`  |
-| `CONTENT_ACCESS_MODE`                | 正式内容可否匿名访问：`public` / `authenticated` | `public`              |
-| `STORAGE_PROVIDER`                   | 文件存储驱动：`oss` / `local`                    | `local`（示例配置）   |
-| `LOCAL_STORAGE_DIR`                  | `STORAGE_PROVIDER=local` 时的本地存储目录        | `data/uploads`        |
-| `ENABLE_PASSWORD_SIGNIN`             | 是否启用账号密码登录                             | `true`                |
-| `ENABLE_PUBLIC_SIGNUP`               | 是否启用公开注册接口                             | `false`               |
-| `ENABLE_AIRALOGY_OAUTH`              | 是否启用 Airalogy OAuth 登录                     | `false`（示例配置）   |
-| `ENABLE_INSTITUTION_LOGIN`           | 是否启用机构登录入口                             | `false`               |
-| `ENABLE_INSTITUTION_PROVISION_LOGIN` | 是否启用机构激活令牌                             | `false`               |
-| `INSTITUTION_SSO_ENABLED`            | 是否启用机构统一身份认证                         | `false`（示例配置）   |
-| `ENABLE_AI_CHAT`                     | 是否启用 AI Chat 能力                            | `false`（示例配置）   |
-| `ENABLE_PAPER_UPLOAD`                | 是否启用论文上传入口                             | `true`                |
-| `ENABLE_FORUM`                       | 是否启用论坛接口                                 | `true`                |
-| `PUBLIC_APP_NAME`                    | 前端公开展示的应用名称                           | `Airalogy Scholar`    |
-| `SHOW_BRAND_LOGO`                    | 是否显示 Airalogy 主品牌 logo                    | `true`                |
-| `SHOW_INSTITUTION_LOGO`              | 是否显示机构 logo / 水印                         | `false`               |
-| `PUBLIC_BRAND_LOGO_URL`              | 可选的品牌 logo HTTP(S) / 同域路径               | 空                    |
-| `PUBLIC_INSTITUTION_LOGO_URL`        | 部署方授权的机构 logo HTTP(S) / 同域路径         | 空                    |
-| `PUBLIC_INSTITUTION_WATERMARK_URL`   | 部署方授权的机构水印 HTTP(S) / 同域路径          | 空                    |
-| `DATABASE_URL`                       | PostgreSQL 连接字符串                            | -                     |
-| `SCHOLAR_IMPORT_INSTITUTION_NAME`    | 本地源数据同步命令的目标机构名称                 | 空                    |
-| `ALLOW_DESTRUCTIVE_SEED`             | 是否允许清空业务表并写入示例数据                 | `false`               |
-| `OPENAI_BASE_URL`                    | 模型 API Base URL，启用 AI Chat 时必填           | -                     |
-| `OPENAI_API_KEY`                     | 模型 API Key，启用 AI Chat 时必填                | -                     |
-| `OPENAI_EMBEDDING_MODEL`             | 论文与学者检索使用的嵌入模型                     | `text-embedding-v4`   |
-| `CHAT_MODEL`                         | 普通对话与学者推荐使用的对话模型                 | `qwen3.5-plus`        |
-| `OSS_ENDPOINT`                       | `STORAGE_PROVIDER=oss` 时的 OSS Endpoint         | -                     |
-| `OSS_ACCESS_KEY_ID`                  | `STORAGE_PROVIDER=oss` 时的 Access Key ID        | -                     |
-| `OSS_ACCESS_KEY_SECRET`              | `STORAGE_PROVIDER=oss` 时的 Access Key Secret    | -                     |
-| `OSS_BUCKET`                         | `STORAGE_PROVIDER=oss` 时的 Bucket 名称          | -                     |
-| `PORT`                               | 服务端口                                         | 3000                  |
-| `HOST`                               | 服务主机                                         | 0.0.0.0               |
+| 变量名                                | 说明                                             | `.env.example` 示例值 |
+| ------------------------------------- | ------------------------------------------------ | --------------------- |
+| `NODE_ENV`                            | 运行环境：`development` / `test` / `production`  | `development`         |
+| `LOG_LEVEL`                           | Fastify / Pino 日志级别                          | `info`                |
+| `TRUST_PROXY`                         | 明确信任的反向代理配置；未配置时不信任转发头     | 空                    |
+| `MANAGEMENT_MODE`                     | 运营方式：`self_hosted` / `airalogy_managed`     | `self_hosted`         |
+| `INSTITUTION_SLUG`                    | 当前实例唯一机构的 slug                          | `example-university`  |
+| `CONTENT_ACCESS_MODE`                 | 正式内容可否匿名访问：`public` / `authenticated` | `public`              |
+| `STORAGE_PROVIDER`                    | 文件存储驱动：`oss` / `local`                    | `local`（示例配置）   |
+| `LOCAL_STORAGE_DIR`                   | `STORAGE_PROVIDER=local` 时的本地存储目录        | `data/uploads`        |
+| `ENABLE_PASSWORD_SIGNIN`              | 是否启用账号密码登录                             | `true`                |
+| `ENABLE_PUBLIC_SIGNUP`                | 是否启用公开注册接口                             | `false`               |
+| `ENABLE_AIRALOGY_OAUTH`               | 是否启用 Airalogy OAuth 登录                     | `false`（示例配置）   |
+| `ENABLE_INSTITUTION_LOGIN`            | 是否启用机构登录入口                             | `false`               |
+| `ENABLE_INSTITUTION_PROVISION_LOGIN`  | 是否启用机构激活令牌                             | `false`               |
+| `INSTITUTION_SSO_ENABLED`             | 是否启用机构统一身份认证                         | `false`（示例配置）   |
+| `ENABLE_AI_CHAT`                      | 是否启用 AI Chat 能力                            | `false`（示例配置）   |
+| `ALLOW_APPROVED_PDF_MODEL_PROCESSING` | 是否允许将审核通过的 PDF 片段交给模型服务        | `false`               |
+| `ENABLE_PAPER_UPLOAD`                 | 是否启用论文上传入口                             | `true`                |
+| `ENABLE_FORUM`                        | 是否启用论坛接口                                 | `true`                |
+| `PUBLIC_APP_NAME`                     | 前端公开展示的应用名称                           | `Airalogy Scholar`    |
+| `SHOW_BRAND_LOGO`                     | 是否显示 Airalogy 主品牌 logo                    | `true`                |
+| `SHOW_INSTITUTION_LOGO`               | 是否显示机构 logo / 水印                         | `false`               |
+| `PUBLIC_BRAND_LOGO_URL`               | 可选的品牌 logo HTTP(S) / 同域路径               | 空                    |
+| `PUBLIC_INSTITUTION_LOGO_URL`         | 部署方授权的机构 logo HTTP(S) / 同域路径         | 空                    |
+| `PUBLIC_INSTITUTION_WATERMARK_URL`    | 部署方授权的机构水印 HTTP(S) / 同域路径          | 空                    |
+| `DATABASE_URL`                        | PostgreSQL 连接字符串                            | -                     |
+| `SCHOLAR_IMPORT_INSTITUTION_NAME`     | 本地源数据同步命令的目标机构名称                 | 空                    |
+| `ALLOW_DESTRUCTIVE_SEED`              | 是否允许清空业务表并写入示例数据                 | `false`               |
+| `OPENAI_BASE_URL`                     | 模型 API Base URL，启用 AI Chat 时必填           | -                     |
+| `OPENAI_API_KEY`                      | 模型 API Key，启用 AI Chat 时必填                | -                     |
+| `OPENAI_EMBEDDING_MODEL`              | 论文与学者检索使用的嵌入模型                     | `text-embedding-v4`   |
+| `CHAT_MODEL`                          | 普通对话与学者推荐使用的对话模型                 | `qwen3.5-plus`        |
+| `OSS_ENDPOINT`                        | `STORAGE_PROVIDER=oss` 时的 OSS Endpoint         | -                     |
+| `OSS_ACCESS_KEY_ID`                   | `STORAGE_PROVIDER=oss` 时的 Access Key ID        | -                     |
+| `OSS_ACCESS_KEY_SECRET`               | `STORAGE_PROVIDER=oss` 时的 Access Key Secret    | -                     |
+| `OSS_BUCKET`                          | `STORAGE_PROVIDER=oss` 时的 Bucket 名称          | -                     |
+| `PORT`                                | 服务端口                                         | 3000                  |
+| `HOST`                                | 服务主机                                         | 0.0.0.0               |
 
 机构 SSO 开启时需要配置完整的 `INSTITUTION_SSO_*` 身份服务地址、客户端凭证和用户字段映射。`INSTITUTION_SSO_INTERNAL_ID_FIELD` 必须指向工号、学号等机构内部恒定标识，不应使用邮箱、姓名或可变的登录名。完整配置及首次登录的
 账号绑定规则见[机构登录与统一身份认证](../../docs/zh/institution-auth.md)。
