@@ -8,6 +8,8 @@ import test, { after } from 'node:test'
 import { createReleaseMetadata } from './release-metadata-lib.mjs'
 
 const repositoryRoot = path.resolve(import.meta.dirname, '..')
+const version = (await readFile(path.join(repositoryRoot, 'VERSION'), 'utf8')).trim()
+const releaseTag = `v${version}`
 const digest = (character) => `sha256:${character.repeat(64)}`
 const fixtureRoots = []
 
@@ -53,12 +55,12 @@ test('release metadata binds one product version to exact component digests', as
     metadataDirectory: fixture.metadataDirectory,
     outputDirectory: fixture.outputDirectory,
     envTemplatePath: path.join(repositoryRoot, 'deploy', '.env.example'),
-    releaseTag: 'v3.0.0',
+    releaseTag,
     gitCommit: 'c'.repeat(40),
     createdAt: '2026-08-12T12:00:00Z',
   })
 
-  assert.equal(result.manifest.productVersion, '3.0.0')
+  assert.equal(result.manifest.productVersion, version)
   assert.deepEqual(result.manifest.documentation, {
     bundledIn: 'web',
     sitePath: '/docs/',
@@ -67,7 +69,7 @@ test('release metadata binds one product version to exact component digests', as
   assert.equal(result.manifest.database.migration, await readLatestMigration())
   assert.equal(
     result.manifest.components.api.deploymentReference,
-    `ghcr.io/airalogy/scholar-api:3.0.0@${digest('a')}`,
+    `ghcr.io/airalogy/scholar-api:${version}@${digest('a')}`,
   )
 
   const manifestJson = await readFile(
@@ -82,10 +84,11 @@ test('release metadata binds one product version to exact component digests', as
   const checksum = createHash('sha256').update(manifestJson).digest('hex')
 
   assert.match(releaseEnv, new RegExp(`SCHOLAR_RELEASE_MANIFEST_SHA256=${checksum}`))
-  assert.match(releaseEnv, /SCHOLAR_RELEASE_PRODUCT_VERSION=3\.0\.0/)
-  assert.match(
-    releaseEnv,
-    /SCHOLAR_RELEASE_API_TAGGED_IMAGE=ghcr\.io\/airalogy\/scholar-api:3\.0\.0/,
+  assert.ok(releaseEnv.split('\n').includes(`SCHOLAR_RELEASE_PRODUCT_VERSION=${version}`))
+  assert.ok(
+    releaseEnv.split('\n').includes(
+      `SCHOLAR_RELEASE_API_TAGGED_IMAGE=ghcr.io/airalogy/scholar-api:${version}`,
+    ),
   )
   assert.match(renderedEnv, new RegExp(`SCHOLAR_API_IMAGE=.*@${digest('a')}`))
   assert.match(renderedEnv, /SCHOLAR_RELEASE_METADATA_REQUIRED=true/)
@@ -101,7 +104,7 @@ test('release metadata rejects an invalid image digest', async () => {
       metadataDirectory: fixture.metadataDirectory,
       outputDirectory: fixture.outputDirectory,
       envTemplatePath: path.join(repositoryRoot, 'deploy', '.env.example'),
-      releaseTag: 'v3.0.0',
+      releaseTag,
       gitCommit: 'c'.repeat(40),
       createdAt: '2026-08-12T12:00:00Z',
     }),
@@ -109,11 +112,27 @@ test('release metadata rejects an invalid image digest', async () => {
   )
 })
 
+test('release metadata rejects a tag that differs from the product version', async () => {
+  const fixture = await prepareFixture()
+  await assert.rejects(
+    createReleaseMetadata({
+      repositoryRoot,
+      metadataDirectory: fixture.metadataDirectory,
+      outputDirectory: fixture.outputDirectory,
+      envTemplatePath: path.join(repositoryRoot, 'deploy', '.env.example'),
+      releaseTag: `${releaseTag}-mismatch`,
+      gitCommit: 'c'.repeat(40),
+      createdAt: '2026-08-12T12:00:00Z',
+    }),
+    /does not match VERSION/,
+  )
+})
+
 test('deployment write operations reject a concurrent operation lock', async () => {
   const fixture = await prepareFixture()
   const envPath = path.join(fixture.root, '.env')
   const stateDirectory = path.join(fixture.root, 'state')
-  await writeFile(envPath, 'SCHOLAR_VERSION=3.0.0\n')
+  await writeFile(envPath, `SCHOLAR_VERSION=${version}\n`)
   await mkdir(path.join(stateDirectory, 'operation.lock'), { recursive: true })
 
   assert.throws(
@@ -139,7 +158,7 @@ test('deployment preflight accepts one release set and rejects mixed component d
     metadataDirectory: fixture.metadataDirectory,
     outputDirectory: fixture.outputDirectory,
     envTemplatePath: path.join(repositoryRoot, 'deploy', '.env.example'),
-    releaseTag: 'v3.0.0',
+    releaseTag,
     gitCommit: 'c'.repeat(40),
     createdAt: '2026-08-12T12:00:00Z',
   })
@@ -222,7 +241,7 @@ esac
       encoding: 'utf8',
     },
   )
-  assert.match(output, /Preflight passed for Scholar 3\.0\.0/)
+  assert.ok(output.includes(`Preflight passed for Scholar ${version}`))
 
   const offlineOutput = execFileSync(
     'sh',
@@ -233,7 +252,7 @@ esac
       encoding: 'utf8',
     },
   )
-  assert.match(offlineOutput, /Preflight passed for Scholar 3\.0\.0/)
+  assert.ok(offlineOutput.includes(`Preflight passed for Scholar ${version}`))
 
   await writeFile(
     envPath,
@@ -281,7 +300,7 @@ esac
       encoding: 'utf8',
     },
   )
-  assert.match(institutionSsoOutput, /Preflight passed for Scholar 3\.0\.0/)
+  assert.ok(institutionSsoOutput.includes(`Preflight passed for Scholar ${version}`))
 
   await writeFile(
     envPath,
@@ -393,8 +412,8 @@ esac
   await writeFile(
     envPath,
     configured.replace(
-      `SCHOLAR_WEB_IMAGE=ghcr.io/airalogy/scholar-web:3.0.0@${digest('b')}`,
-      `SCHOLAR_WEB_IMAGE=ghcr.io/airalogy/scholar-web:3.0.0@${digest('e')}`,
+      `SCHOLAR_WEB_IMAGE=ghcr.io/airalogy/scholar-web:${version}@${digest('b')}`,
+      `SCHOLAR_WEB_IMAGE=ghcr.io/airalogy/scholar-web:${version}@${digest('e')}`,
     ),
   )
   assert.throws(
