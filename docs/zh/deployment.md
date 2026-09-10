@@ -165,6 +165,33 @@ deploy/scholarctl bootstrap
 
 ## 6. 版本升级
 
+### 从 3.0.0 升级到单机构版本
+
+本次升级会改变部署配置和身份数据结构。生产维护窗口前，应先在已有数据库备份的还原副本上验证。保留原 PostgreSQL 数据库和 `_prisma_migrations` 历史，不替换初始迁移，不执行 `db push`，不导入演示 seed。
+
+将原配置迁入新版发布模板：
+
+| 原配置 | 新配置及操作 |
+|---|---|
+| `DEPLOYMENT_MODE=private` | 学校自行运维的实例使用 `MANAGEMENT_MODE=self_hosted`。 |
+| `DEPLOYMENT_MODE=public` | Airalogy 运维、导入需审核的租户使用 `MANAGEMENT_MODE=airalogy_managed`；每个租户仍只服务一个机构。 |
+| `PRIVATE_INSTITUTION_SLUG` / `INSTITUTION_LOGIN_INSTITUTION_SLUG` | 将已有机构的 slug 写入 `INSTITUTION_SLUG`，生产启动时必填。 |
+| 内容可见性 | 显式选择 `CONTENT_ACCESS_MODE=public` 或 `authenticated`；管理方式不决定内容可见性。需要登录才能访问的知识库应设置 `authenticated`。 |
+| `INSTITUTION_SSO_EXTERNAL_ID_FIELD` | 将 `INSTITUTION_SSO_INTERNAL_ID_FIELD` 配置为经学校确认的规范内部 ID 字段，不能直接把 SSO 的 `sub` 或邮箱当作工号、学号。 |
+
+迁移会保留组织人员、学者映射、成员账号、邀请、任职和论文作者绑定。同名人员保持独立，冲突的历史关联需要明确处理。已有成员缺少已知内部 ID 时，会获得仅用于迁移的 `legacy-user:` 编号；启用 SSO 自动绑定前，需将它们与学校的真实编号核对并对应。
+
+若原数据库服务多个机构，仅配置一个 slug 并不会完成数据拆分，其他机构的数据将无法通过该实例访问。必须先规划独立机构实例并核对其数据，再执行升级。自定义接入还需适配已移除的机构加入申请接口和变化后的 `/auth/public-config` 响应。
+
+升级保留已有向量。要补全新增全文/BM25 元数据，可在 API 容器中运行共用索引器，先使用 `--dry-run` 核对范围：
+
+```bash
+node dist/src/scripts/generate-paper-embeddings.js --dry-run
+node dist/src/scripts/generate-paper-embeddings.js
+```
+
+重新索引可能调用已配置的 embedding 服务处理论文元数据。已审核 PDF 正文在本地建立 BM25 索引；只有机构明确同意并设置 `ALLOW_APPROVED_PDF_MODEL_PROCESSING=true` 后，才会将片段发送给所配置的模型或 embedding 服务。未审核和其他机构文件仍不参与处理。升级后应验证两个同名人员的 SSO、各自预绑定论文、机构过滤和 AI 检索。回滚需恢复升级前数据库备份、匹配的上传文件、旧配置及镜像，仅切换镜像不足以回滚。
+
 升级前先阅读目标版本的中英文 Changelog，确认数据库迁移和回滚限制。推荐流程：
 
 1. 记录当前 `deploy/scholarctl status` 与 `/version`；

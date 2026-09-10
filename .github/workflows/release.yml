@@ -46,9 +46,11 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm audit:prod
       - run: pnpm db:generate
       - run: pnpm db:migrate:deploy
       - run: pnpm db:audit:integrity
+      - run: pnpm db:verify:upgrade
       - run: pnpm license:check
       - run: pnpm check
       - run: pnpm release:source:verify

@@ -32,7 +32,9 @@ RELEASE_SOURCE_DATABASE_URL='postgresql://.../scholar?schema=release_source' \
   pnpm release:source:verify
 ```
 
-The manifest command reconstructs the initial migration from the current Prisma schema, scans source files for credential-shaped values, validates the changelog baseline, and records file hashes in `RELEASE-SOURCE-MANIFEST.json`. The release-source check fails when the committed manifest no longer matches the source tree.
+The manifest command preserves the published initial migration and every incremental migration unchanged, scans source files for credential-shaped values, validates the changelog baseline, and records their actual file hashes in `RELEASE-SOURCE-MANIFEST.json`. Never regenerate or replace a published migration. The release-source check fails when the committed manifest no longer matches the source tree, including migration changes.
+
+CI verifies both an empty database and an upgrade fixture containing existing institution identities and paper bindings. To run the upgrade fixture independently, set `DATABASE_URL` and run `pnpm db:verify:upgrade`. It uses a randomly named schema and rolls back the fixture and migrations together on one connection.
 
 ## Create a release
 

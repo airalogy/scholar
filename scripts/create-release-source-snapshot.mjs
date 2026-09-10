@@ -24,18 +24,11 @@ const targetArgument = process.argv
   .slice(2)
   .find(
     (argument) =>
-      argument !== '--check' &&
-      argument !== '--verify' &&
-      argument !== '--update-manifest',
+      argument !== '--check' && argument !== '--verify' && argument !== '--update-manifest',
   )
-const initialMigrationPath =
-  'apps/api/prisma/migrations/00000000000000_v3_initial/migration.sql'
-const migrationLockPath = 'apps/api/prisma/migrations/migration_lock.toml'
+const initialMigrationPath = 'apps/api/prisma/migrations/00000000000000_v3_initial/migration.sql'
 const releaseManifestPath = 'RELEASE-SOURCE-MANIFEST.json'
 const releaseHistoryBaseline = '3.0.0'
-const prismaDatabaseUrl =
-  process.env.DATABASE_URL ??
-  'postgresql://scholar:scholar@127.0.0.1:5432/scholar?schema=public'
 
 const run = (command, args, options = {}) => {
   const result = spawnSync(command, args, {
@@ -52,10 +45,6 @@ const run = (command, args, options = {}) => {
   return typeof result.stdout === 'string' ? result.stdout : ''
 }
 
-const isGeneratedMigration = (file) => {
-  return file.startsWith('apps/api/prisma/migrations/') && file !== migrationLockPath
-}
-
 const listCandidateFiles = () => {
   const output = run('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'])
   const deletedFiles = new Set(
@@ -65,40 +54,8 @@ const listCandidateFiles = () => {
     .split('\0')
     .filter(Boolean)
     .filter((file) => !deletedFiles.has(file))
-    .filter((file) => !isGeneratedMigration(file))
     .filter((file) => file !== releaseManifestPath)
     .sort()
-}
-
-const generateInitialMigration = async () => {
-  const schemaSql = run(
-    'pnpm',
-    [
-      '--filter',
-      '@airalogy/scholar-server',
-      'exec',
-      'prisma',
-      'migrate',
-      'diff',
-      '--from-empty',
-      '--to-schema',
-      'prisma/schema.prisma',
-      '--script',
-    ],
-    {
-      cwd: path.join(repositoryRoot, 'apps/api'),
-      env: { ...process.env, DATABASE_URL: prismaDatabaseUrl },
-    },
-  )
-  const coreSubjects = await readFile(
-    path.join(repositoryRoot, 'apps/api/prisma/core-academic-subjects.sql'),
-    'utf8',
-  )
-  const searchPathSql = [
-    '-- Keep extension types visible when they are already installed in public.',
-    "SELECT set_config('search_path', quote_ident(current_schema()) || ', public', false);",
-  ].join('\n')
-  return `${searchPathSql}\n\n${schemaSql.trim()}\n\n-- Install the provider-neutral core academic subject catalog.\n${coreSubjects.trim()}\n`
 }
 
 const isBinary = (content) => content.includes(0)
@@ -150,9 +107,7 @@ const compareReleaseVersions = (left, right) => {
 }
 
 const auditPublicChangelog = (file, text) => {
-  const releaseVersions = [...text.matchAll(/^## \[(\d+\.\d+\.\d+)\]/gmu)].map(
-    (match) => match[1],
-  )
+  const releaseVersions = [...text.matchAll(/^## \[(\d+\.\d+\.\d+)\]/gmu)].map((match) => match[1])
   if (!releaseVersions.includes(releaseHistoryBaseline)) {
     throw new Error(`${file} does not contain the 3.0.0 release baseline`)
   }
@@ -164,7 +119,10 @@ const auditPublicChangelog = (file, text) => {
   }
 }
 
-const auditCandidates = async (files, initialMigration) => {
+const auditCandidates = async (files) => {
+  if (!files.includes(initialMigrationPath)) {
+    throw new Error('Release source must preserve the published 3.0.0 initial migration')
+  }
   for (const file of files) {
     const content = await readFile(path.join(repositoryRoot, file))
     if (!isBinary(content)) {
@@ -175,7 +133,6 @@ const auditCandidates = async (files, initialMigration) => {
       }
     }
   }
-  auditText(initialMigrationPath, initialMigration)
 }
 
 const assertTargetDoesNotExist = async (target) => {
@@ -206,33 +163,19 @@ const sha256 = (content) => createHash('sha256').update(content).digest('hex')
 
 const createManifest = async (targetRoot, files) => {
   const entries = {}
-  for (const file of [...files, initialMigrationPath].sort()) {
+  for (const file of files) {
     entries[file] = sha256(await readFile(path.join(targetRoot, file)))
   }
   const version = (await readFile(path.join(repositoryRoot, 'VERSION'), 'utf8')).trim()
   return `${JSON.stringify({ version, files: entries }, null, 2)}\n`
 }
 
-const createRepositoryManifest = async (files, initialMigration) => {
-  const entries = {}
-  for (const file of files) {
-    entries[file] = sha256(await readFile(path.join(repositoryRoot, file)))
-  }
-  entries[initialMigrationPath] = sha256(initialMigration)
-  const version = (await readFile(path.join(repositoryRoot, 'VERSION'), 'utf8')).trim()
-  return `${JSON.stringify({ version, files: Object.fromEntries(Object.entries(entries).sort()) }, null, 2)}\n`
-}
-
-const writeSnapshot = async (targetRoot, files, initialMigration) => {
+const writeSnapshot = async (targetRoot, files) => {
   await assertTargetDoesNotExist(targetRoot)
   await mkdir(targetRoot, { recursive: true })
   for (const file of files) {
     await copyCandidate(file, targetRoot)
   }
-  const migrationTarget = path.join(targetRoot, initialMigrationPath)
-  await mkdir(path.dirname(migrationTarget), { recursive: true })
-  await writeFile(migrationTarget, initialMigration)
-
   const manifest = await createManifest(targetRoot, files)
   await writeFile(path.join(targetRoot, releaseManifestPath), manifest)
 }
@@ -250,9 +193,7 @@ const verifySnapshot = (targetRoot) => {
     throw new Error('RELEASE_SOURCE_DATABASE_URL must use a non-public disposable schema')
   }
   if (!/^[a-z][a-z0-9_]{0,62}$/u.test(schema)) {
-    throw new Error(
-      'RELEASE_SOURCE_DATABASE_URL schema must be a lowercase PostgreSQL identifier',
-    )
+    throw new Error('RELEASE_SOURCE_DATABASE_URL schema must be a lowercase PostgreSQL identifier')
   }
 
   parsedDatabaseUrl.searchParams.set('options', `-c search_path=${schema},public`)
@@ -270,15 +211,7 @@ const verifySnapshot = (targetRoot) => {
   console.log(`Release source verification: recreate disposable schema ${schema}`)
   run(
     'pnpm',
-    [
-      '--filter',
-      '@airalogy/scholar-server',
-      'exec',
-      'prisma',
-      'db',
-      'execute',
-      '--stdin',
-    ],
+    ['--filter', '@airalogy/scholar-server', 'exec', 'prisma', 'db', 'execute', '--stdin'],
     {
       cwd: targetRoot,
       env: { ...process.env, DATABASE_URL: administrativeDatabaseUrl.toString() },
@@ -300,6 +233,7 @@ const verifySnapshot = (targetRoot) => {
     ['pnpm', ['--filter', '@airalogy/scholar-server', 'smoke:dist']],
     ['pnpm', ['db:migrate:deploy']],
     ['pnpm', ['db:audit:integrity']],
+    ['pnpm', ['db:verify:upgrade']],
   ]
 
   for (const [command, args] of commands) {
@@ -318,28 +252,22 @@ const main = async () => {
     throw new Error('--check, --verify, and --update-manifest cannot be used together')
   }
   const files = listCandidateFiles()
-  const initialMigration = await generateInitialMigration()
-  await auditCandidates(files, initialMigration)
+  await auditCandidates(files)
 
   if (updateManifest) {
-    const manifest = await createRepositoryManifest(files, initialMigration)
+    const manifest = await createManifest(repositoryRoot, files)
     await writeFile(path.join(repositoryRoot, releaseManifestPath), manifest)
-    console.log(`Updated ${releaseManifestPath} for ${files.length + 1} files`)
+    console.log(`Updated ${releaseManifestPath} for ${files.length} files`)
     return
   }
 
   if (checkOnly) {
-    const expectedManifest = await createRepositoryManifest(files, initialMigration)
-    const actualManifest = await readFile(
-      path.join(repositoryRoot, releaseManifestPath),
-      'utf8',
-    )
+    const expectedManifest = await createManifest(repositoryRoot, files)
+    const actualManifest = await readFile(path.join(repositoryRoot, releaseManifestPath), 'utf8')
     if (actualManifest !== expectedManifest) {
-      throw new Error(
-        `${releaseManifestPath} is stale; run pnpm release:source:manifest`,
-      )
+      throw new Error(`${releaseManifestPath} is stale; run pnpm release:source:manifest`)
     }
-    console.log(`Release source audit passed for ${files.length + 1} files`)
+    console.log(`Release source audit passed for ${files.length} files`)
     return
   }
 
@@ -347,10 +275,10 @@ const main = async () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'scholar-release-source-'))
     const targetRoot = path.join(temporaryRoot, 'source')
     try {
-      await writeSnapshot(targetRoot, files, initialMigration)
+      await writeSnapshot(targetRoot, files)
       initializeVerificationGitIndex(targetRoot)
       verifySnapshot(targetRoot)
-      console.log(`Verified release source snapshot with ${files.length + 1} files`)
+      console.log(`Verified release source snapshot with ${files.length} files`)
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true })
     }
@@ -371,7 +299,7 @@ const main = async () => {
   if (targetRoot === repositoryRoot || targetRoot.startsWith(`${repositoryRoot}${path.sep}`)) {
     throw new Error('Release source target must be outside the source repository')
   }
-  await writeSnapshot(targetRoot, files, initialMigration)
+  await writeSnapshot(targetRoot, files)
   console.log(`Created audited release source snapshot at ${targetRoot}`)
 }
 

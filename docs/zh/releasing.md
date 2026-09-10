@@ -32,7 +32,9 @@ RELEASE_SOURCE_DATABASE_URL='postgresql://.../scholar?schema=release_source' \
   pnpm release:source:verify
 ```
 
-清单命令会根据当前 Prisma schema 重建初始迁移，扫描形似凭证的内容，校验 Changelog 基线，并在 `RELEASE-SOURCE-MANIFEST.json` 中记录文件摘要。发布源码检查会在已提交清单与当前源码不一致时失败。
+清单命令会原样保留已发布的初始迁移与全部增量迁移，扫描形似凭证的内容，校验 Changelog 基线，并在 `RELEASE-SOURCE-MANIFEST.json` 中记录文件的实际摘要。不得重新生成或替换已发布迁移。发布源码检查会在已提交清单与当前源码不一致时失败，包括迁移文件变动。
+
+CI 同时验证空库和含已有机构身份、论文绑定的升级样例。需要单独运行升级验证时，设置 `DATABASE_URL` 后执行 `pnpm db:verify:upgrade`；它使用随机命名的 schema，并在同一连接中整体回滚样例和迁移。
 
 ## 创建发布
 

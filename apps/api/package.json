@@ -55,7 +55,7 @@
     "ali-oss": "^6.23.0",
     "bcrypt": "^6.0.0",
     "dotenv": "^17.4.2",
-    "fastify": "^5.11.3",
+    "fastify": "^5.12.1",
     "fastify-plugin": "^5.1.0",
     "openai": "^6.34.0",
     "pdf-lib": "^1.17.1",
