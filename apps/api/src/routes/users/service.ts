@@ -65,13 +65,28 @@ export async function getMyProfile(fastify: FastifyInstance, userId: string) {
 
   const profile = user as Record<string, unknown>
   const avatar = (profile.avatar as string | null) ?? null
-  const [avatarUrl, labMemberships, institutionMemberships] = await Promise.all([
+  const fixedInstitution = await fastify.prisma.institutions.findUnique({
+    where: { slug: fastify.deployment.institution.slug },
+  })
+  if (!fixedInstitution) {
+    throw fastify.httpErrors.serviceUnavailable(
+      'The configured institution has not been initialized',
+    )
+  }
+  const [avatarUrl, labMemberships, institutionMemberships, institutionPeople] = await Promise.all([
     resolveAvatarUrl(fastify, avatar),
     fastify.prisma.lab_memberships.findMany({
-      where: { userId },
+      where: {
+        userId,
+        lab: { institutionId: fixedInstitution.id },
+      },
     }),
     fastify.prisma.institution_memberships.findMany({
-      where: { userId },
+      where: { userId, institutionId: fixedInstitution.id },
+    }),
+    fastify.prisma.institution_people.findMany({
+      where: { userId, institutionId: fixedInstitution.id, is_active: true },
+      orderBy: { createdAt: 'asc' },
     }),
   ])
 
@@ -97,18 +112,7 @@ export async function getMyProfile(fastify: FastifyInstance, userId: string) {
           },
         })
       : []
-  const allInstitutions =
-    institutionMemberships.length > 0
-      ? await fastify.prisma.institutions.findMany({
-          where: {
-            id: {
-              in: [
-                ...new Set(institutionMemberships.map((membership) => membership.institutionId)),
-              ],
-            },
-          },
-        })
-      : []
+  const allInstitutions = institutionMemberships.length > 0 ? [fixedInstitution] : []
   const manageableLabs = allLabs.filter((lab) => {
     return manageableLabMemberships.some((membership) => membership.labId === lab.id)
   })
@@ -150,6 +154,27 @@ export async function getMyProfile(fastify: FastifyInstance, userId: string) {
     institutionMemberships,
     labMemberships,
   })
+  const institutionPerson =
+    institutionPeople.find((person) => person.institutionId === fixedInstitution.id) ?? null
+  const institutionPaperBindings = institutionPerson
+    ? await fastify.prisma.institution_paper_author_bindings.findMany({
+        where: { personId: institutionPerson.id },
+        orderBy: { createdAt: 'asc' },
+        include: {
+          paper: {
+            select: {
+              id: true,
+              title: true,
+              doi: true,
+              publish_year: true,
+            },
+          },
+          author: {
+            select: { name: true },
+          },
+        },
+      })
+    : []
 
   return {
     code: 0 as const,
@@ -252,6 +277,22 @@ export async function getMyProfile(fastify: FastifyInstance, userId: string) {
           } => item !== null,
         )
         .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')),
+      institution_identity: institutionPerson
+        ? {
+            id: institutionPerson.id,
+            institutionId: fixedInstitution.id,
+            institutionName: fixedInstitution.name,
+            internalId: institutionPerson.internalId,
+            scholarId: institutionPerson.scholarId,
+          }
+        : null,
+      institution_papers: institutionPaperBindings.map((binding) => ({
+        id: binding.paper.id,
+        title: binding.paper.title,
+        doi: binding.paper.doi,
+        publishYear: binding.paper.publish_year,
+        authorName: binding.author.name,
+      })),
     },
   }
 }

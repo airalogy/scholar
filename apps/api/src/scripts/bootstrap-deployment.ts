@@ -8,6 +8,7 @@ interface BootstrapInput {
   ownerName: string
   ownerEmail: string
   ownerUsername: string
+  ownerInternalId: string
   ownerPassword: string
   makePlatformAdmin: boolean
 }
@@ -25,6 +26,7 @@ const readInput = (): BootstrapInput => {
   const ownerEmail = requireEnvironmentValue('SCHOLAR_BOOTSTRAP_OWNER_EMAIL').toLowerCase()
   const ownerUsername = requireEnvironmentValue('SCHOLAR_BOOTSTRAP_OWNER_USERNAME')
   const ownerPassword = requireEnvironmentValue('SCHOLAR_BOOTSTRAP_OWNER_PASSWORD')
+  const ownerInternalId = requireEnvironmentValue('SCHOLAR_BOOTSTRAP_OWNER_INTERNAL_ID')
 
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(institutionSlug)) {
     throw new Error(
@@ -47,6 +49,7 @@ const readInput = (): BootstrapInput => {
     ownerName: requireEnvironmentValue('SCHOLAR_BOOTSTRAP_OWNER_NAME'),
     ownerEmail,
     ownerUsername,
+    ownerInternalId,
     ownerPassword,
     makePlatformAdmin: process.env.SCHOLAR_BOOTSTRAP_PLATFORM_ADMIN === 'true',
   }
@@ -55,6 +58,10 @@ const readInput = (): BootstrapInput => {
 const main = async (): Promise<void> => {
   const databaseUrl = requireEnvironmentValue('DATABASE_URL')
   const input = readInput()
+  const configuredInstitutionSlug = process.env.INSTITUTION_SLUG?.trim()
+  if (configuredInstitutionSlug && configuredInstitutionSlug !== input.institutionSlug) {
+    throw new Error('SCHOLAR_BOOTSTRAP_INSTITUTION_SLUG must match INSTITUTION_SLUG')
+  }
   const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) })
 
   try {
@@ -107,6 +114,69 @@ const main = async (): Promise<void> => {
         update: {
           name: input.institutionName,
           updatedAt: new Date(),
+        },
+      })
+
+      const normalizedInternalId = input.ownerInternalId.toLocaleLowerCase('en-US')
+      const existingPerson = await transaction.institution_people.findUnique({
+        where: {
+          institutionId_normalizedInternalId: {
+            institutionId: institution.id,
+            normalizedInternalId,
+          },
+        },
+      })
+      const conflictingPerson = await transaction.institution_people.findUnique({
+        where: {
+          institutionId_userId: {
+            institutionId: institution.id,
+            userId: user.id,
+          },
+        },
+      })
+      if (existingPerson?.userId && existingPerson.userId !== user.id) {
+        throw new Error('The bootstrap internal ID is linked to another user')
+      }
+      if (conflictingPerson && conflictingPerson.id !== existingPerson?.id) {
+        throw new Error('The bootstrap owner is linked to another institution person')
+      }
+      const now = new Date()
+      const person = existingPerson
+        ? await transaction.institution_people.update({
+            where: { id: existingPerson.id },
+            data: {
+              name: input.ownerName,
+              email: input.ownerEmail,
+              userId: user.id,
+              userLinkedAt: existingPerson.userLinkedAt ?? now,
+              is_active: true,
+              updatedAt: now,
+            },
+          })
+        : await transaction.institution_people.create({
+            data: {
+              institutionId: institution.id,
+              key: `owner:${normalizedInternalId}`.slice(0, 100),
+              internalId: input.ownerInternalId,
+              normalizedInternalId,
+              name: input.ownerName,
+              email: input.ownerEmail,
+              userId: user.id,
+              userLinkedAt: now,
+              createdAt: now,
+              updatedAt: now,
+            },
+          })
+
+      await transaction.institution_person_events.create({
+        data: {
+          institutionId: institution.id,
+          personId: person.id,
+          actorUserId: user.id,
+          event_type: 'bootstrap_owner_linked',
+          source: 'deployment_bootstrap',
+          nextUserId: user.id,
+          createdAt: now,
         },
       })
 

@@ -2,9 +2,12 @@ import type { FastifyInstance } from 'fastify'
 import { Prisma } from '../../../prisma/generated/client'
 import type { SearchQuery } from './schema'
 import type { ClaimRecord } from './service.shared'
-import { tokenizeText } from '../../utils/document'
-import { embedTexts } from '../../ai/embeddings'
 import { formatPapers } from './service.paper'
+import { getConfiguredInstitution } from '../../utils/institution-scope'
+import {
+  searchPaperSegmentsByBm25,
+  searchPaperSegmentsByVector,
+} from '../../search/paper-retrieval'
 
 export async function searchPapers(fastify: FastifyInstance, userId: string, query: SearchQuery) {
   const limit = query.limit ?? 20
@@ -28,37 +31,13 @@ async function searchByFulltext(
   limit: number,
   offset: number,
 ) {
-  const queryText = tokenizeText(q)
-    .filter((token) => token.trim())
-    .join(' ')
-  const results: { paperId: string; text: string; score: number }[] =
-    await fastify.prisma.$queryRawUnsafe(
-      `WITH ranked AS (
-         SELECT e."paperId", e.text,
-                ts_rank(e.tsv, websearch_to_tsquery('simple', $1)) AS score,
-                row_number() OVER (
-                  PARTITION BY e."paperId"
-                  ORDER BY ts_rank(e.tsv, websearch_to_tsquery('simple', $1)) DESC
-                ) AS row_number
-         FROM embeddings e
-         WHERE e.tsv @@ websearch_to_tsquery('simple', $1)
-           AND EXISTS (
-             SELECT 1
-             FROM paper_claims claim
-             JOIN content_review_cases review_case ON review_case.id = claim."reviewCaseId"
-             WHERE claim."paperId" = e."paperId"
-               AND review_case.status = 'approved'
-           )
-       )
-       SELECT "paperId", text, score
-       FROM ranked
-       WHERE row_number = 1
-       ORDER BY score DESC, "paperId"
-       LIMIT $2 OFFSET $3`,
-      queryText,
-      limit,
-      offset,
-    )
+  const institution = await getConfiguredInstitution(fastify)
+  const results = await searchPaperSegmentsByBm25(fastify, q, {
+    institutionId: institution.id,
+    limit,
+    offset,
+    distinctPapers: true,
+  })
 
   return hydrateSearchResults(fastify, userId, results)
 }
@@ -70,37 +49,13 @@ async function searchByVector(
   limit: number,
   offset: number,
 ) {
-  const [queryEmbedding] = await embedTexts(fastify, [q])
-  const vectorStr = `[${queryEmbedding.join(',')}]`
-
-  const results: { paperId: string; text: string; score: number }[] =
-    await fastify.prisma.$queryRawUnsafe(
-      `WITH ranked AS (
-         SELECT e."paperId", e.text,
-                1 - (e.embedding <=> $1::vector) AS score,
-                row_number() OVER (
-                  PARTITION BY e."paperId"
-                  ORDER BY e.embedding <=> $1::vector
-                ) AS row_number
-         FROM embeddings e
-         WHERE e.embedding IS NOT NULL
-           AND EXISTS (
-             SELECT 1
-             FROM paper_claims claim
-             JOIN content_review_cases review_case ON review_case.id = claim."reviewCaseId"
-             WHERE claim."paperId" = e."paperId"
-               AND review_case.status = 'approved'
-           )
-       )
-       SELECT "paperId", text, score
-       FROM ranked
-       WHERE row_number = 1
-       ORDER BY score DESC, "paperId"
-       LIMIT $2 OFFSET $3`,
-      vectorStr,
-      limit,
-      offset,
-    )
+  const institution = await getConfiguredInstitution(fastify)
+  const results = await searchPaperSegmentsByVector(fastify, q, {
+    institutionId: institution.id,
+    limit,
+    offset,
+    distinctPapers: true,
+  })
 
   return hydrateSearchResults(fastify, userId, results)
 }
@@ -110,6 +65,7 @@ async function hydrateSearchResults(
   userId: string,
   results: Array<{ paperId: string; text: string; score: number }>,
 ) {
+  const institution = await getConfiguredInstitution(fastify)
   const paperIds = [...new Set(results.map((result) => result.paperId))]
   const approvedClaims =
     paperIds.length > 0
@@ -133,6 +89,7 @@ async function hydrateSearchResults(
         FROM paper_claims pc
         JOIN content_review_cases crc ON crc.id = pc."reviewCaseId"
         WHERE pc."paperId" IN (${Prisma.join(paperIds)})
+          AND pc."institutionId" = ${institution.id}
           AND crc.status = 'approved'
         ORDER BY pc."paperId", crc."decidedAt" DESC, pc."updatedAt" DESC, pc."createdAt" DESC
       `)

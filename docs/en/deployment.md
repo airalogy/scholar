@@ -1,6 +1,6 @@
-# Airalogy Scholar Private Deployment
+# Airalogy Scholar Deployment
 
-English | [简体中文](../zh/private-deployment.md)
+English | [简体中文](../zh/deployment.md)
 
 This guide deploys one tested Airalogy Scholar release to a university while keeping application upgrades independent from institution-owned data. Production uses a complete release package, not a server Git checkout. Web, API, migrations, documentation, and an optional database are internal components of one product version and are not freely mixed.
 
@@ -67,12 +67,12 @@ At minimum configure:
 - `SCHOLAR_API_IMAGE`, `SCHOLAR_WEB_IMAGE`, and `POSTGRES_IMAGE`;
 - `POSTGRES_PASSWORD` and `DATABASE_URL`;
 - a random `JWT_SECRET` of at least 32 characters;
-- `DEPLOYMENT_MODE` and `PRIVATE_INSTITUTION_SLUG`;
+- `MANAGEMENT_MODE`, `INSTITUTION_SLUG`, and `CONTENT_ACCESS_MODE`;
 - login methods and AI, upload, forum, thesis, and timeline features;
 - local or object-storage settings;
 - application display name and institution-authorized branding URLs.
 
-The formal product template enables `ENABLE_AI_CHAT=true` for the chat page and paper-reading assistant. Configure `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `CHAT_MODEL`, and `OPENAI_EMBEDDING_MODEL`, or explicitly disable AI when it is not part of the deployment. Source-development defaults remain disabled to avoid starting AI without valid credentials.
+The formal product template enables `ENABLE_AI_CHAT=true` for the chat page and paper-reading assistant. Configure `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `CHAT_MODEL`, and `OPENAI_EMBEDDING_MODEL`, or explicitly disable AI when it is not part of the deployment. Source-development defaults remain disabled to avoid starting AI without valid credentials. Approved PDF text is indexed locally for BM25 by default. Set `ALLOW_APPROVED_PDF_MODEL_PROCESSING=true` only after the institution has approved sending retrieved PDF excerpts to the configured model and embedding service; it is otherwise kept `false` in both source and product templates.
 
 For institution-only SSO, enable institution login and SSO and disable password login and public registration. Use only generic `INSTITUTION_SSO_*` configuration. The callback is `/institution_sso_callback`; migrate any legacy customer-specific variables before upgrade. See [institution authentication](./institution-auth.md) and `deploy/.env.example`.
 
@@ -147,6 +147,33 @@ deploy/scholarctl bootstrap
 Bootstrap does not write the owner password to `.env`. Repeating it repairs the same account's ownership relationship without replacing the password. Keep `ENABLE_PUBLIC_SIGNUP=false` afterward.
 
 ## 6. Upgrades
+
+### Upgrading from 3.0.0 to the single-institution version
+
+This upgrade changes the deployment contract and the identity schema. Test it on a restored copy of the existing database before the production maintenance window. Keep the existing PostgreSQL database and `_prisma_migrations` history; do not replace the initial migration, run `db push`, or seed production data.
+
+Migrate the existing configuration into the new release template:
+
+| Previous setting | New setting and required action |
+|---|---|
+| `DEPLOYMENT_MODE=private` | Use `MANAGEMENT_MODE=self_hosted` for institution-operated instances. |
+| `DEPLOYMENT_MODE=public` | Use `MANAGEMENT_MODE=airalogy_managed` for Airalogy-operated tenants with reviewed imports; each tenant still serves only one institution. |
+| `PRIVATE_INSTITUTION_SLUG` / `INSTITUTION_LOGIN_INSTITUTION_SLUG` | Set `INSTITUTION_SLUG` to the existing institution slug. Production startup requires it. |
+| Content visibility | Explicitly choose `CONTENT_ACCESS_MODE=public` or `authenticated`; management mode does not determine visibility. Use `authenticated` for a library that must require login. |
+| `INSTITUTION_SSO_EXTERNAL_ID_FIELD` | Configure `INSTITUTION_SSO_INTERNAL_ID_FIELD` with the institution's verified canonical internal-ID claim. Do not automatically treat an SSO `sub` or email as an employee/student number. |
+
+The migration preserves organization people, scholar mappings, member accounts, invitations, appointments, and paper-author links. Same-name people remain separate; conflicting legacy links need explicit resolution. Existing members without a known internal ID receive migration-only `legacy-user:` identifiers, which must be reconciled with the institution's real IDs before enabling SSO automatic binding.
+
+If the database serves multiple institutions, configuring one slug is not a data migration: records for other institutions become unavailable through that instance. Plan separate institution deployments and validate their data before upgrading. Removed institution join-request endpoints and the changed `/auth/public-config` response also require updates to custom integrations.
+
+Existing embeddings survive the upgrade. To populate the new full-text/BM25 metadata, run the shared indexer inside the API container, first with `--dry-run`:
+
+```bash
+node dist/src/scripts/generate-paper-embeddings.js --dry-run
+node dist/src/scripts/generate-paper-embeddings.js
+```
+
+Reindexing may call the configured embedding service for paper metadata. Approved PDF text is indexed locally for BM25; sending excerpts to the configured model or embedding service requires explicit institutional approval and `ALLOW_APPROVED_PDF_MODEL_PROCESSING=true`. Unapproved and cross-institution files remain excluded. Verify SSO with two same-name users, each user's prebound papers, institution filtering, and AI retrieval after upgrade. Rollback requires the pre-upgrade database backup, matching uploads, and the old configuration and images; switching images alone is insufficient.
 
 Read both changelogs and confirm migration and rollback constraints. Then:
 

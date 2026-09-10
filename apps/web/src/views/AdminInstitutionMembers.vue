@@ -133,10 +133,10 @@
               </div>
 
               <div class="field-grid field-grid--quad">
-                <a-form-item field="externalId" :label="$t('adminInstitutionMembers.externalIdLabel')">
+                <a-form-item field="internalId" :label="$t('adminInstitutionMembers.internalIdLabel')">
                   <a-input
-                    v-model="provisionForm.externalId"
-                    :placeholder="$t('upload.optional')"
+                    v-model="provisionForm.internalId"
+                    :placeholder="$t('adminInstitutionMembers.internalIdPlaceholder')"
                   />
                 </a-form-item>
                 <a-form-item field="college" :label="$t('common.college')">
@@ -257,92 +257,6 @@
         <section class="admin-panel">
           <div class="panel-head">
             <div>
-              <h2 class="panel-title">{{ $t('adminInstitutionMembers.joinRequestsTitle') }}</h2>
-              <p class="panel-subtitle">{{ $t('adminInstitutionMembers.joinRequestsSubtitle') }}</p>
-            </div>
-          </div>
-
-          <template v-if="institution.access.can_manage_members">
-            <div v-if="isJoinRequestLoading" class="table-state">{{ $t('adminInstitutionMembers.joinRequestsLoading') }}</div>
-            <div v-else-if="joinRequests.length" class="join-request-list">
-              <article v-for="request in joinRequests" :key="request.id" class="join-request-item">
-                <div class="join-request-main">
-                  <div class="provision-head">
-                    <div class="search-user">
-                      <div class="avatar">
-                        <img v-if="request.userAvatar" :src="request.userAvatar" :alt="request.userName" />
-                        <span v-else>{{ request.userName.charAt(0) }}</span>
-                      </div>
-                      <div>
-                        <div class="search-name">{{ request.userName }}</div>
-                        <div class="search-meta">{{ request.userEmail }}</div>
-                        <div class="search-meta">{{ formatJoinRequestMeta(request) }}</div>
-                      </div>
-                    </div>
-                    <span
-                      class="status-badge"
-                      :class="`status-badge--${request.status}`"
-                    >
-                      {{ getJoinRequestStatusLabel(request.status) }}
-                    </span>
-                  </div>
-                  <div class="search-meta">
-                    {{ $t('adminInstitutionMembers.joinRequestCreatedAt', { date: formatDateTime(request.createdAt) }) }}
-                  </div>
-                  <div v-if="request.reason" class="request-note-block">
-                    <div class="request-note-label">{{ $t('adminInstitutionMembers.joinRequestReasonLabel') }}</div>
-                    <div class="search-meta search-meta--block">{{ request.reason }}</div>
-                  </div>
-                  <div v-if="request.reviewNotes" class="request-note-block">
-                    <div class="request-note-label">{{ $t('adminInstitutionMembers.joinRequestReviewNotesLabel') }}</div>
-                    <div class="search-meta search-meta--block">{{ request.reviewNotes }}</div>
-                  </div>
-                  <div v-if="request.reviewedByName" class="search-meta">
-                    {{ $t('adminInstitutionMembers.joinRequestReviewedBy', {
-                      name: request.reviewedByName,
-                      date: formatDateTime(request.reviewedAt),
-                    }) }}
-                  </div>
-                </div>
-
-                <div v-if="request.status === 'pending'" class="join-request-review">
-                  <a-textarea
-                    v-model="joinRequestDecisionNotes[request.id]"
-                    :max-length="2000"
-                    :auto-size="{ minRows: 3, maxRows: 5 }"
-                    :placeholder="$t('adminInstitutionMembers.joinRequestNotesPlaceholder')"
-                  />
-                  <div class="provision-actions join-request-review-actions">
-                    <a-button
-                      type="primary"
-                      :loading="joinActionId === request.id && joinActionStatus === 'approved'"
-                      @click="reviewJoinRequest(request.id, 'approved')"
-                    >
-                      {{ $t('adminInstitutionMembers.joinRequestApprove') }}
-                    </a-button>
-                    <a-button
-                      status="danger"
-                      type="outline"
-                      :loading="joinActionId === request.id && joinActionStatus === 'rejected'"
-                      @click="reviewJoinRequest(request.id, 'rejected')"
-                    >
-                      {{ $t('adminInstitutionMembers.joinRequestReject') }}
-                    </a-button>
-                  </div>
-                </div>
-              </article>
-            </div>
-            <div v-else class="table-state">{{ $t('adminInstitutionMembers.noJoinRequests') }}</div>
-          </template>
-
-          <div v-else class="table-state">
-            {{ $t('adminInstitutionMembers.noJoinRequestPermission') }}
-          </div>
-        </section>
-
-        <section class="admin-panel">
-          <div class="panel-head">
-            <div>
               <h2 class="panel-title">{{ $t('adminInstitutionMembers.memberPermissionsTitle') }}</h2>
               <p class="panel-subtitle">{{ $t('adminInstitutionMembers.memberPermissionsSubtitle') }}</p>
             </div>
@@ -357,6 +271,11 @@
                 allow-clear
                 @search="searchDirectory"
                 @press-enter="searchDirectory"
+              />
+              <a-input
+                v-model="searchInternalId"
+                class="internal-id-input"
+                :placeholder="$t('adminInstitutionMembers.internalIdPlaceholder')"
               />
               <a-select v-model="searchRole" class="role-select">
                 <a-option v-for="item in manageableRoleOptions" :key="item.value" :value="item.value">{{ item.label }}</a-option>
@@ -400,7 +319,8 @@
                 <a-button
                   type="outline"
                   :loading="actionUserId === user.id"
-                  @click="upsertMember(user.id, searchRole, searchCanReviewContent, searchCanImportData)"
+                  :disabled="!memberIdSet.has(user.id) && !searchInternalId.trim()"
+                  @click="upsertMember(user.id, searchRole, searchCanReviewContent, searchCanImportData, searchInternalId)"
                 >
                   {{ memberIdSet.has(user.id) ? $t('common.updateRole') : $t('common.addToInstitution') }}
                 </a-button>
@@ -514,8 +434,6 @@ import { useRoute } from 'vue-router'
 import { Message } from '@arco-design/web-vue'
 import { useI18n } from 'vue-i18n'
 import {
-  reviewInstitutionJoinRequest,
-  listInstitutionJoinRequests,
   disableInstitutionProvision,
   getInstitution,
   listInstitutionMemberships,
@@ -525,8 +443,6 @@ import {
   upsertInstitutionMembership,
   upsertInstitutionProvision,
   type InstitutionDetailResponse,
-  type InstitutionJoinRequestItem,
-  type InstitutionJoinRequestStatus,
   type InstitutionMembershipItem,
   type InstitutionProvisionItem,
   type InstitutionProvisionStatus,
@@ -541,9 +457,9 @@ const { t, locale } = useI18n()
 const institution = ref<InstitutionDetailResponse | null>(null)
 const memberships = ref<InstitutionMembershipItem[]>([])
 const provisions = ref<InstitutionProvisionItem[]>([])
-const joinRequests = ref<InstitutionJoinRequestItem[]>([])
 const searchResults = ref<UserSearchItem[]>([])
 const searchQuery = ref('')
+const searchInternalId = ref('')
 const searchRole = ref<InstitutionRole>('member')
 const searchCanReviewContent = ref(false)
 const searchCanImportData = ref(false)
@@ -551,16 +467,12 @@ const isLoading = ref(false)
 const isSavingContent = ref(false)
 const isMembershipLoading = ref(false)
 const isProvisionLoading = ref(false)
-const isJoinRequestLoading = ref(false)
 const isSavingProvision = ref(false)
 const isSearching = ref(false)
 const actionUserId = ref('')
 const provisionActionId = ref('')
 const provisionActionKind = ref<'copy' | 'disable' | ''>('')
-const joinActionId = ref('')
-const joinActionStatus = ref<'approved' | 'rejected' | ''>('')
 const loadError = ref('')
-const joinRequestDecisionNotes = reactive<Record<string, string>>({})
 
 const formState = reactive({
   summary: '',
@@ -573,7 +485,7 @@ const provisionForm = reactive({
   role: 'member' as InstitutionRole,
   can_review_content: false,
   can_import_data: false,
-  externalId: '',
+  internalId: '',
   college: '',
   major: '',
   laboratory: '',
@@ -606,7 +518,8 @@ const manageableRoleOptions = computed(() => {
 const canSubmitProvision = computed(() => {
   return !isSavingProvision.value &&
     Boolean(provisionForm.email.trim()) &&
-    Boolean(provisionForm.name.trim())
+    Boolean(provisionForm.name.trim()) &&
+    Boolean(provisionForm.internalId.trim())
 })
 
 const institutionRoleLabel = computed(() => {
@@ -649,7 +562,7 @@ const resetProvisionForm = (): void => {
   provisionForm.role = 'member'
   provisionForm.can_review_content = false
   provisionForm.can_import_data = false
-  provisionForm.externalId = ''
+  provisionForm.internalId = ''
   provisionForm.college = ''
   provisionForm.major = ''
   provisionForm.laboratory = ''
@@ -722,22 +635,10 @@ const getProvisionStatusLabel = (status: InstitutionProvisionStatus): string => 
   return t(PROVISION_STATUS_LABEL_KEYS[status])
 }
 
-const getJoinRequestStatusLabel = (status: InstitutionJoinRequestStatus): string => {
-  if (status === 'approved') {
-    return t('adminInstitutionMembers.joinRequestStatusApproved')
-  }
-
-  if (status === 'rejected') {
-    return t('adminInstitutionMembers.joinRequestStatusRejected')
-  }
-
-  return t('adminInstitutionMembers.joinRequestStatusPending')
-}
-
 const formatProvisionMeta = (provision: InstitutionProvisionItem): string => {
   const parts = [
     getRoleLabel(provision.role, provision.canReviewContent),
-    provision.externalId,
+    provision.internalId,
     provision.college,
     provision.major,
     provision.laboratory,
@@ -746,38 +647,9 @@ const formatProvisionMeta = (provision: InstitutionProvisionItem): string => {
   return parts.join(' / ') || t('common.noAdditionalInfo')
 }
 
-const formatJoinRequestMeta = (request: InstitutionJoinRequestItem): string => {
-  const parts = [
-    request.userDegree,
-    request.userCollege,
-    request.userMajor,
-    request.userLaboratory,
-  ].filter(Boolean)
-
-  return parts.join(' / ') || t('common.noAdditionalInfo')
-}
-
 const syncFormState = (): void => {
   formState.summary = institution.value?.summary ?? ''
   formState.website = institution.value?.website ?? ''
-}
-
-const syncJoinRequestDecisionState = (items: InstitutionJoinRequestItem[]): void => {
-  const activeIds = new Set(items.map((item) => item.id))
-
-  for (const item of items) {
-    if (joinRequestDecisionNotes[item.id] === undefined) {
-      joinRequestDecisionNotes[item.id] = item.reviewNotes ?? ''
-    } else if (item.status !== 'pending') {
-      joinRequestDecisionNotes[item.id] = item.reviewNotes ?? ''
-    }
-  }
-
-  for (const key of Object.keys(joinRequestDecisionNotes)) {
-    if (!activeIds.has(key)) {
-      delete joinRequestDecisionNotes[key]
-    }
-  }
 }
 
 const syncManageableRoleState = (): void => {
@@ -820,22 +692,6 @@ const loadProvisions = async (slug: string): Promise<void> => {
   }
 }
 
-const loadJoinRequests = async (slug: string): Promise<void> => {
-  if (!institution.value?.access.can_manage_members) {
-    joinRequests.value = []
-    syncJoinRequestDecisionState([])
-    return
-  }
-
-  isJoinRequestLoading.value = true
-  try {
-    joinRequests.value = await listInstitutionJoinRequests(slug)
-    syncJoinRequestDecisionState(joinRequests.value)
-  } finally {
-    isJoinRequestLoading.value = false
-  }
-}
-
 const refreshInstitutionDetail = async (slug: string): Promise<void> => {
   institution.value = await getInstitution(slug)
   syncFormState()
@@ -845,20 +701,15 @@ const load = async (slug: string): Promise<void> => {
   isLoading.value = true
   loadError.value = ''
   searchResults.value = []
+  searchInternalId.value = ''
 
   try {
     await refreshInstitutionDetail(slug)
-    await Promise.all([
-      loadMemberships(slug),
-      loadProvisions(slug),
-      loadJoinRequests(slug),
-    ])
+    await Promise.all([loadMemberships(slug), loadProvisions(slug)])
   } catch (error) {
     institution.value = null
     memberships.value = []
     provisions.value = []
-    joinRequests.value = []
-    syncJoinRequestDecisionState([])
     loadError.value = getErrorMessage(error, t('adminInstitutionMembers.loadFailed'))
   } finally {
     isLoading.value = false
@@ -897,6 +748,7 @@ const saveProvision = async (): Promise<void> => {
     provisions.value = await upsertInstitutionProvision(slug, {
       email: provisionForm.email.trim(),
       name: provisionForm.name.trim(),
+      internalId: provisionForm.internalId.trim(),
       role: provisionForm.role,
       can_review_content: resolveRequestedReviewPermission(
         provisionForm.role,
@@ -906,7 +758,6 @@ const saveProvision = async (): Promise<void> => {
         provisionForm.role,
         provisionForm.can_import_data,
       ),
-      externalId: trimOrUndefined(provisionForm.externalId),
       college: trimOrUndefined(provisionForm.college),
       major: trimOrUndefined(provisionForm.major),
       laboratory: trimOrUndefined(provisionForm.laboratory),
@@ -955,36 +806,6 @@ const disableProvision = async (provisionId: string): Promise<void> => {
   }
 }
 
-const reviewJoinRequest = async (
-  requestId: string,
-  status: 'approved' | 'rejected',
-): Promise<void> => {
-  const slug = String(route.params.slug ?? '')
-  if (!slug) {
-    return
-  }
-
-  joinActionId.value = requestId
-  joinActionStatus.value = status
-  try {
-    joinRequests.value = await reviewInstitutionJoinRequest(slug, requestId, {
-      status,
-      notes: joinRequestDecisionNotes[requestId]?.trim() || undefined,
-    })
-    syncJoinRequestDecisionState(joinRequests.value)
-    await Promise.all([
-      refreshInstitutionDetail(slug),
-      loadMemberships(slug),
-    ])
-    Message.success(t('adminInstitutionMembers.joinRequestReviewSuccess'))
-  } catch (error) {
-    Message.error(getErrorMessage(error, t('adminInstitutionMembers.joinRequestReviewFailed')))
-  } finally {
-    joinActionId.value = ''
-    joinActionStatus.value = ''
-  }
-}
-
 const searchDirectory = async (): Promise<void> => {
   const keyword = searchQuery.value.trim()
   if (!keyword) {
@@ -1007,6 +828,7 @@ const upsertMember = async (
   role: InstitutionRole,
   canReviewContent: boolean,
   canImportData: boolean,
+  internalId?: string,
 ): Promise<void> => {
   const slug = String(route.params.slug ?? '')
   if (!slug) {
@@ -1017,11 +839,13 @@ const upsertMember = async (
   try {
     memberships.value = await upsertInstitutionMembership(slug, {
       userId,
+      internalId: internalId?.trim() || undefined,
       role,
       can_review_content: resolveRequestedReviewPermission(role, canReviewContent),
       can_import_data: resolveRequestedImportPermission(role, canImportData),
     })
     Message.success(t('adminInstitutionMembers.memberUpdated'))
+    searchInternalId.value = ''
   } catch (error) {
     Message.error(getErrorMessage(error, t('adminInstitutionMembers.memberUpdateFailed')))
   } finally {
@@ -1117,8 +941,7 @@ watch(
       institution.value = null
       memberships.value = []
       provisions.value = []
-      joinRequests.value = []
-      syncJoinRequestDecisionState([])
+      searchInternalId.value = ''
       return
     }
     void load(slug)
@@ -1353,48 +1176,6 @@ watch(manageableRoleOptions, () => {
   font-size: 13px
   color: #0f2f57
 
-.join-request-list
-  display: flex
-  flex-direction: column
-  gap: 12px
-  margin-top: 18px
-
-.join-request-item
-  display: flex
-  align-items: flex-start
-  justify-content: space-between
-  gap: 18px
-  padding: 18px
-  border-radius: 18px
-  background: #f8fafc
-
-.join-request-main
-  min-width: 0
-  flex: 1
-
-.join-request-review
-  width: 320px
-  max-width: 100%
-
-.join-request-review-actions
-  margin-top: 12px
-  justify-content: flex-end
-
-.request-note-block
-  margin-top: 12px
-  padding: 12px 14px
-  border-radius: 14px
-  background: #ffffff
-  border: 1px solid rgba(15, 47, 87, 0.08)
-
-.request-note-label
-  font-size: 12px
-  font-weight: 700
-  color: #475467
-
-.search-meta--block
-  white-space: pre-wrap
-
 .member-toolbar
   display: flex
   gap: 12px
@@ -1403,6 +1184,9 @@ watch(manageableRoleOptions, () => {
 
 .member-search
   flex: 1
+
+.internal-id-input
+  width: 220px
 
 .role-select
   width: 160px
@@ -1518,26 +1302,18 @@ watch(manageableRoleOptions, () => {
   .admin-container
     padding: 0 18px
 
-  .admin-header, .panel-head, .member-toolbar, .search-card, .member-card, .lab-card, .provision-card, .join-request-item
+  .admin-header, .panel-head, .member-toolbar, .search-card, .member-card, .lab-card, .provision-card
     flex-direction: column
     align-items: stretch
 
   .field-grid--triple, .field-grid--quad, .field-grid--compact
     grid-template-columns: 1fr
 
-  .role-select, .inline-role-select
+  .role-select, .inline-role-select, .internal-id-input
     width: 100%
 
   .member-actions
     flex-direction: column
     align-items: stretch
 
-  .join-request-review
-    width: 100%
-
-  .join-request-review-actions
-    justify-content: stretch
-
-  .join-request-review-actions :deep(.arco-btn)
-    width: 100%
 </style>

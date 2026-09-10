@@ -20,12 +20,8 @@ export const resolveScholarScopeInstitutionId = async (
   fastify: FastifyInstance,
   requestedSlug?: string,
 ): Promise<string | null> => {
-  const fixedSlug = fastify.deployment.paperLibrary.fixedInstitutionSlug
-  const effectiveSlug = fixedSlug ?? requestedSlug?.trim()
-  if (!effectiveSlug) {
-    return null
-  }
-  if (fixedSlug && requestedSlug && requestedSlug !== fixedSlug) {
+  const effectiveSlug = fastify.deployment.institution.slug
+  if (requestedSlug && requestedSlug !== effectiveSlug) {
     throw fastify.httpErrors.forbidden(
       'This deployment is restricted to its configured institution',
     )
@@ -75,7 +71,7 @@ export const buildScholarWhere = async (
     })
   }
   if (institutionId) {
-    and.push({ institution_mappings: { some: { institutionId } } })
+    and.push({ institution_people: { some: { institutionId } } })
   }
   if (options.omit !== 'college' && query.college) {
     and.push({ college: { has: query.college } })

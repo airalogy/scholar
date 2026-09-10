@@ -18,7 +18,7 @@ Scholar supports two institution data import paths. Both call the same JSON impo
 
 ## When data becomes effective
 
-- Public multi-institution mode: submissions enter the review flow; integration credentials cannot approve their own submissions.
-- Private single-institution mode: valid records are applied directly, while the import and audit history is still retained.
+- Airalogy Managed tenant: submissions enter the managed review flow; integration credentials cannot approve their own submissions.
+- Self-hosted institution: valid records are applied directly, while the import and audit history is still retained.
 
 Continue with [Authentication and Access](/en/integration/authentication) or open the [Bulk Import API](/en/integration/bulk-import).

@@ -37,7 +37,7 @@ const degreeThesisRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.get(
     '/facets',
     {
-      config: { publicRoute: true },
+      config: { publicRoute: true, publicContentRoute: true },
       schema: {
         tags: ['degree-theses-v1'],
         response: { 200: DegreeThesisFacetsResponseSchema },
@@ -75,7 +75,7 @@ const degreeThesisRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.get(
     '/',
     {
-      config: { publicRoute: true },
+      config: { publicRoute: true, publicContentRoute: true },
       schema: {
         tags: ['degree-theses-v1'],
         querystring: DegreeThesisListQuerySchema,
@@ -110,7 +110,7 @@ const degreeThesisRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.get(
     '/by-code/:recordCode',
     {
-      config: { publicRoute: true },
+      config: { publicRoute: true, publicContentRoute: true },
       schema: {
         tags: ['degree-theses-v1'],
         params: DegreeThesisRecordCodeParamsSchema,
@@ -126,7 +126,7 @@ const degreeThesisRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.get(
     '/:id',
     {
-      config: { publicRoute: true },
+      config: { publicRoute: true, publicContentRoute: true },
       schema: {
         tags: ['degree-theses-v1'],
         params: DegreeThesisParamsSchema,

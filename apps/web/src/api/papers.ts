@@ -10,7 +10,8 @@ export interface PaperAuthor {
 export interface PaperBoundMember {
   bindingId: string
   paperId: string
-  userId: string
+  institutionPersonId: string
+  userId: string | null
   name: string
   avatar: string | null
   authorId: string

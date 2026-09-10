@@ -37,7 +37,7 @@ export interface InstitutionProvisionPreview {
   email: string
   name: string
   role: 'owner' | 'admin' | 'member'
-  externalId: string | null
+  internalId: string
   college: string | null
   major: string | null
   laboratory: string | null
@@ -52,7 +52,7 @@ export interface ActivateInstitutionProvisionBody {
   password?: string
 }
 
-export type InstitutionAuthMethod = 'provision_token' | 'platform_account' | 'sso'
+export type InstitutionAuthMethod = 'provision_token' | 'sso'
 export type InstitutionSsoProvisioningMode = 'manual' | 'jit_member'
 
 export interface AuthInstitutionItem {

@@ -42,7 +42,7 @@ describe('admin access policies', () => {
     expect(parseAdminCapabilities('import_data')).toEqual([])
   })
 
-  it('restricts public platform-only tools while allowing private institution admins', () => {
+  it('restricts managed platform-only tools while allowing self-hosted institution admins', () => {
     const institutionAdmin: AdminAccess = {
       ...EMPTY_ADMIN_ACCESS,
       can_access: true,
@@ -51,13 +51,13 @@ describe('admin access policies', () => {
 
     expect(
       hasAdminRouteAccess(institutionAdmin, ['manage_platform', 'manage_institutions'], {
-        deploymentMode: 'public',
+        managementMode: 'airalogy_managed',
         platformOnlyInPublic: true,
       }),
     ).toBe(false)
     expect(
       hasAdminRouteAccess(institutionAdmin, ['manage_platform', 'manage_institutions'], {
-        deploymentMode: 'private',
+        managementMode: 'self_hosted',
         platformOnlyInPublic: true,
       }),
     ).toBe(true)

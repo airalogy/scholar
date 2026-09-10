@@ -89,7 +89,7 @@ const ossRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.get(
     '/access/storage',
     {
-      config: { publicRoute: true },
+      config: { publicRoute: true, publicContentRoute: true },
       schema: {
         tags: ['files'],
         querystring: FileAccessQuerySchema,
@@ -104,7 +104,7 @@ const ossRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.get(
     '/access/:id',
     {
-      config: { publicRoute: true },
+      config: { publicRoute: true, publicContentRoute: true },
       schema: {
         tags: ['files'],
         params: FileAccessParamsSchema,

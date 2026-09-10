@@ -14,6 +14,7 @@ import { buildProtectedFileAccessUrls } from '../../utils/protected-files'
 import { requireNormalizedDoi } from '../../utils/doi'
 import { mergeWhere, normalizeReviewStatus, toClaimRecord } from './service.shared'
 import { refreshPaperSearchIndex } from './paper-index'
+import { getConfiguredInstitution } from '../../utils/institution-scope'
 
 export const resolvePaperScope = async (
   fastify: FastifyInstance,
@@ -22,8 +23,12 @@ export const resolvePaperScope = async (
   requestedLabId?: string,
   requestedReviewNodeId?: string,
 ): Promise<PaperScope> => {
+  const configuredInstitution = await getConfiguredInstitution(fastify)
   if (!requestedInstitutionId && !requestedLabId) {
     throw fastify.httpErrors.badRequest('Institution scope is required when submitting a paper')
+  }
+  if (requestedInstitutionId && requestedInstitutionId !== configuredInstitution.id) {
+    throw fastify.httpErrors.notFound('Institution not found')
   }
 
   if (requestedLabId) {
@@ -33,6 +38,9 @@ export const resolvePaperScope = async (
     })
 
     if (!lab) {
+      throw fastify.httpErrors.notFound('Lab not found')
+    }
+    if (lab.institutionId !== configuredInstitution.id) {
       throw fastify.httpErrors.notFound('Lab not found')
     }
 
@@ -186,9 +194,10 @@ const buildReviewScopeWhere = async (fastify: FastifyInstance, userId: string) =
 }
 
 export const buildUserReviewableClaimsWhere = async (fastify: FastifyInstance, userId: string) => {
+  const institution = await getConfiguredInstitution(fastify)
   const platformRole = await getUserPlatformRole(fastify, userId)
   if (platformRole === 'platform_admin') {
-    return {}
+    return { institutionId: institution.id }
   }
 
   const [scopeWhereResult, workflowClaimIds] = await Promise.all([
@@ -208,7 +217,8 @@ export const buildUserReviewableClaimsWhere = async (fastify: FastifyInstance, u
     throw fastify.httpErrors.forbidden('You do not have permission to review papers')
   }
 
-  return conditions.length === 1 ? conditions[0] : { OR: conditions }
+  const scope = conditions.length === 1 ? conditions[0] : { OR: conditions }
+  return { AND: [{ institutionId: institution.id }, scope] }
 }
 
 const assertCanAccessClaim = async (
@@ -626,6 +636,7 @@ export async function formatPaper(
 }
 
 export async function getPaper(fastify: FastifyInstance, id: string, userId: string | null) {
+  const configuredInstitution = await getConfiguredInstitution(fastify)
   const paper = await fastify.prisma.papers.findUnique({ where: { id } })
   if (!paper) {
     throw fastify.httpErrors.notFound('Paper not found')
@@ -636,6 +647,7 @@ export async function getPaper(fastify: FastifyInstance, id: string, userId: str
         where: {
           paperId: id,
           userId,
+          institutionId: configuredInstitution.id,
         },
         orderBy: { createdAt: 'desc' },
       })
@@ -654,6 +666,7 @@ export async function getPaper(fastify: FastifyInstance, id: string, userId: str
     const approvedClaim = await fastify.prisma.paper_claims.findFirst({
       where: {
         paperId: id,
+        institutionId: configuredInstitution.id,
         review_case: { status: 'approved' },
       },
       include: { review_case: true },
@@ -666,7 +679,10 @@ export async function getPaper(fastify: FastifyInstance, id: string, userId: str
     const reviewScopeWhere = await buildUserReviewableClaimsWhere(fastify, userId).catch(() => ({}))
     if (Object.keys(reviewScopeWhere).length > 0) {
       const reviewableClaim = await fastify.prisma.paper_claims.findFirst({
-        where: mergeWhere({ paperId: id }, reviewScopeWhere),
+        where: mergeWhere(
+          { paperId: id, institutionId: configuredInstitution.id },
+          reviewScopeWhere,
+        ),
         include: { review_case: true },
         orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
       })
@@ -689,18 +705,30 @@ export async function updatePaper(
   body: UpdatePaperBody,
   userId: string,
 ) {
+  await assertCanManagePaper(fastify, userId)
+  const configuredInstitution = await getConfiguredInstitution(fastify)
   const paper = await fastify.prisma.papers.findUnique({ where: { id } })
   if (!paper) {
     throw fastify.httpErrors.notFound('Paper not found')
   }
 
   const claims = await fastify.prisma.paper_claims.findMany({
-    where: { paperId: id },
+    where: { paperId: id, institutionId: configuredInstitution.id },
     include: { review_case: true },
     orderBy: { createdAt: 'asc' },
   })
-  await assertCanManagePaper(fastify, userId)
-
+  if (claims.length === 0) {
+    throw fastify.httpErrors.notFound('Paper not found')
+  }
+  const foreignClaim = await fastify.prisma.paper_claims.findFirst({
+    where: { paperId: id, institutionId: { not: configuredInstitution.id } },
+    select: { id: true },
+  })
+  if (foreignClaim) {
+    throw fastify.httpErrors.conflict(
+      'This legacy paper is linked to another institution and cannot be edited in single-institution mode',
+    )
+  }
   const data: Prisma.papersUpdateInput = { updatedAt: new Date() }
   if (body.title !== undefined) data.title = body.title
   if (body.abstract !== undefined) data.abstract = body.abstract
@@ -743,16 +771,28 @@ export async function updatePaper(
 }
 
 export async function deletePaper(fastify: FastifyInstance, id: string, userId: string) {
+  await assertCanManagePaper(fastify, userId)
+  const configuredInstitution = await getConfiguredInstitution(fastify)
   const paper = await fastify.prisma.papers.findUnique({ where: { id } })
   if (!paper) {
     throw fastify.httpErrors.notFound('Paper not found')
   }
 
   const claims = await fastify.prisma.paper_claims.findMany({
-    where: { paperId: id },
+    where: { paperId: id, institutionId: configuredInstitution.id },
   })
-  await assertCanManagePaper(fastify, userId)
-
+  if (claims.length === 0) {
+    throw fastify.httpErrors.notFound('Paper not found')
+  }
+  const foreignClaim = await fastify.prisma.paper_claims.findFirst({
+    where: { paperId: id, institutionId: { not: configuredInstitution.id } },
+    select: { id: true },
+  })
+  if (foreignClaim) {
+    throw fastify.httpErrors.conflict(
+      'This legacy paper is linked to another institution and cannot be deleted in single-institution mode',
+    )
+  }
   const posts = await fastify.prisma.forum_posts.findMany({
     where: { paperId: id },
     select: { id: true },

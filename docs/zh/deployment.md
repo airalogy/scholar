@@ -1,6 +1,6 @@
-# Airalogy Scholar 私有化部署
+# Airalogy Scholar 部署
 
-[English](../en/private-deployment.md) | 简体中文
+[English](../en/deployment.md) | 简体中文
 
 本文档说明如何把同一套 Airalogy Scholar 发布版本部署到不同大学，并保证应用升级与机构数据相互独立。生产部署以一个经过整体验证的 Airalogy Scholar 发布包为交付物，不以服务器 Git 工作区为运行单元。Web、API、迁移任务和可选数据库是产品内部组件，不分别选择或自由组合版本。
 
@@ -67,7 +67,7 @@ cp deploy/.env.example deploy/.env
 - `SCHOLAR_API_IMAGE`、`SCHOLAR_WEB_IMAGE`、`POSTGRES_IMAGE`；
 - `POSTGRES_PASSWORD` 和 `DATABASE_URL`；
 - `JWT_SECRET`（至少 32 个随机字符）；
-- `DEPLOYMENT_MODE` 和 `PRIVATE_INSTITUTION_SLUG`；
+- `MANAGEMENT_MODE`、`INSTITUTION_SLUG` 和 `CONTENT_ACCESS_MODE`；
 - 登录方式、AI、上传、论坛和年谱开关；
 - 本地文件或对象存储配置；
 - 应用名称及经机构授权的品牌资源 URL。
@@ -76,7 +76,7 @@ cp deploy/.env.example deploy/.env
 问答页和论文详情右侧的 AI 阅读助手。部署前必须填写 `OPENAI_BASE_URL`、
 `OPENAI_API_KEY`、`CHAT_MODEL` 和 `OPENAI_EMBEDDING_MODEL`；若学校本期不交付 AI
 能力，可显式改为 `false`。源码开发模板和服务端代码默认值仍保持关闭，避免在未配置
-模型凭证时误启动 AI 服务。
+模型凭证时误启动 AI 服务。审核通过的 PDF 文本默认只在机构服务内建立 BM25 索引。只有机构已同意将检索到的 PDF 片段交给所配置的对话和嵌入模型服务时，才设置 `ALLOW_APPROVED_PDF_MODEL_PROCESSING=true`；源码和正式部署模板均默认为 `false`。
 
 如果部署仅允许机构统一身份认证，设置
 `ENABLE_INSTITUTION_LOGIN=true`、`INSTITUTION_SSO_ENABLED=true`，并关闭账号密码登录与公开注册。
@@ -164,6 +164,33 @@ deploy/scholarctl bootstrap
 该命令不会把 owner 密码写入 `.env`。重复运行只会修复同一账号与机构的 owner 权限，不会覆盖已有账号密码。完成后保持 `ENABLE_PUBLIC_SIGNUP=false`。
 
 ## 6. 版本升级
+
+### 从 3.0.0 升级到单机构版本
+
+本次升级会改变部署配置和身份数据结构。生产维护窗口前，应先在已有数据库备份的还原副本上验证。保留原 PostgreSQL 数据库和 `_prisma_migrations` 历史，不替换初始迁移，不执行 `db push`，不导入演示 seed。
+
+将原配置迁入新版发布模板：
+
+| 原配置 | 新配置及操作 |
+|---|---|
+| `DEPLOYMENT_MODE=private` | 学校自行运维的实例使用 `MANAGEMENT_MODE=self_hosted`。 |
+| `DEPLOYMENT_MODE=public` | Airalogy 运维、导入需审核的租户使用 `MANAGEMENT_MODE=airalogy_managed`；每个租户仍只服务一个机构。 |
+| `PRIVATE_INSTITUTION_SLUG` / `INSTITUTION_LOGIN_INSTITUTION_SLUG` | 将已有机构的 slug 写入 `INSTITUTION_SLUG`，生产启动时必填。 |
+| 内容可见性 | 显式选择 `CONTENT_ACCESS_MODE=public` 或 `authenticated`；管理方式不决定内容可见性。需要登录才能访问的知识库应设置 `authenticated`。 |
+| `INSTITUTION_SSO_EXTERNAL_ID_FIELD` | 将 `INSTITUTION_SSO_INTERNAL_ID_FIELD` 配置为经学校确认的规范内部 ID 字段，不能直接把 SSO 的 `sub` 或邮箱当作工号、学号。 |
+
+迁移会保留组织人员、学者映射、成员账号、邀请、任职和论文作者绑定。同名人员保持独立，冲突的历史关联需要明确处理。已有成员缺少已知内部 ID 时，会获得仅用于迁移的 `legacy-user:` 编号；启用 SSO 自动绑定前，需将它们与学校的真实编号核对并对应。
+
+若原数据库服务多个机构，仅配置一个 slug 并不会完成数据拆分，其他机构的数据将无法通过该实例访问。必须先规划独立机构实例并核对其数据，再执行升级。自定义接入还需适配已移除的机构加入申请接口和变化后的 `/auth/public-config` 响应。
+
+升级保留已有向量。要补全新增全文/BM25 元数据，可在 API 容器中运行共用索引器，先使用 `--dry-run` 核对范围：
+
+```bash
+node dist/src/scripts/generate-paper-embeddings.js --dry-run
+node dist/src/scripts/generate-paper-embeddings.js
+```
+
+重新索引可能调用已配置的 embedding 服务处理论文元数据。已审核 PDF 正文在本地建立 BM25 索引；只有机构明确同意并设置 `ALLOW_APPROVED_PDF_MODEL_PROCESSING=true` 后，才会将片段发送给所配置的模型或 embedding 服务。未审核和其他机构文件仍不参与处理。升级后应验证两个同名人员的 SSO、各自预绑定论文、机构过滤和 AI 检索。回滚需恢复升级前数据库备份、匹配的上传文件、旧配置及镜像，仅切换镜像不足以回滚。
 
 升级前先阅读目标版本的中英文 Changelog，确认数据库迁移和回滚限制。推荐流程：
 

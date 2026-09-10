@@ -51,18 +51,7 @@ const getTimelineAccess = async (
   userId: string,
   scholarId: string,
 ): Promise<TimelineAccess> => {
-  const platformRole = await getUserPlatformRole(fastify, userId)
-  if (platformRole === 'platform_admin') {
-    return { canRequest: true, canManage: true, institutionId: null }
-  }
-  if (fastify.deployment.mode === 'public') {
-    return { canRequest: true, canManage: false, institutionId: null }
-  }
-
-  const slug = fastify.deployment.paperLibrary.fixedInstitutionSlug
-  if (!slug) {
-    return { canRequest: false, canManage: false, institutionId: null }
-  }
+  const slug = fastify.deployment.institution.slug
   const institution = await fastify.prisma.institutions.findUnique({
     where: { slug },
     select: { id: true },
@@ -70,19 +59,29 @@ const getTimelineAccess = async (
   if (!institution) {
     return { canRequest: false, canManage: false, institutionId: null }
   }
-  const [membership, mapping] = await Promise.all([
+  const [platformRole, membership, mapping] = await Promise.all([
+    getUserPlatformRole(fastify, userId),
     fastify.prisma.institution_memberships.findUnique({
       where: { institutionId_userId: { institutionId: institution.id, userId } },
       select: { role: true },
     }),
-    fastify.prisma.institution_scholar_mappings.findFirst({
+    fastify.prisma.institution_people.findFirst({
       where: { institutionId: institution.id, scholarId },
       select: { id: true },
     }),
   ])
+  if (!mapping) {
+    return { canRequest: false, canManage: false, institutionId: institution.id }
+  }
+  if (platformRole === 'platform_admin') {
+    return { canRequest: true, canManage: true, institutionId: institution.id }
+  }
+  if (fastify.deployment.managementMode === 'airalogy_managed') {
+    return { canRequest: true, canManage: false, institutionId: institution.id }
+  }
   return {
-    canRequest: membership !== null && mapping !== null,
-    canManage: mapping !== null && (membership?.role === 'owner' || membership?.role === 'admin'),
+    canRequest: membership !== null,
+    canManage: membership?.role === 'owner' || membership?.role === 'admin',
     institutionId: institution.id,
   }
 }
@@ -530,28 +529,34 @@ const resolveAdminScholarFilter = async (
   userId: string,
 ): Promise<Prisma.scholar_research_timeline_generationsWhereInput> => {
   const role = await getUserPlatformRole(fastify, userId)
-  if (role === 'platform_admin') {
-    return {}
-  }
-  if (fastify.deployment.mode !== 'private') {
+  if (role !== 'platform_admin' && fastify.deployment.managementMode !== 'self_hosted') {
     throw fastify.httpErrors.forbidden('Platform administrator permission is required')
   }
-  const slug = fastify.deployment.paperLibrary.fixedInstitutionSlug
-  const institution = slug
-    ? await fastify.prisma.institutions.findUnique({ where: { slug }, select: { id: true } })
-    : null
+  const slug = fastify.deployment.institution.slug
+  const institution = await fastify.prisma.institutions.findUnique({
+    where: { slug },
+    select: { id: true },
+  })
   if (!institution) {
     throw fastify.httpErrors.forbidden('Institution administrator permission is required')
   }
-  const access = await getInstitutionAccessById(fastify, userId, institution.id)
-  if (access.institution_role !== 'owner' && access.institution_role !== 'admin') {
-    throw fastify.httpErrors.forbidden('Institution administrator permission is required')
+  if (role !== 'platform_admin') {
+    const access = await getInstitutionAccessById(fastify, userId, institution.id)
+    if (access.institution_role !== 'owner' && access.institution_role !== 'admin') {
+      throw fastify.httpErrors.forbidden('Institution administrator permission is required')
+    }
   }
-  const mappings = await fastify.prisma.institution_scholar_mappings.findMany({
-    where: { institutionId: institution.id },
+  const people = await fastify.prisma.institution_people.findMany({
+    where: { institutionId: institution.id, scholarId: { not: null } },
     select: { scholarId: true },
   })
-  return { scholar_id: { in: mappings.map((mapping) => mapping.scholarId) } }
+  return {
+    scholar_id: {
+      in: people
+        .map((person) => person.scholarId)
+        .filter((scholarId): scholarId is string => Boolean(scholarId)),
+    },
+  }
 }
 
 export const listTimelineGenerations = async (

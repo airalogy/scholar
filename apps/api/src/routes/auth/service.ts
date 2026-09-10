@@ -72,6 +72,9 @@ const assertInstitutionSlugMatch = (
   actualSlug: string,
   expectedSlug?: string,
 ): void => {
+  if (actualSlug !== fastify.deployment.institution.slug) {
+    throw fastify.httpErrors.notFound('Activation token not found')
+  }
   if (expectedSlug && actualSlug !== expectedSlug) {
     throw fastify.httpErrors.badRequest(
       'The activation token does not belong to the selected institution',
@@ -145,10 +148,7 @@ export async function listPublicAuthInstitutions(fastify: FastifyInstance) {
         return []
       }
 
-      if (
-        fastify.deployment.paperLibrary.fixedInstitutionSlug &&
-        institution.slug !== fastify.deployment.paperLibrary.fixedInstitutionSlug
-      ) {
+      if (institution.slug !== fastify.deployment.institution.slug) {
         return []
       }
 
@@ -258,6 +258,20 @@ export async function getInstitutionProvisionPreview(
     where: { email: provision.email },
     select: { id: true },
   })
+  const person = await fastify.prisma.institution_people.findUnique({
+    where: {
+      institutionId_provisionId: {
+        institutionId: institution.id,
+        provisionId: provision.id,
+      },
+    },
+    select: { internalId: true },
+  })
+  if (!person) {
+    throw fastify.httpErrors.conflict(
+      'Institution provision is not linked to an institution person',
+    )
+  }
 
   return {
     institutionSlug: institution.slug,
@@ -265,7 +279,7 @@ export async function getInstitutionProvisionPreview(
     email: provision.email,
     name: provision.name,
     role: normalizeInstitutionRole(provision.role),
-    externalId: provision.externalId,
+    internalId: person.internalId,
     college: provision.college,
     major: provision.major,
     laboratory: provision.laboratory,

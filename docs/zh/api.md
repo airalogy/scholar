@@ -57,12 +57,12 @@
   - Prisma 相关在 `prisma/` 目录；本地开发可用 `db:migrate`，生产只应用 `db:migrate:deploy`。`db:seed` 会清空核心业务表，仅在可丢弃数据库且显式设置 `ALLOW_DESTRUCTIVE_SEED=true` 时使用。
 - **鉴权**
   - JWT 插件：`@fastify/jwt`；新增受保护路由通常通过 `preHandler` 或统一钩子实现。
-  - 部署模式与公共能力开关由 `src/plugins/global/zzz-deployment.ts` 在启动时统一解析，并挂到 `fastify.deployment`。
+  - 单机构运行配置、运营方式与公共能力开关由 `src/plugins/global/zzz-deployment.ts` 在启动时统一解析，并挂到 `fastify.deployment`。
   - `GET /auth/public-config` 会返回当前部署的公开能力，例如：是否开启账号密码登录、是否开启 Airalogy OAuth、是否开启机构登录、是否开启 AI Chat / 论文上传等。
   - `ENABLE_PAPER_UPLOAD=false` 不只是隐藏前端入口；后端也会同时拒绝 `POST /papers/create` 与 `POST /files/upload`。
   - 机构成员激活接口使用公开 `auth` 路由，当前支持基于激活令牌完成首次绑定/注册。
   - 机构 SSO 登录当前支持“首次成功认证后自动创建或匹配平台 `user`，并自动创建默认 `member` 级别机构成员关系”的 JIT provisioning。
-  - 机构登录入口和接入更多机构的约定见[机构认证](./institution-auth.md)。
+  - 机构登录入口和内部 ID 绑定约定见[机构认证](./institution-auth.md)。
 - **响应结构**
   - 响应必须符合路由声明的 TypeBox Schema；新增版本化业务接口使用 `{ code, data?, message? }`。
 - **内容治理与审核**
@@ -74,7 +74,7 @@
   - 机构管理员预开通成员与首次激活规则同样见[内容治理](./content-governance.md)。
   - 机构成员论文作者绑定接口 `POST /institutions/:slug/paper-author-bindings`、`DELETE /institutions/:slug/paper-author-bindings/:bindingId` 的设计边界与约束见[内容治理](./content-governance.md)。
   - 机构成员论文统计口径，例如 `paperCount` 与 `approvedPaperCount` 的含义，见[论文审核流程](./paper-review-workflow.md)。
-  - 多机构登录入口与认证方式扩展规则见[机构认证](./institution-auth.md)。
-  - 如果要把当前系统交付为某一个机构的私有化部署版本，具体运行步骤、环境变量组合和初始化方式见[私有化部署](./private-deployment.md)。
+  - 机构登录与认证方式规则见[机构认证](./institution-auth.md)。
+  - 具体运行步骤、环境变量组合和初始化方式见[部署](./deployment.md)。
   - 机构组织结构接口 `GET /institutions/:slug/org-structure`、`PUT /institutions/:slug/org-structure`，以及论文上传时可选的 `review_node_id`，见[机构组织结构](./institution-org-structure.md)。
-  - 公网版 / 私有版共用同一套后端代码，差别由环境变量中的部署模式与 feature flag 决定，而不是维护独立分支。
+  - Airalogy Managed 与机构自托管共用同一套单机构后端代码，差别由环境变量与 feature flag 决定，不维护客户专属分支。

@@ -2,7 +2,12 @@
 
 [English](./README.md) | 简体中文
 
-面向学术场景的机构论文库、学者信息、研究时间线、检索与问答系统（Monorepo）。
+面向单一机构的学术知识平台，提供学者档案、论文、学位论文、研究时间线、检索与 AI 辅助阅读。每个部署实例或托管租户只服务一个机构，用户不在不同机构之间切换数据作用域。
+
+同一套源码支持两种运行方式：
+
+- **机构自托管**：由机构自行运行 Scholar，通过校验的导入数据直接生效。
+- **Airalogy Managed**：由 Airalogy 运行隔离的单机构租户，导入变更进入托管审核流程。
 
 ## 当前项目状态
 
@@ -59,7 +64,7 @@ pnpm install
 
 后端通过环境变量启动。请复制 `apps/api/.env.example` 为 `apps/api/.env` 并根据实际环境修改。
 
-AI 对话与学者推荐都由 `apps/api` 提供。启用时需在 `apps/api/.env` 配置 `OPENAI_BASE_URL`、`OPENAI_API_KEY`、`CHAT_MODEL` 和 `OPENAI_EMBEDDING_MODEL`。
+AI 对话与学者推荐都由 `apps/api` 提供。启用时需在 `apps/api/.env` 配置 `OPENAI_BASE_URL`、`OPENAI_API_KEY`、`CHAT_MODEL` 和 `OPENAI_EMBEDDING_MODEL`。审核通过的 PDF 会在机构服务内解析并建立 BM25 索引；只有机构明确设置 `ALLOW_APPROVED_PDF_MODEL_PROCESSING=true` 后，才会把 PDF 片段交给所配置的模型服务。
 
 ## 本地开发数据库
 
@@ -199,7 +204,7 @@ deploy/scholarctl bootstrap
 
 默认只把 Web 绑定到 `127.0.0.1:8080`，由部署方现有的 HTTPS 反向代理对外提供服务。中国大陆或断网环境不依赖 Docker Hub：可把全部镜像同步到阿里云 ACR、腾讯云 TCR 或校内 Harbor，并在 `deploy/.env` 中替换镜像地址；也可以通过 `deploy/export-images.sh` / `deploy/import-images.sh` 交付离线镜像包。
 
-Scholar 以一个产品版本整体交付；Web、API、迁移任务和可选 PostgreSQL 是该产品内部的独立服务，不作为可自由组合的版本分别交付。应用升级只替换发布清单指定的镜像。PostgreSQL、上传文件和备份由部署方持有，并通过 Docker volume、宿主机目录或外部数据库/对象存储持续保留。完整说明见[私有化部署说明](./docs/zh/private-deployment.md)。
+Scholar 以一个产品版本整体交付；Web、API、迁移任务和可选 PostgreSQL 是该产品内部的独立服务，不作为可自由组合的版本分别交付。应用升级只替换发布清单指定的镜像。PostgreSQL、上传文件和备份由部署方持有，并通过 Docker volume、宿主机目录或外部数据库/对象存储持续保留。完整说明见[部署说明](./docs/zh/deployment.md)。
 
 正式部署后，机构管理员和系统集成人员可从 `/docs/zh/` 或 `/docs/en/` 阅读与当前产品版本一致的中英文指南，并在页面中切换语言；`/docs/` 默认进入中文版。`/api/docs` 提供当前 API 的 Swagger 文档。面向用户的文档站不收录部署、运维、仓库架构或开发流程；这些资料保留在仓库[中文维护文档](./docs/zh/README.md)中，并另有[英文版本](./docs/en/README.md)。文档静态文件包含在 Web 镜像中，因此校内镜像和离线交付无需额外连接公共文档服务。
 

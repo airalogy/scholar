@@ -420,7 +420,7 @@ const buildInstitutionPaperAuthorBindingClearWhere = (
 
   if (targets.profileIds.length > 0) {
     filters.push({ authorId: { in: targets.profileIds } })
-    filters.push({ userId: { in: targets.profileIds } })
+    filters.push({ person: { scholarId: { in: targets.profileIds } } })
   }
 
   return filters.length > 0
@@ -604,7 +604,7 @@ const loadInstitutionPaperAuthorBindings = async (institutionId: string, authorI
     const bindings = await prisma.institution_paper_author_bindings.findMany({
       where: {
         institutionId,
-        OR: [{ authorId: { in: chunk } }, { userId: { in: chunk } }],
+        OR: [{ authorId: { in: chunk } }, { person: { scholarId: { in: chunk } } }],
       },
     })
     for (const binding of bindings) {
@@ -1109,13 +1109,57 @@ const syncInstitutionPaperAuthorBindings = async (
   const existingBindingByAuthor = new Map(
     existingBindings.map((binding) => [`${binding.paperId}:${binding.authorId}`, binding]),
   )
-  const existingBindingByUser = new Map(
-    existingBindings.map((binding) => [`${binding.paperId}:${binding.userId}`, binding]),
+  const existingBindingByPerson = new Map(
+    existingBindings.map((binding) => [`${binding.paperId}:${binding.personId}`, binding]),
   )
+  const existingPeople = await prisma.institution_people.findMany({
+    where: {
+      institutionId,
+      scholarId: { in: sourceProfiles.map((profile) => profile.id) },
+    },
+  })
+  const personByScholarId = new Map<string, (typeof existingPeople)[number]>()
+  for (const person of existingPeople) {
+    if (person.scholarId) {
+      personByScholarId.set(person.scholarId, person)
+    }
+  }
+  const matchingUsers = await prisma.users.findMany({
+    where: { id: { in: sourceProfiles.map((profile) => profile.id) } },
+    select: { id: true },
+  })
+  const matchingUserIds = new Set(matchingUsers.map((user) => user.id))
+
+  for (const profile of sourceProfiles) {
+    if (personByScholarId.has(profile.id) || isDryRun) {
+      continue
+    }
+    const runAt = new Date()
+    const person = await prisma.institution_people.create({
+      data: {
+        institutionId,
+        key: `scholar:${profile.id}`,
+        internalId: `legacy-scholar:${profile.id}`,
+        normalizedInternalId: `legacy-scholar:${profile.id}`,
+        name: profile.name.trim(),
+        userId: matchingUserIds.has(profile.id) ? profile.id : null,
+        scholarId: profile.id,
+        userLinkedAt: matchingUserIds.has(profile.id) ? runAt : null,
+        scholarLinkedAt: runAt,
+        createdAt: runAt,
+        updatedAt: runAt,
+      },
+    })
+    personByScholarId.set(profile.id, person)
+  }
 
   for (const profile of sourceProfiles) {
     const authorId = profile.id
-    const userId = profile.id
+    const person = personByScholarId.get(profile.id)
+    if (!person && !isDryRun) {
+      throw new Error(`Institution person was not created for scholar "${profile.id}"`)
+    }
+    const personId = person?.id ?? profile.id
     const dedupedDoiList = dedupeDoiList(profile.doi_list)
 
     for (const doi of dedupedDoiList) {
@@ -1130,15 +1174,15 @@ const syncInstitutionPaperAuthorBindings = async (
       }
 
       const authorBindingKey = `${paper.id}:${authorId}`
-      const userBindingKey = `${paper.id}:${userId}`
+      const personBindingKey = `${paper.id}:${personId}`
       const existingBinding = existingBindingByAuthor.get(authorBindingKey)
-      const existingUserBinding = existingBindingByUser.get(userBindingKey)
+      const existingPersonBinding = existingBindingByPerson.get(personBindingKey)
 
       if (!existingBinding) {
-        if (existingUserBinding && existingUserBinding.authorId !== authorId) {
+        if (existingPersonBinding && existingPersonBinding.authorId !== authorId) {
           summary.institutionPaperAuthorBindings.conflicts += 1
           logWarn(
-            `Skipped institution_paper_author_bindings row for author "${authorId}" and paper "${paper.id}" because user "${userId}" is already bound to author "${existingUserBinding.authorId}"`,
+            `Skipped institution_paper_author_bindings row for author "${authorId}" and paper "${paper.id}" because person "${personId}" is already bound to author "${existingPersonBinding.authorId}"`,
           )
           continue
         }
@@ -1150,29 +1194,29 @@ const syncInstitutionPaperAuthorBindings = async (
               institutionId,
               paperId: paper.id,
               authorId,
-              userId,
+              personId,
               boundBy: boundByUserId,
               createdAt: runAt,
               updatedAt: runAt,
             },
           })
           existingBindingByAuthor.set(authorBindingKey, createdBinding)
-          existingBindingByUser.set(userBindingKey, createdBinding)
+          existingBindingByPerson.set(personBindingKey, createdBinding)
         }
 
         summary.institutionPaperAuthorBindings.created += 1
         continue
       }
 
-      if (existingBinding.userId === userId && existingBinding.boundBy === boundByUserId) {
+      if (existingBinding.personId === personId && existingBinding.boundBy === boundByUserId) {
         summary.institutionPaperAuthorBindings.unchanged += 1
         continue
       }
 
-      if (existingUserBinding && existingUserBinding.id !== existingBinding.id) {
+      if (existingPersonBinding && existingPersonBinding.id !== existingBinding.id) {
         summary.institutionPaperAuthorBindings.conflicts += 1
         logWarn(
-          `Skipped institution_paper_author_bindings update for author "${authorId}" and paper "${paper.id}" because user "${userId}" is already bound to author "${existingUserBinding.authorId}"`,
+          `Skipped institution_paper_author_bindings update for author "${authorId}" and paper "${paper.id}" because person "${personId}" is already bound to author "${existingPersonBinding.authorId}"`,
         )
         continue
       }
@@ -1181,13 +1225,13 @@ const syncInstitutionPaperAuthorBindings = async (
         const updatedBinding = await prisma.institution_paper_author_bindings.update({
           where: { id: existingBinding.id },
           data: {
-            userId,
+            personId,
             boundBy: boundByUserId,
             updatedAt: new Date(),
           },
         })
         existingBindingByAuthor.set(authorBindingKey, updatedBinding)
-        existingBindingByUser.set(userBindingKey, updatedBinding)
+        existingBindingByPerson.set(personBindingKey, updatedBinding)
       }
 
       summary.institutionPaperAuthorBindings.updated += 1

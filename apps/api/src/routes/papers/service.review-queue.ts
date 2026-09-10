@@ -9,6 +9,7 @@ import {
   normalizeSearchText,
 } from './service.shared'
 import { formatPapers } from './service.paper'
+import { getConfiguredInstitution } from '../../utils/institution-scope'
 
 const escapeLikePattern = (value: string): string => {
   return value.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')
@@ -19,8 +20,9 @@ const buildReviewQueueQuery = async (
   userId: string,
   query: ReviewQueueQuery,
 ) => {
+  const institution = await getConfiguredInstitution(fastify)
   const reviewScope = await getReviewScope(fastify, userId)
-  const filters: Prisma.Sql[] = []
+  const filters: Prisma.Sql[] = [Prisma.sql`pc."institutionId" = ${institution.id}`]
   const keyword = normalizeSearchText(query.q)
 
   if (reviewScope.platformRole !== 'platform_admin') {

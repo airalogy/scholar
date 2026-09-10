@@ -2,7 +2,12 @@
 
 English | [简体中文](./README.zh-CN.md)
 
-Airalogy Scholar is an institution-ready platform for scholarly profiles, papers, degree theses, research timelines, discovery, and AI-assisted reading.
+Airalogy Scholar is a single-institution knowledge platform for scholarly profiles, papers, degree theses, research timelines, discovery, and AI-assisted reading. Each deployment or managed tenant serves exactly one institution; institution data and identity boundaries are never selected by end users.
+
+The same source supports two operating models:
+
+- **Self-hosted:** the institution operates Scholar and valid imports take effect directly.
+- **Airalogy Managed:** Airalogy operates an isolated institution tenant and imported changes enter the managed review workflow.
 
 ## What is included
 
@@ -52,7 +57,7 @@ This installs dependencies for the API, Web application, and documentation site.
 
 Copy `apps/api/.env.example` to `apps/api/.env` and update the environment variables for your local environment.
 
-The API provides both conversational AI and Scholar retrieval. To enable them, configure `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `CHAT_MODEL`, and `OPENAI_EMBEDDING_MODEL` in `apps/api/.env`.
+The API provides both conversational AI and Scholar retrieval. To enable them, configure `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `CHAT_MODEL`, and `OPENAI_EMBEDDING_MODEL` in `apps/api/.env`. Approved PDFs are extracted and indexed locally for BM25 retrieval; sending PDF excerpts to the configured model service remains disabled unless the institution explicitly sets `ALLOW_APPROVED_PDF_MODEL_PROCESSING=true`.
 
 ## Start a local database
 
@@ -166,7 +171,7 @@ PostgreSQL data, uploaded files, and backups remain under the deploying institut
 
 Mainland China and disconnected environments can mirror the API, Web, and PostgreSQL images to ACR, TCR, Harbor, or another institution-managed registry. `deploy/export-images.sh` and `deploy/import-images.sh` support offline delivery.
 
-See [private deployment](./docs/en/private-deployment.md) for the complete deployment and upgrade guide.
+See the [deployment guide](./docs/en/deployment.md) for the complete installation and upgrade process.
 
 ## Documentation
 

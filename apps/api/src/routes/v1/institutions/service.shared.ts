@@ -69,10 +69,7 @@ export const loadImportInstitution = async (
   fastify: FastifyInstance,
   slug: string,
 ): Promise<InstitutionRecord> => {
-  if (
-    fastify.deployment.paperLibrary.fixedInstitutionSlug &&
-    fastify.deployment.paperLibrary.fixedInstitutionSlug !== slug
-  ) {
+  if (fastify.deployment.institution.slug !== slug) {
     throw fastify.httpErrors.notFound('Institution not found')
   }
 

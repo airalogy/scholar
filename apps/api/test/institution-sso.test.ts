@@ -13,7 +13,10 @@ const USER_ID = '11111111-1111-4111-8111-111111111111'
 const INSTITUTION_ID = '22222222-2222-4222-8222-222222222222'
 
 const deployment: DeploymentRuntimeConfig = {
-  mode: 'private',
+  tenancyMode: 'single_institution',
+  managementMode: 'self_hosted',
+  contentAccess: 'public',
+  institution: { slug: 'example-university' },
   auth: {
     enablePasswordSignin: false,
     enablePublicSignup: false,
@@ -54,14 +57,14 @@ const deployment: DeploymentRuntimeConfig = {
     clientSecret: 'provider-secret',
     redirectUri: 'https://scholar.example.test/institution_sso_callback',
     scope: 'basic',
-    externalIdField: 'account.id',
+    internalIdField: 'account.id',
     emailField: 'account.email',
     nameField: 'account.name',
     userInfoTokenMode: 'bearer',
   },
 }
 
-test('institution SSO links a verified identity to an existing institution member', async (t) => {
+test('institution SSO links a verified identity through the canonical institution person', async (t) => {
   const app = Fastify({ logger: false })
   await app.register(sensible)
   await app.register(jwt, { secret: 'institution-sso-test-jwt-secret-1234567890' })
@@ -72,7 +75,8 @@ test('institution SSO links a verified identity to an existing institution membe
 
   const createdIdentities: Array<{ userId: string; provider: string; externalId: string }> = []
   let membershipUpserted = false
-  app.decorate('prisma', {
+  let linkedPersonUserId: string | null = USER_ID
+  const prisma = {
     user_external_identities: {
       findUnique: async () => null,
       create: async ({
@@ -89,13 +93,25 @@ test('institution SSO links a verified identity to an existing institution membe
       },
     },
     users: {
-      findUnique: async () => ({
-        id: USER_ID,
-        email: 'member@example.edu',
-        username: 'existing_member',
-        name: 'Existing Member',
-        institution_memberships: [{ id: 1 }],
-      }),
+      findUnique: async ({
+        where,
+      }: {
+        where: { id?: string; email?: string; username?: string }
+      }) => {
+        if (where.username) {
+          return null
+        }
+        if (where.email) {
+          return assert.fail('Email must not be used to claim an institution identity')
+        }
+        return {
+          id: USER_ID,
+          email: 'member@example.edu',
+          username: 'existing_member',
+          name: 'Existing Member',
+        }
+      },
+      create: async () => assert.fail('The verified email already belongs to an account'),
       update: async () => assert.fail('A populated existing user should not be updated'),
     },
     institutions: {
@@ -107,7 +123,37 @@ test('institution SSO links a verified identity to an existing institution membe
         return { id: 1 }
       },
     },
-  } as never)
+    institution_people: {
+      findUnique: async () => ({
+        id: '33333333-3333-4333-8333-333333333333',
+        institutionId: INSTITUTION_ID,
+        key: 'person:20260001',
+        internalId: '20260001',
+        normalizedInternalId: '20260001',
+        name: 'Verified Member',
+        email: 'member@example.edu',
+        userId: linkedPersonUserId,
+        scholarId: null,
+        provisionId: null,
+        userLinkedAt: new Date('2026-08-26T00:00:00.000Z'),
+        scholarLinkedAt: null,
+      }),
+      findFirst: async () => null,
+      update: async ({ data }: { data: { userId?: string | null } }) => {
+        linkedPersonUserId = data.userId ?? linkedPersonUserId
+        return {
+          id: '33333333-3333-4333-8333-333333333333',
+          institutionId: INSTITUTION_ID,
+          userId: linkedPersonUserId,
+        }
+      },
+    },
+    institution_person_events: {
+      create: async ({ data }: { data: object }) => data,
+    },
+    $transaction: async (operation: (tx: typeof prisma) => Promise<unknown>) => operation(prisma),
+  }
+  app.decorate('prisma', prisma as never)
 
   const originalFetch = globalThis.fetch
   const providerRequests: Array<{ url: string; authorization: string | null }> = []
@@ -171,5 +217,6 @@ test('institution SSO links a verified identity to an existing institution membe
     externalId: '20260001',
   })
   assert.equal(membershipUpserted, true)
+  assert.equal(linkedPersonUserId, USER_ID)
   assert.equal(providerRequests[1]?.authorization, 'Bearer provider-access-token')
 })

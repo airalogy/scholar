@@ -47,11 +47,11 @@ curl -X POST 'https://scholar.example.edu/api/v1/institutions/example-university
   }'
 ```
 
-Scholar strips DOI URL prefixes and normalizes case. In public multi-institution mode, new papers and conflicting metadata enter review and do not overwrite shared global metadata immediately.
+Scholar strips DOI URL prefixes and normalizes case. In an Airalogy Managed tenant, new papers and conflicting metadata enter review and do not overwrite published metadata before approval. A self-hosted instance applies valid data directly.
 
 ## Import scholars
 
-Scholars use an institution-scoped unique `external_id`. External systems do not create Scholar UUIDs; the platform maintains the institution-to-scholar mapping.
+Scholars use an institution-scoped unique `external_id`. This wire field contains the institution's canonical employee/student identifier. External systems do not create Scholar UUIDs, and email or name must not be used as identity keys. The platform links the institution person, scholarly profile, user account, and prebound papers independently.
 
 ```bash
 curl -X POST 'https://scholar.example.edu/api/v1/institutions/example-university/imports/scholars' \
@@ -74,7 +74,7 @@ curl -X POST 'https://scholar.example.edu/api/v1/institutions/example-university
   }'
 ```
 
-Every DOI in `paper_dois` must already exist in the database, so import papers first during initial synchronization. Scholar profile changes in public multi-institution mode become effective only after platform administrator review.
+Every DOI in `paper_dois` must already exist in the database, so import papers first during initial synchronization. Scholar profile changes in an Airalogy Managed tenant become effective only after managed review; self-hosted changes apply directly.
 
 ## Read results
 

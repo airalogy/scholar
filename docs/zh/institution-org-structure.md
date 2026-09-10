@@ -45,10 +45,9 @@
 - `institution_org_edges`
   - 节点之间的关系
   - 当前推荐 `fromNodeId = 子节点`，`toNodeId = 父节点`
-- `institution_org_people`
-  - 机构目录中的人
-  - 可绑定平台 `user`
-  - 可关联 `institution_user_provisions`，用于预开通
+- `institution_people`
+  - 机构目录中的权威人员身份，以唯一规范内部 ID 区分
+  - 可分别关联平台 `user`、`scholar` 和 `institution_user_provisions`
 - `institution_org_positions`
   - 某节点上的岗位
   - 示例：院长、科研秘书、PI、审核员
@@ -302,14 +301,16 @@
 
 导入组织结构时，系统会尽量自动完成以下动作：
 
-1. 若 `people[].userId` 已提供，直接绑定到该平台用户
-2. 若未提供 `userId`，但 `email` 能命中已有 `users.email`，则自动绑定该用户
-3. 若 `createProvision = true` 且尚未命中平台用户，则自动创建或更新 `institution_user_provisions`
-4. 一旦目录中的人绑定到平台用户，系统会确保存在对应 `institution_memberships`
+1. 每个 `people[]` 必须提供机构内唯一的 `internalId`
+2. 若 `people[].userId` 已提供，系统显式绑定到该平台用户
+3. 若 `createProvision = true` 且尚未绑定平台用户，则创建或更新 `institution_user_provisions`
+4. 人员通过 SSO 或激活令牌首次登录时，系统按同一 `internalId` 绑定 `user`
+5. 一旦目录中的人绑定到平台用户，系统会确保存在对应 `institution_memberships`
 
 注意：
 
 - 当前实现不会因为导入名单而直接创建可登录 `user`
+- `email` 只作为联系信息，不用于自动认领或覆盖机构身份
 - 平台账号仍应通过原有注册、激活或机构登录流程产生
 
 ## 与论文审核的关系

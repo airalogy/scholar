@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 
-export type DeploymentMode = 'public' | 'private'
+export type ManagementMode = 'airalogy_managed' | 'self_hosted'
+export type ContentAccessMode = 'public' | 'authenticated'
 
 export interface DeploymentAuthConfig {
   enablePasswordSignin: boolean
@@ -22,7 +23,7 @@ export interface DeploymentInstitutionSsoConfig {
   clientSecret: string
   redirectUri: string
   scope: string
-  externalIdField: string
+  internalIdField: string
   emailField: string
   nameField: string
   userInfoTokenMode: 'bearer' | 'query'
@@ -54,7 +55,7 @@ export interface DeploymentNavigationConfig {
 
 export interface DeploymentPaperLibraryConfig {
   defaultPath: string
-  fixedInstitutionSlug: string | null
+  fixedInstitutionSlug: string
 }
 
 export type ScholarTimelineGenerationMode = 'disabled' | 'request_only' | 'preview' | 'admin'
@@ -64,7 +65,12 @@ export interface DeploymentScholarTimelineConfig {
 }
 
 export interface DeploymentRuntimeConfig {
-  mode: DeploymentMode
+  tenancyMode: 'single_institution'
+  managementMode: ManagementMode
+  contentAccess: ContentAccessMode
+  institution: {
+    slug: string
+  }
   auth: DeploymentAuthConfig
   features: DeploymentFeatureConfig
   branding: DeploymentBrandingConfig
@@ -76,7 +82,12 @@ export interface DeploymentRuntimeConfig {
 }
 
 export interface PublicDeploymentConfig {
-  deploymentMode: DeploymentMode
+  tenancyMode: 'single_institution'
+  managementMode: ManagementMode
+  contentAccess: ContentAccessMode
+  institution: {
+    slug: string
+  }
   auth: DeploymentAuthConfig
   features: DeploymentFeatureConfig
   branding: DeploymentBrandingConfig
@@ -143,7 +154,7 @@ const buildInstitutionSsoConfig = (fastify: FastifyInstance): DeploymentInstitut
     clientSecret: fastify.config.INSTITUTION_SSO_CLIENT_SECRET.trim(),
     redirectUri: fastify.config.INSTITUTION_SSO_REDIRECT_URI.trim(),
     scope: firstConfiguredValue(fastify.config.INSTITUTION_SSO_SCOPE, 'basic'),
-    externalIdField: firstConfiguredValue(fastify.config.INSTITUTION_SSO_EXTERNAL_ID_FIELD, 'sub'),
+    internalIdField: fastify.config.INSTITUTION_SSO_INTERNAL_ID_FIELD.trim(),
     emailField: firstConfiguredValue(fastify.config.INSTITUTION_SSO_EMAIL_FIELD, 'email'),
     nameField: firstConfiguredValue(fastify.config.INSTITUTION_SSO_NAME_FIELD, 'name'),
     userInfoTokenMode: fastify.config.INSTITUTION_SSO_USERINFO_TOKEN_MODE,
@@ -152,14 +163,13 @@ const buildInstitutionSsoConfig = (fastify: FastifyInstance): DeploymentInstitut
 
 export const buildDeploymentRuntimeConfig = (fastify: FastifyInstance): DeploymentRuntimeConfig => {
   const fixedInstitutionSlug =
-    fastify.config.DEPLOYMENT_MODE === 'private'
-      ? fastify.config.PRIVATE_INSTITUTION_SLUG.trim() || null
-      : null
+    fastify.config.INSTITUTION_SLUG.trim() ||
+    (fastify.config.NODE_ENV === 'production' ? '' : 'example-university')
+  if (!fixedInstitutionSlug) {
+    throw new Error('INSTITUTION_SLUG is required in production')
+  }
   const institutionLogin: DeploymentInstitutionLoginConfig = {
-    institutionSlug: firstConfiguredValue(
-      fastify.config.INSTITUTION_LOGIN_INSTITUTION_SLUG,
-      fixedInstitutionSlug ?? '',
-    ),
+    institutionSlug: fixedInstitutionSlug,
   }
   const institutionSso = buildInstitutionSsoConfig(fastify)
   const auth: DeploymentAuthConfig = {
@@ -195,7 +205,7 @@ export const buildDeploymentRuntimeConfig = (fastify: FastifyInstance): Deployme
     institutionWatermarkUrl,
   }
   const paperLibrary: DeploymentPaperLibraryConfig = {
-    defaultPath: fixedInstitutionSlug ? `/institutions/${fixedInstitutionSlug}/papers` : '/papers',
+    defaultPath: `/institutions/${fixedInstitutionSlug}/papers`,
     fixedInstitutionSlug,
   }
   const scholarTimeline: DeploymentScholarTimelineConfig = {
@@ -204,10 +214,6 @@ export const buildDeploymentRuntimeConfig = (fastify: FastifyInstance): Deployme
 
   if (auth.enablePublicSignup && !auth.enablePasswordSignin) {
     throw new Error('ENABLE_PUBLIC_SIGNUP requires ENABLE_PASSWORD_SIGNIN to be enabled')
-  }
-
-  if (fastify.config.DEPLOYMENT_MODE === 'private' && !fixedInstitutionSlug) {
-    throw new Error('PRIVATE_INSTITUTION_SLUG is required when DEPLOYMENT_MODE=private')
   }
 
   if (
@@ -222,7 +228,7 @@ export const buildDeploymentRuntimeConfig = (fastify: FastifyInstance): Deployme
 
   ensureEnvWhenEnabled(fastify, auth.enableInstitutionLogin, {
     value: institutionLogin.institutionSlug,
-    envName: 'INSTITUTION_LOGIN_INSTITUTION_SLUG',
+    envName: 'INSTITUTION_SLUG',
     featureName: 'institution login',
   })
 
@@ -254,6 +260,11 @@ export const buildDeploymentRuntimeConfig = (fastify: FastifyInstance): Deployme
   ensureEnvWhenEnabled(fastify, auth.enableInstitutionSso, {
     value: institutionSso.providerId,
     envName: 'INSTITUTION_SSO_PROVIDER_ID',
+    featureName: 'institution SSO',
+  })
+  ensureEnvWhenEnabled(fastify, auth.enableInstitutionSso, {
+    value: institutionSso.internalIdField,
+    envName: 'INSTITUTION_SSO_INTERNAL_ID_FIELD',
     featureName: 'institution SSO',
   })
   ensureEnvWhenEnabled(fastify, auth.enableInstitutionSso, {
@@ -309,7 +320,10 @@ export const buildDeploymentRuntimeConfig = (fastify: FastifyInstance): Deployme
   })
 
   return {
-    mode: fastify.config.DEPLOYMENT_MODE,
+    tenancyMode: 'single_institution',
+    managementMode: fastify.config.MANAGEMENT_MODE,
+    contentAccess: fastify.config.CONTENT_ACCESS_MODE,
+    institution: { slug: fixedInstitutionSlug },
     auth,
     features,
     branding,
@@ -327,7 +341,10 @@ export const toPublicDeploymentConfig = (
   config: DeploymentRuntimeConfig,
 ): PublicDeploymentConfig => {
   return {
-    deploymentMode: config.mode,
+    tenancyMode: config.tenancyMode,
+    managementMode: config.managementMode,
+    contentAccess: config.contentAccess,
+    institution: { ...config.institution },
     auth: { ...config.auth },
     features: { ...config.features },
     branding: { ...config.branding },

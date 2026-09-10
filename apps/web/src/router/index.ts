@@ -161,37 +161,37 @@ export const appRoutes: RouteRecordRaw[] = [
     path: '/papers',
     name: 'Papers',
     component: () => import('../views/Papers.vue'),
-    meta: { allowAnonymous: true },
+    meta: { allowAnonymous: true, publicContent: true },
   },
   {
     path: '/institutions/:slug/papers',
     name: 'InstitutionPapers',
     component: () => import('../views/Papers.vue'),
-    meta: { allowAnonymous: true },
+    meta: { allowAnonymous: true, publicContent: true },
   },
   {
     path: '/institutions/:slug/colleges/:collegeSlug/papers',
     name: 'InstitutionCollegePapers',
     component: () => import('../views/Papers.vue'),
-    meta: { allowAnonymous: true },
+    meta: { allowAnonymous: true, publicContent: true },
   },
   {
     path: '/labs/:slug/papers',
     name: 'LabPapers',
     component: () => import('../views/Papers.vue'),
-    meta: { allowAnonymous: true },
+    meta: { allowAnonymous: true, publicContent: true },
   },
   {
     path: '/scholars/:id/papers',
     name: 'ScholarPapers',
     component: () => import('../views/Papers.vue'),
-    meta: { allowAnonymous: true },
+    meta: { allowAnonymous: true, publicContent: true },
   },
   {
     path: '/papers/:id',
     name: 'PaperDetail',
     component: () => import('../views/PaperDetail.vue'),
-    meta: { allowAnonymous: true },
+    meta: { allowAnonymous: true, publicContent: true },
   },
   {
     path: '/theses',
@@ -199,6 +199,7 @@ export const appRoutes: RouteRecordRaw[] = [
     component: () => import('../views/Theses.vue'),
     meta: {
       allowAnonymous: true,
+      publicContent: true,
       featureKey: 'degreeTheses',
     },
   },
@@ -232,6 +233,7 @@ export const appRoutes: RouteRecordRaw[] = [
     component: () => import('../views/ThesisDetail.vue'),
     meta: {
       allowAnonymous: true,
+      publicContent: true,
       featureKey: 'degreeTheses',
     },
   },
@@ -239,19 +241,19 @@ export const appRoutes: RouteRecordRaw[] = [
     path: '/scholars',
     name: 'Scholars',
     component: () => import('../views/Scholars.vue'),
-    meta: { allowAnonymous: true },
+    meta: { allowAnonymous: true, publicContent: true },
   },
   {
     path: '/scholars/:id',
     name: 'ScholarDetail',
     component: () => import('../views/ScholarDetail.vue'),
-    meta: { allowAnonymous: true },
+    meta: { allowAnonymous: true, publicContent: true },
   },
   {
     path: '/labs/:slug',
     name: 'LabDetail',
     component: () => import('../views/LabDetail.vue'),
-    meta: { allowAnonymous: true },
+    meta: { allowAnonymous: true, publicContent: true },
   },
   {
     path: '/my-library',
@@ -299,7 +301,7 @@ router.beforeEach(async (to) => {
   const publicConfig = getCurrentPublicConfig()
   const redirectPath = publicConfig.navigation.defaultHomePath
   const papersHomePath = publicConfig.paperLibrary.defaultPath
-  const fixedInstitutionSlug = publicConfig.paperLibrary.fixedInstitutionSlug
+  const fixedInstitutionSlug = publicConfig.institution.slug
   const routeFeatureKey = typeof to.meta.featureKey === 'string' ? to.meta.featureKey : ''
   const {
     isLoggedIn,
@@ -307,7 +309,9 @@ router.beforeEach(async (to) => {
     adminAccessResolved,
     updateAdminAccess,
   } = useAuth()
-  const allowAnonymous = to.meta.allowAnonymous === true
+  const allowAnonymous =
+    to.meta.allowAnonymous === true &&
+    (to.meta.publicContent !== true || publicConfig.contentAccess === 'public')
 
   if (typeof to.name === 'string' && to.name === 'Home') {
     return redirectPath
@@ -325,7 +329,6 @@ router.beforeEach(async (to) => {
   }
 
   if (
-    fixedInstitutionSlug &&
     typeof to.name === 'string' &&
     (to.name === 'InstitutionPapers' || to.name === 'InstitutionCollegePapers') &&
     String(to.params.slug ?? '') !== fixedInstitutionSlug
@@ -368,7 +371,7 @@ router.beforeEach(async (to) => {
     const requiredCapabilities = parseAdminCapabilities(to.meta.adminCapabilities)
     if (
       !hasAdminRouteAccess(adminAccess.value, requiredCapabilities, {
-        deploymentMode: publicConfig.deploymentMode,
+        managementMode: publicConfig.managementMode,
         platformOnlyInPublic: to.meta.platformOnlyInPublic === true,
       })
     ) {

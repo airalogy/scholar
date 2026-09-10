@@ -39,7 +39,7 @@ export const hasAdminCapability = (
 }
 
 interface AdminRouteAccessOptions {
-  deploymentMode: 'public' | 'private'
+  managementMode: 'airalogy_managed' | 'self_hosted'
   platformOnlyInPublic?: boolean
 }
 
@@ -49,7 +49,7 @@ export const hasAdminRouteAccess = (
   options: AdminRouteAccessOptions,
 ): boolean => {
   if (
-    options.deploymentMode === 'public' &&
+    options.managementMode === 'airalogy_managed' &&
     options.platformOnlyInPublic === true &&
     access?.manage_platform !== true
   ) {

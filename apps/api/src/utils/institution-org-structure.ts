@@ -2,6 +2,11 @@ import crypto from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { Prisma } from '../../prisma/generated/client'
 import type { UpsertInstitutionOrgStructureBody } from '../routes/institutions/schema'
+import {
+  assertInstitutionInternalId,
+  normalizeInstitutionInternalId,
+  upsertInstitutionPerson,
+} from './institution-people'
 
 type PrismaClientLike = FastifyInstance['prisma'] | Prisma.TransactionClient
 type InstitutionRole = 'owner' | 'admin' | 'member'
@@ -188,6 +193,11 @@ const validateStructurePayload = (
     fastify,
     'person',
     body.people.map((item) => item.key),
+  )
+  ensureUniqueKeys(
+    fastify,
+    'person internal ID',
+    body.people.map((item) => normalizeInstitutionInternalId(item.internalId)),
   )
   ensureUniqueKeys(
     fastify,
@@ -540,7 +550,7 @@ export const loadReviewResolutionContext = async (
         is_primary: true,
       },
     }),
-    prisma.institution_org_people.findMany({
+    prisma.institution_people.findMany({
       where: { institutionId },
       select: {
         id: true,
@@ -725,7 +735,6 @@ const upsertProvisionForPerson = async (
       where: { id: existingProvision.id },
       data: {
         name: person.name.trim(),
-        externalId: trimNullableString(person.externalId),
         updatedAt: now,
       },
       select: {
@@ -748,7 +757,6 @@ const upsertProvisionForPerson = async (
       name: person.name.trim(),
       role: 'member',
       can_review_content: false,
-      externalId: trimNullableString(person.externalId),
       inviteToken: generateInviteToken(),
       status: 'pending_activation',
       expiresAt: buildProvisionExpiry(30),
@@ -780,7 +788,7 @@ export const getInstitutionOrgStructure = async (
       where: { institutionId },
       orderBy: [{ edge_type: 'asc' }, { fromNodeId: 'asc' }, { toNodeId: 'asc' }],
     }),
-    fastify.prisma.institution_org_people.findMany({
+    fastify.prisma.institution_people.findMany({
       where: { institutionId },
       orderBy: { key: 'asc' },
     }),
@@ -880,7 +888,8 @@ export const getInstitutionOrgStructure = async (
       key: person.key,
       name: person.name,
       email: person.email,
-      externalId: person.externalId,
+      internalId: person.internalId,
+      scholarId: person.scholarId,
       userId: person.userId,
       provisionId: person.provisionId,
       provisionStatus: person.provisionId
@@ -1056,14 +1065,8 @@ export const upsertInstitutionOrgStructure = async (
 
     for (const person of body.people) {
       const normalizedEmail = normalizeNullableEmail(person.email)
+      const internalId = assertInstitutionInternalId(person.internalId)
       let resolvedUserId = person.userId ?? null
-      if (!resolvedUserId && normalizedEmail) {
-        const existingUser = await tx.users.findUnique({
-          where: { email: normalizedEmail },
-          select: { id: true },
-        })
-        resolvedUserId = existingUser?.id ?? null
-      }
 
       const provision = await upsertProvisionForPerson(tx, institutionId, actorId, person, now)
       if (!resolvedUserId && provision.claimedUserId) {
@@ -1074,33 +1077,20 @@ export const upsertInstitutionOrgStructure = async (
         await ensureInstitutionMembership(tx, institutionId, resolvedUserId, now)
       }
 
-      await tx.institution_org_people.upsert({
-        where: {
-          institutionId_key: {
-            institutionId,
-            key: person.key,
-          },
-        },
-        create: {
-          institutionId,
-          key: person.key,
-          name: person.name.trim(),
-          email: normalizedEmail,
-          externalId: trimNullableString(person.externalId),
-          userId: resolvedUserId,
-          provisionId: provision.provisionId,
-          is_provisioning_enabled: person.createProvision === true,
-          is_active: person.isActive !== false,
-          metadata: toNullableJsonInput(person.metadata),
-          createdAt: now,
-          updatedAt: now,
-        },
-        update: {
-          name: person.name.trim(),
-          email: normalizedEmail,
-          externalId: trimNullableString(person.externalId),
-          userId: resolvedUserId,
-          provisionId: provision.provisionId,
+      const persistedPerson = await upsertInstitutionPerson(tx, {
+        institutionId,
+        key: person.key,
+        internalId,
+        name: person.name,
+        email: normalizedEmail,
+        userId: resolvedUserId,
+        provisionId: provision.provisionId,
+        source: 'organization_structure',
+        actorUserId: actorId,
+      })
+      await tx.institution_people.update({
+        where: { id: persistedPerson.id },
+        data: {
           is_provisioning_enabled: person.createProvision === true,
           is_active: person.isActive !== false,
           metadata: toNullableJsonInput(person.metadata),
@@ -1111,7 +1101,7 @@ export const upsertInstitutionOrgStructure = async (
 
     if (replaceMissing) {
       const keepPersonKeys = body.people.map((item) => item.key)
-      await tx.institution_org_people.updateMany({
+      await tx.institution_people.updateMany({
         where: {
           institutionId,
           key: {
@@ -1125,7 +1115,7 @@ export const upsertInstitutionOrgStructure = async (
       })
     }
 
-    const allPeople = await tx.institution_org_people.findMany({
+    const allPeople = await tx.institution_people.findMany({
       where: { institutionId },
       select: { id: true, key: true },
     })

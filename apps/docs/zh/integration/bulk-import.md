@@ -47,11 +47,11 @@ curl -X POST 'https://scholar.example.edu/api/v1/institutions/example-university
   }'
 ```
 
-DOI 会自动去除 URL 前缀、规范大小写。公有多机构模式中，新论文或元数据差异进入审核，不会直接覆盖其他机构使用的全局论文资料。
+DOI 会自动去除 URL 前缀、规范大小写。Airalogy Managed 租户中，新论文或元数据差异进入审核，审核前不覆盖正式数据；机构自托管实例直接应用通过校验的数据。
 
 ## 导入学者
 
-学者使用机构范围内唯一的 `external_id`。外部系统不需要生成 Scholar UUID；平台会维护机构学者映射。
+学者使用机构范围内唯一的 `external_id`。该接口字段存放机构的规范工号/学号。外部系统不需要生成 Scholar UUID，也不能把邮箱或姓名当作身份主键。平台会分别关联机构人员、学者档案、用户账号和预绑定论文。
 
 ```bash
 curl -X POST 'https://scholar.example.edu/api/v1/institutions/example-university/imports/scholars' \
@@ -74,7 +74,7 @@ curl -X POST 'https://scholar.example.edu/api/v1/institutions/example-university
   }'
 ```
 
-`paper_dois` 只能引用数据库中已经存在的论文，因此首次同步时应先导入论文。公有多机构模式中的学者资料变更由平台管理员审核后生效。
+`paper_dois` 只能引用数据库中已经存在的论文，因此首次同步时应先导入论文。Airalogy Managed 租户中的学者资料变更经托管审核后生效；机构自托管实例直接应用变更。
 
 ## 查询结果
 

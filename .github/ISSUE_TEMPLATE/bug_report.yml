@@ -20,8 +20,8 @@ body:
     attributes:
       label: Deployment mode
       options:
-        - Public multi-institution
-        - Private single-institution
+        - Airalogy Managed tenant
+        - Self-hosted institution
         - Local development
         - Modified fork
     validations:

@@ -45,7 +45,7 @@ The authoritative versions are defined in `apps/api/package.json`.
 - **Authentication**: JWT enforcement is centralized. Public routes must opt in explicitly. The deployment plugin at `src/plugins/global/zzz-deployment.ts` resolves feature flags and deployment mode once at startup.
 - **Public configuration**: `GET /auth/public-config` exposes only public capabilities such as password login, Airalogy OAuth, institution login, AI chat, and paper uploads. Backend routes independently enforce every disabled feature.
 - **Institution identity**: activation tokens support provisioned members. Institution SSO uses JIT provisioning to create or match a platform user and grants only the default `member` role. See [institution authentication](./institution-auth.md).
-- **Public and private deployments**: both use the same backend. Environment configuration and feature flags select behavior; customer-specific source branches are not maintained.
+- **Managed and self-hosted operations**: both use the same single-institution backend. Environment configuration selects operational policy; customer-specific source branches are not maintained.
 
 ## Governance references
 
@@ -53,7 +53,7 @@ The authoritative versions are defined in `apps/api/package.json`.
 - [Paper review state machine](./paper-review-workflow.md)
 - [Degree-thesis versions, files, and review APIs](./degree-thesis-workflow.md)
 - [Institution organization snapshots and workflow resolution](./institution-org-structure.md)
-- [Private deployment](./private-deployment.md)
+- [Deployment](./deployment.md)
 
 Ordinary papers and degree theses share the `content_review_*` state machine, reviewer snapshots, and audit actions. New content domains must use the shared review service instead of implementing review transitions inside business routes.
 

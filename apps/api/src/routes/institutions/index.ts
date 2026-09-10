@@ -2,26 +2,21 @@ import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
 import {
   BindInstitutionPaperAuthorBodySchema,
   CreateInstitutionApiCredentialBodySchema,
-  CreateInstitutionJoinRequestBodySchema,
   InstitutionCatalogResponseSchema,
   InstitutionApiCredentialListResponseSchema,
   InstitutionApiCredentialParamsSchema,
   InstitutionApiCredentialSecretResponseSchema,
   InstitutionDetailResponseSchema,
-  InstitutionJoinRequestListResponseSchema,
-  InstitutionJoinRequestParamsSchema,
   InstitutionListResponseSchema,
   InstitutionMemberParamsSchema,
   InstitutionMembershipListResponseSchema,
   InstitutionOrgStructureResponseSchema,
   InstitutionPaperBindingParamsSchema,
   InstitutionPaperBoundMemberListResponseSchema,
-  MyInstitutionJoinRequestResponseSchema,
   InstitutionParamsSchema,
   InstitutionProvisionListResponseSchema,
   InstitutionProvisionParamsSchema,
   RotateInstitutionApiCredentialBodySchema,
-  ReviewInstitutionJoinRequestBodySchema,
   UpdateInstitutionBodySchema,
   UpsertInstitutionMembershipBodySchema,
   UpsertInstitutionOrgStructureBodySchema,
@@ -29,18 +24,14 @@ import {
 } from './schema'
 import {
   bindInstitutionPaperAuthor,
-  createInstitutionJoinRequest,
   disableInstitutionProvision,
   getInstitution,
   getInstitutionOrgStructure,
-  getMyInstitutionJoinRequest,
   listInstitutionCatalog,
-  listInstitutionJoinRequests,
   listInstitutions,
   listInstitutionMemberships,
   listInstitutionProvisions,
   removeInstitutionPaperAuthorBinding,
-  reviewInstitutionJoinRequest,
   removeInstitutionMembership,
   updateInstitution,
   upsertInstitutionOrgStructure,
@@ -89,7 +80,7 @@ const institutionRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.get(
     '/:slug',
     {
-      config: { publicRoute: true },
+      config: { publicRoute: true, publicContentRoute: true },
       schema: {
         tags: ['institutions'],
         params: InstitutionParamsSchema,
@@ -194,22 +185,6 @@ const institutionRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
         request.user.userId,
         request.body,
       )
-    },
-  )
-
-  fastify.get(
-    '/:slug/join-requests/me',
-    {
-      schema: {
-        tags: ['institutions'],
-        params: InstitutionParamsSchema,
-        response: {
-          200: MyInstitutionJoinRequestResponseSchema,
-        },
-      },
-    },
-    async (request) => {
-      return getMyInstitutionJoinRequest(fastify, request.params.slug, request.user.userId)
     },
   )
 
@@ -334,67 +309,6 @@ const institutionRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
         request.params.slug,
         request.params.credentialId,
         request.user.userId,
-      )
-    },
-  )
-
-  fastify.post(
-    '/:slug/join-requests',
-    {
-      schema: {
-        tags: ['institutions'],
-        params: InstitutionParamsSchema,
-        body: CreateInstitutionJoinRequestBodySchema,
-        response: {
-          200: MyInstitutionJoinRequestResponseSchema,
-        },
-      },
-    },
-    async (request) => {
-      return createInstitutionJoinRequest(
-        fastify,
-        request.params.slug,
-        request.user.userId,
-        request.body,
-      )
-    },
-  )
-
-  fastify.get(
-    '/:slug/join-requests',
-    {
-      schema: {
-        tags: ['institutions'],
-        params: InstitutionParamsSchema,
-        response: {
-          200: InstitutionJoinRequestListResponseSchema,
-        },
-      },
-    },
-    async (request) => {
-      return listInstitutionJoinRequests(fastify, request.params.slug, request.user.userId)
-    },
-  )
-
-  fastify.post(
-    '/:slug/join-requests/:requestId/review',
-    {
-      schema: {
-        tags: ['institutions'],
-        params: InstitutionJoinRequestParamsSchema,
-        body: ReviewInstitutionJoinRequestBodySchema,
-        response: {
-          200: InstitutionJoinRequestListResponseSchema,
-        },
-      },
-    },
-    async (request) => {
-      return reviewInstitutionJoinRequest(
-        fastify,
-        request.params.slug,
-        request.params.requestId,
-        request.user.userId,
-        request.body,
       )
     },
   )

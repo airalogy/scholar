@@ -24,15 +24,15 @@ Uploaded scholarly metadata can contain misspelled names, incorrect affiliations
 
 ### 3. Review authority is resolved from explicit scope
 
-- `platform_admin` can review every paper.
+- `platform_admin` can review every paper in the configured institution.
 - Institution `owner/admin` roles can review claims whose `institutionId` matches their institution.
 - Laboratory `owner/admin` roles can review claims whose `labId` matches their laboratory.
 - When a claim has `reviewNodeId` and the institution has a workflow, only users resolved into the current step may review that step.
 - Every v3 paper claim belongs to an institution.
 
-### 4. Member-paper bindings support presentation and reporting only
+### 4. Institution-person bindings support presentation and reporting only
 
-- Institution administrators may bind a member to one author of a paper in that institution's library.
+- Institution administrators may bind a canonical institution person to one author of a paper in the institution library, even before that person has signed in.
 - The relationship is institution-scoped operational data, not a global authorship merge.
 - A binding never bypasses review or publishes an unapproved paper.
 - Member paper lists and counts remain bounded by the institution's own claims.
@@ -49,7 +49,7 @@ Uploaded scholarly metadata can contain misspelled names, incorrect affiliations
 - Anonymous visitors and signed-in users may browse approved public papers and public metadata.
 - A submitter's personal workspace shows all of that user's `paper_submissions` and review states.
 - Review queues show only `paper_claims` within the current user's review scope.
-- Institution administration exposes member-paper bindings and institution-scoped counts only to authorized accounts.
+- Institution administration exposes person-paper bindings and institution-scoped counts only to authorized accounts.
 - Non-approved paper details are limited to the submitter, current reviewers, and platform administrators.
 - Protected files require a signed-in user and a fresh server authorization check; anonymous responses contain no protected access link or private author email.
 
@@ -57,8 +57,8 @@ Uploaded scholarly metadata can contain misspelled names, incorrect affiliations
 
 - `paperCount` counts papers explicitly bound to the member within the institution.
 - `approvedPaperCount` counts those bound papers whose claim for that institution is `approved`.
-- Joining an institution does not import all papers associated with the user's platform account.
-- The same paper may be independently claimed, bound, and reviewed by multiple institutions.
+- Linking a user account does not infer authorship from the account name or email.
+- Papers bound to the person's canonical institution identity become visible after that identity is linked to the user account.
 
 ## State machine
 
@@ -82,7 +82,6 @@ For an ordinary paper, submission creates or reuses a global `papers` record by 
 4. A change request requires a note and moves the case to `changes_requested`.
 5. A corrected resubmission resolves and snapshots the workflow again, then returns to `pending_review`.
 6. The content remains outside public discovery until the new review completes.
-7. Claims by different institutions advance independently.
 
 ## Institution organization workflows
 

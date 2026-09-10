@@ -1,8 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import type {
   BindInstitutionPaperAuthorBody,
-  CreateInstitutionJoinRequestBody,
-  ReviewInstitutionJoinRequestBody,
   UpdateInstitutionBody,
   UpsertInstitutionMembershipBody,
   UpsertInstitutionOrgStructureBody,
@@ -32,6 +30,7 @@ import {
   upsertInstitutionOrgStructure as persistInstitutionOrgStructure,
 } from '../../utils/institution-org-structure'
 import { lockMutationScope } from '../../utils/advisory-lock'
+import { resolveInstitutionPerson, upsertInstitutionPerson } from '../../utils/institution-people'
 
 interface InstitutionRecord {
   id: string
@@ -52,6 +51,8 @@ const ANONYMOUS_INSTITUTION_ACCESS = {
 
 interface ResolvedInstitutionMember {
   userId: string
+  institutionPersonId: string | null
+  internalId: string | null
   name: string
   email: string
   avatar: string | null
@@ -71,7 +72,7 @@ interface ResolvedInstitutionProvision {
   role: 'owner' | 'admin' | 'member'
   canReviewContent: boolean
   canImportData: boolean
-  externalId: string | null
+  internalId: string | null
   college: string | null
   major: string | null
   laboratory: string | null
@@ -85,36 +86,10 @@ interface ResolvedInstitutionProvision {
   updatedAt: string
 }
 
-interface ResolvedInstitutionJoinRequest {
-  id: string
-  userId: string
-  userName: string
-  userEmail: string
-  userAvatar: string | null
-  userDegree: string | null
-  userMajor: string | null
-  userCollege: string | null
-  userLaboratory: string | null
-  status: 'pending' | 'approved' | 'rejected'
-  reason: string | null
-  reviewNotes: string | null
-  reviewedBy: string | null
-  reviewedByName: string | null
-  reviewedAt: string | null
-  createdAt: string
-  updatedAt: string
-}
-
 const INSTITUTION_ROLE_WEIGHT = {
   owner: 0,
   admin: 1,
   member: 2,
-} as const
-
-const INSTITUTION_JOIN_REQUEST_STATUS_WEIGHT = {
-  pending: 0,
-  approved: 1,
-  rejected: 2,
 } as const
 
 const hasInstitutionReviewerRole = (
@@ -160,10 +135,7 @@ const getInstitutionBySlug = async (
   fastify: FastifyInstance,
   slug: string,
 ): Promise<InstitutionRecord> => {
-  if (
-    fastify.deployment.paperLibrary.fixedInstitutionSlug &&
-    slug !== fastify.deployment.paperLibrary.fixedInstitutionSlug
-  ) {
+  if (slug !== fastify.deployment.institution.slug) {
     throw fastify.httpErrors.notFound('Institution not found')
   }
 
@@ -191,13 +163,22 @@ const resolveInstitutionMembers = async (
   }
 
   const userIds = memberships.map((membership) => membership.userId)
-  const [users, paperStatsMap] = await Promise.all([
+  const [users, people, paperStatsMap] = await Promise.all([
     fastify.prisma.users.findMany({
       where: { id: { in: userIds } },
+    }),
+    fastify.prisma.institution_people.findMany({
+      where: { institutionId, userId: { in: userIds } },
+      select: { id: true, userId: true, internalId: true },
     }),
     resolveInstitutionMemberPaperStats(fastify, institutionId, userIds),
   ])
   const userMap = new Map(users.map((user) => [user.id, user]))
+  const personMap = new Map(
+    people
+      .filter((person): person is typeof person & { userId: string } => Boolean(person.userId))
+      .map((person) => [person.userId, person]),
+  )
 
   const resolved = await Promise.all(
     memberships.map(async (membership) => {
@@ -213,6 +194,8 @@ const resolveInstitutionMembers = async (
 
       return {
         userId: user.id,
+        institutionPersonId: personMap.get(user.id)?.id ?? null,
+        internalId: personMap.get(user.id)?.internalId ?? null,
         name: user.name,
         email: user.email,
         avatar: await resolveAvatarUrl(fastify, user.avatar),
@@ -251,21 +234,6 @@ const resolveInstitutionMembers = async (
 
 const normalizeProvisionEmail = (email: string): string => email.trim().toLowerCase()
 
-const trimNullableString = (value: string | undefined): string | null => {
-  const trimmed = value?.trim()
-  return trimmed ? trimmed : null
-}
-
-const normalizeInstitutionJoinRequestStatus = (
-  status: string,
-): 'pending' | 'approved' | 'rejected' => {
-  if (status === 'approved' || status === 'rejected') {
-    return status
-  }
-
-  return 'pending'
-}
-
 const resolveInstitutionProvisions = async (
   fastify: FastifyInstance,
   institutionId: string,
@@ -283,14 +251,29 @@ const resolveInstitutionProvisions = async (
   const claimedUserIds = provisions
     .map((provision) => provision.claimedUserId)
     .filter((value): value is string => Boolean(value))
-  const claimedUsers =
+  const [claimedUsers, people] = await Promise.all([
     claimedUserIds.length > 0
       ? await fastify.prisma.users.findMany({
           where: { id: { in: claimedUserIds } },
           select: { id: true, name: true },
         })
-      : []
+      : [],
+    fastify.prisma.institution_people.findMany({
+      where: {
+        institutionId,
+        provisionId: { in: provisions.map((provision) => provision.id) },
+      },
+      select: { provisionId: true, internalId: true },
+    }),
+  ])
   const claimedUserMap = new Map(claimedUsers.map((user) => [user.id, user.name]))
+  const personInternalIdMap = new Map(
+    people
+      .filter((person): person is typeof person & { provisionId: string } =>
+        Boolean(person.provisionId),
+      )
+      .map((person) => [person.provisionId, person.internalId]),
+  )
 
   return provisions.map((provision) => {
     const normalizedRole = normalizeInstitutionRole(provision.role)
@@ -311,7 +294,7 @@ const resolveInstitutionProvisions = async (
         provision.can_review_content === true,
       ),
       canImportData: normalizedRole !== 'member' || provision.can_import_data === true,
-      externalId: provision.externalId,
+      internalId: personInternalIdMap.get(provision.id) ?? null,
       college: provision.college,
       major: provision.major,
       laboratory: provision.laboratory,
@@ -327,96 +310,6 @@ const resolveInstitutionProvisions = async (
       updatedAt: provision.updatedAt.toISOString(),
     }
   })
-}
-
-const resolveInstitutionJoinRequests = async (
-  fastify: FastifyInstance,
-  requests: Array<{
-    id: string
-    userId: string
-    status: string
-    reason: string | null
-    review_notes: string | null
-    reviewedBy: string | null
-    reviewedAt: Date | null
-    createdAt: Date
-    updatedAt: Date
-  }>,
-): Promise<ResolvedInstitutionJoinRequest[]> => {
-  if (requests.length === 0) {
-    return []
-  }
-
-  const userIds = [
-    ...new Set(
-      requests.flatMap((request) => [
-        request.userId,
-        ...(request.reviewedBy ? [request.reviewedBy] : []),
-      ]),
-    ),
-  ]
-
-  const users =
-    userIds.length > 0
-      ? await fastify.prisma.users.findMany({
-          where: { id: { in: userIds } },
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            avatar: true,
-            degree: true,
-            major: true,
-            college: true,
-            laboratory: true,
-          },
-        })
-      : []
-  const userMap = new Map(users.map((user) => [user.id, user]))
-
-  const resolved = await Promise.all(
-    requests.map(async (request) => {
-      const user = userMap.get(request.userId)
-      if (!user) {
-        return null
-      }
-
-      const reviewer = request.reviewedBy ? userMap.get(request.reviewedBy) : null
-
-      return {
-        id: request.id,
-        userId: user.id,
-        userName: user.name,
-        userEmail: user.email,
-        userAvatar: await resolveAvatarUrl(fastify, user.avatar),
-        userDegree: user.degree,
-        userMajor: user.major,
-        userCollege: user.college,
-        userLaboratory: user.laboratory,
-        status: normalizeInstitutionJoinRequestStatus(request.status),
-        reason: request.reason,
-        reviewNotes: request.review_notes,
-        reviewedBy: request.reviewedBy,
-        reviewedByName: reviewer?.name ?? null,
-        reviewedAt: request.reviewedAt ? request.reviewedAt.toISOString() : null,
-        createdAt: request.createdAt.toISOString(),
-        updatedAt: request.updatedAt.toISOString(),
-      }
-    }),
-  )
-
-  return resolved
-    .filter((item): item is ResolvedInstitutionJoinRequest => item !== null)
-    .sort((left, right) => {
-      const statusDelta =
-        INSTITUTION_JOIN_REQUEST_STATUS_WEIGHT[left.status] -
-        INSTITUTION_JOIN_REQUEST_STATUS_WEIGHT[right.status]
-      if (statusDelta !== 0) {
-        return statusDelta
-      }
-
-      return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()
-    })
 }
 
 export const getInstitution = async (
@@ -481,7 +374,7 @@ export const listInstitutions = async (fastify: FastifyInstance, currentUserId: 
   }
 
   const platformRole = normalizePlatformRole(user.platform_role)
-  const fixedInstitutionSlug = fastify.deployment.paperLibrary.fixedInstitutionSlug
+  const fixedInstitutionSlug = fastify.deployment.institution.slug
   const memberships =
     platformRole === 'platform_admin'
       ? []
@@ -505,24 +398,15 @@ export const listInstitutions = async (fastify: FastifyInstance, currentUserId: 
   const institutions =
     platformRole === 'platform_admin'
       ? await fastify.prisma.institutions.findMany({
-          ...(fixedInstitutionSlug
-            ? {
-                where: {
-                  slug: fixedInstitutionSlug,
-                },
-              }
-            : {}),
+          where: { slug: fixedInstitutionSlug },
           orderBy: { name: 'asc' },
         })
       : memberships.length > 0
         ? await fastify.prisma.institutions.findMany({
-            where: fixedInstitutionSlug
-              ? { slug: fixedInstitutionSlug }
-              : {
-                  id: {
-                    in: memberships.map((membership) => membership.institutionId),
-                  },
-                },
+            where: {
+              slug: fixedInstitutionSlug,
+              id: { in: memberships.map((membership) => membership.institutionId) },
+            },
             orderBy: { name: 'asc' },
           })
         : []
@@ -585,13 +469,7 @@ export const listInstitutionCatalog = async (fastify: FastifyInstance, currentUs
   }
 
   const institutions = await fastify.prisma.institutions.findMany({
-    ...(fastify.deployment.paperLibrary.fixedInstitutionSlug
-      ? {
-          where: {
-            slug: fastify.deployment.paperLibrary.fixedInstitutionSlug,
-          },
-        }
-      : {}),
+    where: { slug: fastify.deployment.institution.slug },
     orderBy: { name: 'asc' },
   })
 
@@ -680,6 +558,8 @@ export const listInstitutionMemberships = async (
   return {
     items: items.map((item) => ({
       userId: item.userId,
+      institutionPersonId: item.institutionPersonId,
+      internalId: item.internalId,
       name: item.name,
       email: item.email,
       avatar: item.avatar,
@@ -737,7 +617,7 @@ export const bindInstitutionPaperAuthor = async (
   const institution = await getInstitutionBySlug(fastify, slug)
   await assertCanManageInstitutionMembers(fastify, currentUserId, institution.id)
 
-  const [claim, paperAuthor, membership] = await Promise.all([
+  const [claim, paperAuthor, person] = await Promise.all([
     fastify.prisma.paper_claims.findFirst({
       where: {
         paperId: body.paperId,
@@ -756,16 +636,11 @@ export const bindInstitutionPaperAuthor = async (
         id: true,
       },
     }),
-    fastify.prisma.institution_memberships.findUnique({
-      where: {
-        institutionId_userId: {
-          institutionId: institution.id,
-          userId: body.userId,
-        },
-      },
-      select: {
-        userId: true,
-      },
+    resolveInstitutionPerson(fastify.prisma, institution.id, {
+      institutionPersonId: 'institutionPersonId' in body ? body.institutionPersonId : undefined,
+      institutionInternalId:
+        'institutionInternalId' in body ? body.institutionInternalId : undefined,
+      scholarId: 'scholarId' in body ? body.scholarId : undefined,
     }),
   ])
 
@@ -777,60 +652,79 @@ export const bindInstitutionPaperAuthor = async (
     throw fastify.httpErrors.notFound('Author not found in this paper')
   }
 
-  if (!membership) {
-    throw fastify.httpErrors.badRequest('Selected user is not a member of this institution')
-  }
-
-  const existingBindingForAuthor =
-    await fastify.prisma.institution_paper_author_bindings.findUnique({
-      where: {
-        institutionId_paperId_authorId: {
-          institutionId: institution.id,
-          paperId: body.paperId,
-          authorId: body.authorId,
-        },
-      },
-    })
-
-  const existingBindingForUser = await fastify.prisma.institution_paper_author_bindings.findUnique({
-    where: {
-      institutionId_paperId_userId: {
-        institutionId: institution.id,
-        paperId: body.paperId,
-        userId: body.userId,
-      },
-    },
-  })
-
-  if (existingBindingForUser && existingBindingForUser.authorId !== body.authorId) {
-    throw fastify.httpErrors.conflict(
-      'This institution member is already bound to another author in the same paper',
-    )
+  if (!person || !person.is_active) {
+    throw fastify.httpErrors.badRequest('Selected institution person is not active')
   }
 
   const now = new Date()
-  if (!existingBindingForAuthor) {
-    await fastify.prisma.institution_paper_author_bindings.create({
+  await fastify.prisma.$transaction(async (tx) => {
+    const [existingBindingForAuthor, existingBindingForPerson] = await Promise.all([
+      tx.institution_paper_author_bindings.findUnique({
+        where: {
+          institutionId_paperId_authorId: {
+            institutionId: institution.id,
+            paperId: body.paperId,
+            authorId: body.authorId,
+          },
+        },
+      }),
+      tx.institution_paper_author_bindings.findUnique({
+        where: {
+          institutionId_paperId_personId: {
+            institutionId: institution.id,
+            paperId: body.paperId,
+            personId: person.id,
+          },
+        },
+      }),
+    ])
+
+    if (existingBindingForPerson && existingBindingForPerson.authorId !== body.authorId) {
+      throw fastify.httpErrors.conflict(
+        'This institution person is already bound to another author in the same paper',
+      )
+    }
+
+    if (existingBindingForAuthor?.personId === person.id) {
+      return
+    }
+
+    if (existingBindingForAuthor) {
+      await tx.institution_paper_author_bindings.update({
+        where: { id: existingBindingForAuthor.id },
+        data: {
+          personId: person.id,
+          boundBy: currentUserId,
+          updatedAt: now,
+        },
+      })
+    } else {
+      await tx.institution_paper_author_bindings.create({
+        data: {
+          institutionId: institution.id,
+          paperId: body.paperId,
+          authorId: body.authorId,
+          personId: person.id,
+          boundBy: currentUserId,
+          createdAt: now,
+          updatedAt: now,
+        },
+      })
+    }
+
+    await tx.institution_person_events.create({
       data: {
         institutionId: institution.id,
+        personId: person.id,
+        actorUserId: currentUserId,
+        event_type: 'paper_author_bound',
+        source: 'institution_admin',
         paperId: body.paperId,
         authorId: body.authorId,
-        userId: body.userId,
-        boundBy: currentUserId,
         createdAt: now,
-        updatedAt: now,
       },
     })
-  } else if (existingBindingForAuthor.userId !== body.userId) {
-    await fastify.prisma.institution_paper_author_bindings.update({
-      where: { id: existingBindingForAuthor.id },
-      data: {
-        userId: body.userId,
-        boundBy: currentUserId,
-        updatedAt: now,
-      },
-    })
-  }
+  })
 
   return {
     items: await listInstitutionPaperBoundMembers(fastify, institution.id, body.paperId),
@@ -854,8 +748,22 @@ export const removeInstitutionPaperAuthorBinding = async (
     throw fastify.httpErrors.notFound('Binding not found')
   }
 
-  await fastify.prisma.institution_paper_author_bindings.delete({
-    where: { id: binding.id },
+  await fastify.prisma.$transaction(async (tx) => {
+    await tx.institution_person_events.create({
+      data: {
+        institutionId: institution.id,
+        personId: binding.personId,
+        actorUserId: currentUserId,
+        event_type: 'paper_author_unbound',
+        source: 'institution_admin',
+        paperId: binding.paperId,
+        authorId: binding.authorId,
+        createdAt: new Date(),
+      },
+    })
+    await tx.institution_paper_author_bindings.delete({
+      where: { id: binding.id },
+    })
   })
 
   return {
@@ -874,173 +782,6 @@ export const listInstitutionProvisions = async (
   return {
     items: await resolveInstitutionProvisions(fastify, institution.id, access),
   }
-}
-
-export const getMyInstitutionJoinRequest = async (
-  fastify: FastifyInstance,
-  slug: string,
-  currentUserId: string,
-) => {
-  const institution = await getInstitutionBySlug(fastify, slug)
-
-  const request = await fastify.prisma.institution_join_requests.findFirst({
-    where: {
-      institutionId: institution.id,
-      userId: currentUserId,
-    },
-    orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
-  })
-
-  if (!request) {
-    return { item: null }
-  }
-
-  const [item] = await resolveInstitutionJoinRequests(fastify, [request])
-
-  return {
-    item: item ?? null,
-  }
-}
-
-export const createInstitutionJoinRequest = async (
-  fastify: FastifyInstance,
-  slug: string,
-  currentUserId: string,
-  body: CreateInstitutionJoinRequestBody,
-) => {
-  const institution = await getInstitutionBySlug(fastify, slug)
-
-  const [membership, pendingRequest] = await Promise.all([
-    fastify.prisma.institution_memberships.findUnique({
-      where: {
-        institutionId_userId: {
-          institutionId: institution.id,
-          userId: currentUserId,
-        },
-      },
-    }),
-    fastify.prisma.institution_join_requests.findFirst({
-      where: {
-        institutionId: institution.id,
-        userId: currentUserId,
-        status: 'pending',
-      },
-      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
-    }),
-  ])
-
-  if (membership) {
-    throw fastify.httpErrors.conflict('You are already a member of this institution')
-  }
-
-  if (pendingRequest) {
-    throw fastify.httpErrors.conflict(
-      'You already have a pending join request for this institution',
-    )
-  }
-
-  const now = new Date()
-  const created = await fastify.prisma.institution_join_requests.create({
-    data: {
-      institutionId: institution.id,
-      userId: currentUserId,
-      status: 'pending',
-      reason: trimNullableString(body.reason),
-      review_notes: null,
-      reviewedBy: null,
-      reviewedAt: null,
-      createdAt: now,
-      updatedAt: now,
-    },
-  })
-
-  const [item] = await resolveInstitutionJoinRequests(fastify, [created])
-
-  return {
-    item: item ?? null,
-  }
-}
-
-export const listInstitutionJoinRequests = async (
-  fastify: FastifyInstance,
-  slug: string,
-  currentUserId: string,
-) => {
-  const institution = await getInstitutionBySlug(fastify, slug)
-  await assertCanManageInstitutionMembers(fastify, currentUserId, institution.id)
-
-  const requests = await fastify.prisma.institution_join_requests.findMany({
-    where: { institutionId: institution.id },
-    orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
-  })
-
-  return {
-    items: await resolveInstitutionJoinRequests(fastify, requests),
-  }
-}
-
-export const reviewInstitutionJoinRequest = async (
-  fastify: FastifyInstance,
-  slug: string,
-  requestId: string,
-  currentUserId: string,
-  body: ReviewInstitutionJoinRequestBody,
-) => {
-  const institution = await getInstitutionBySlug(fastify, slug)
-  await assertCanManageInstitutionMembers(fastify, currentUserId, institution.id)
-
-  const joinRequest = await fastify.prisma.institution_join_requests.findUnique({
-    where: { id: requestId },
-  })
-
-  if (!joinRequest || joinRequest.institutionId !== institution.id) {
-    throw fastify.httpErrors.notFound('Join request not found')
-  }
-
-  if (normalizeInstitutionJoinRequestStatus(joinRequest.status) !== 'pending') {
-    throw fastify.httpErrors.badRequest('This join request has already been reviewed')
-  }
-
-  const now = new Date()
-  await fastify.prisma.$transaction(async (tx) => {
-    if (body.status === 'approved') {
-      const membership = await tx.institution_memberships.findUnique({
-        where: {
-          institutionId_userId: {
-            institutionId: institution.id,
-            userId: joinRequest.userId,
-          },
-        },
-      })
-
-      if (!membership) {
-        await tx.institution_memberships.create({
-          data: {
-            institutionId: institution.id,
-            userId: joinRequest.userId,
-            role: 'member',
-            can_review_content: false,
-            can_import_data: false,
-            createdAt: now,
-            updatedAt: now,
-          },
-        })
-      }
-    }
-
-    await tx.institution_join_requests.update({
-      where: { id: joinRequest.id },
-      data: {
-        status: body.status,
-        review_notes: trimNullableString(body.notes),
-        reviewedBy: currentUserId,
-        reviewedAt: now,
-        updatedAt: now,
-      },
-    })
-  })
-
-  return listInstitutionJoinRequests(fastify, slug, currentUserId)
 }
 
 export const upsertInstitutionMembership = async (
@@ -1086,6 +827,31 @@ export const upsertInstitutionMembership = async (
 
   await fastify.prisma.$transaction(async (tx) => {
     await lockMutationScope(tx, 'institution', institution.id)
+    const existingPerson = await tx.institution_people.findUnique({
+      where: {
+        institutionId_userId: {
+          institutionId: institution.id,
+          userId: body.userId,
+        },
+      },
+    })
+    const institutionInternalId = body.internalId?.trim() || existingPerson?.internalId
+    if (!institutionInternalId) {
+      throw fastify.httpErrors.badRequest(
+        'internalId is required when assigning a user who has no institution person record',
+      )
+    }
+    if (!existingPerson || body.internalId?.trim()) {
+      await upsertInstitutionPerson(tx, {
+        institutionId: institution.id,
+        internalId: institutionInternalId,
+        name: user.name,
+        email: user.email,
+        userId: user.id,
+        source: 'membership_assignment',
+        actorUserId: currentUserId,
+      })
+    }
     const currentMembership = await tx.institution_memberships.findUnique({
       where: {
         institutionId_userId: {
@@ -1163,49 +929,64 @@ export const upsertInstitutionProvision = async (
     )
   }
   assertCanManageInstitutionRole(fastify, access, body.role, 'provision')
-  await fastify.prisma.institution_user_provisions.upsert({
-    where: {
-      institutionId_email: {
-        institutionId: institution.id,
-        email: normalizedEmail,
+  await fastify.prisma.$transaction(async (tx) => {
+    const provision = await tx.institution_user_provisions.upsert({
+      where: {
+        institutionId_email: {
+          institutionId: institution.id,
+          email: normalizedEmail,
+        },
       },
-    },
-    create: {
+      create: {
+        institutionId: institution.id,
+        createdBy: currentUserId,
+        claimedUserId: null,
+        email: normalizedEmail,
+        name: body.name.trim(),
+        role: body.role,
+        can_review_content: body.can_review_content ?? false,
+        can_import_data: body.can_import_data ?? false,
+        college: body.college?.trim() ?? null,
+        major: body.major?.trim() ?? null,
+        laboratory: body.laboratory?.trim() ?? null,
+        inviteToken: generateInstitutionInviteToken(),
+        status: 'pending_activation',
+        claimedAt: null,
+        expiresAt: buildInstitutionProvisionExpiry(body.expiresInDays ?? 30),
+        createdAt: now,
+        updatedAt: now,
+      },
+      update: {
+        name: body.name.trim(),
+        role: body.role,
+        can_review_content: body.can_review_content ?? false,
+        can_import_data: body.can_import_data ?? false,
+        college: body.college?.trim() ?? null,
+        major: body.major?.trim() ?? null,
+        laboratory: body.laboratory?.trim() ?? null,
+        inviteToken: existingProvision?.claimedUserId
+          ? existingProvision.inviteToken
+          : generateInstitutionInviteToken(),
+        status: existingProvision?.claimedUserId ? 'claimed' : 'pending_activation',
+        claimedUserId: existingProvision?.claimedUserId ?? null,
+        claimedAt: existingProvision?.claimedAt ?? null,
+        expiresAt: existingProvision?.claimedUserId
+          ? existingProvision.expiresAt
+          : buildInstitutionProvisionExpiry(body.expiresInDays ?? 30),
+        updatedAt: now,
+      },
+    })
+
+    await upsertInstitutionPerson(tx, {
       institutionId: institution.id,
-      createdBy: currentUserId,
-      claimedUserId: null,
+      internalId: body.internalId,
+      name: body.name,
       email: normalizedEmail,
-      name: body.name.trim(),
-      role: body.role,
-      can_review_content: body.can_review_content ?? false,
-      can_import_data: body.can_import_data ?? false,
-      externalId: body.externalId?.trim() ?? null,
-      college: body.college?.trim() ?? null,
-      major: body.major?.trim() ?? null,
-      laboratory: body.laboratory?.trim() ?? null,
-      inviteToken: generateInstitutionInviteToken(),
-      status: 'pending_activation',
-      claimedAt: null,
-      expiresAt: buildInstitutionProvisionExpiry(body.expiresInDays ?? 30),
-      createdAt: now,
-      updatedAt: now,
-    },
-    update: {
-      name: body.name.trim(),
-      role: body.role,
-      can_review_content: body.can_review_content ?? false,
-      can_import_data: body.can_import_data ?? false,
-      externalId: body.externalId?.trim() ?? null,
-      college: body.college?.trim() ?? null,
-      major: body.major?.trim() ?? null,
-      laboratory: body.laboratory?.trim() ?? null,
-      inviteToken: generateInstitutionInviteToken(),
-      status: 'pending_activation',
-      claimedUserId: null,
-      claimedAt: null,
-      expiresAt: buildInstitutionProvisionExpiry(body.expiresInDays ?? 30),
-      updatedAt: now,
-    },
+      userId: provision.claimedUserId,
+      provisionId: provision.id,
+      source: 'member_provision',
+      actorUserId: currentUserId,
+    })
   })
 
   return listInstitutionProvisions(fastify, slug, currentUserId)
@@ -1353,9 +1134,6 @@ export const removeInstitutionMembership = async (
     })
     await tx.lab_memberships.deleteMany({
       where: { userId: targetUserId, labId: { in: institutionLabIds } },
-    })
-    await tx.institution_paper_author_bindings.deleteMany({
-      where: { institutionId: institution.id, userId: targetUserId },
     })
   })
 

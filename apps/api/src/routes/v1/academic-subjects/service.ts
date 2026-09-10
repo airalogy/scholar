@@ -88,8 +88,7 @@ const loadInstitutionScope = async (
     return globalScope
   }
 
-  const fixedSlug = fastify.deployment.paperLibrary.fixedInstitutionSlug
-  if (fixedSlug && fixedSlug !== slug) {
+  if (fastify.deployment.institution.slug !== slug) {
     throw fastify.httpErrors.notFound('Institution not found')
   }
   const institution = await fastify.prisma.institutions.findUnique({

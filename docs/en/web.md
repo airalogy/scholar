@@ -35,7 +35,7 @@ The authoritative versions are defined in `apps/web/package.json`.
 - Drive login methods, navigation, feature entry points, and institution branding from `GET /auth/public-config`. Do not hard-code deployment capabilities in pages.
 - When `paperUpload` is disabled, remove every upload entry point and empty-state call to action in addition to relying on backend rejection.
 - Institution SSO with `jit_member` may explain that the first successful login creates an account and joins the institution, but must not imply administrative privileges.
-- Private-deployment AI chat, uploads, logos, and login options follow public configuration. See [private deployment](./private-deployment.md).
+- AI chat, uploads, logos, and login options follow public configuration. See [deployment](./deployment.md).
 
 ## Governance and administration references
 

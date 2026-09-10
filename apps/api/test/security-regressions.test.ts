@@ -25,6 +25,7 @@ const createSensibleApp = async (): Promise<FastifyInstance> => {
 test('ordinary users cannot update or delete global paper records', async (t) => {
   const app = await createSensibleApp()
   t.after(async () => app.close())
+  app.decorate('deployment', { institution: { slug: 'example' } } as never)
   app.decorate('prisma', {
     users: {
       findUnique: async () => ({ id: USER_ID, platform_role: 'member' }),
@@ -47,28 +48,49 @@ test('ordinary users cannot update or delete global paper records', async (t) =>
   )
 })
 
-test('paper search indexing retains full-text rows without an embedding provider', async () => {
+test('paper search indexing retains BM25 rows without an embedding provider', async () => {
   const calls: unknown[][] = []
+  const updatedAt = new Date('2026-08-11T00:00:00.000Z')
   const fastify = {
+    deployment: { institution: { slug: 'example' } },
     config: {
       OPENAI_BASE_URL: '',
       OPENAI_API_KEY: '',
+      ALLOW_APPROVED_PDF_MODEL_PROCESSING: false,
     },
     prisma: {
+      institutions: {
+        findUnique: async () => ({ id: INSTITUTION_ID, slug: 'example', name: 'Example' }),
+      },
       papers: {
         findUnique: async () => ({
           title: 'Searchable title',
           abstract: 'Searchable abstract',
-          updatedAt: new Date('2026-08-11T00:00:00.000Z'),
+          updatedAt,
         }),
       },
       paper_claims: {
-        findFirst: async () => ({ id: 'approved-claim' }),
+        findFirst: async () => ({
+          id: 'approved-claim',
+          updatedAt,
+          submissionId: null,
+          primary_submission: null,
+        }),
+      },
+      paper_submissions: {
+        findFirst: async () => null,
       },
       $executeRawUnsafe: async (...args: unknown[]) => {
         calls.push(args)
         return 1
       },
+      $transaction: async (operation: (client: unknown) => Promise<unknown>) =>
+        operation({
+          $executeRawUnsafe: async (...args: unknown[]) => {
+            calls.push(args)
+            return 1
+          },
+        }),
     },
     log: {
       info: () => undefined,
@@ -79,14 +101,20 @@ test('paper search indexing retains full-text rows without an embedding provider
   await refreshPaperSearchIndex(fastify, PAPER_ID)
 
   assert.equal(calls.length, 2)
-  assert.match(String(calls[0][0]), /to_tsvector/u)
-  assert.equal(calls[0][4], null)
-  assert.match(String(calls[1][0]), /"segmentIndex" >=/u)
+  assert.match(String(calls[0][0]), /DELETE FROM embeddings/u)
+  assert.match(String(calls[1][0]), /"bm25_terms"/u)
+  assert.equal(calls[1][4], null)
+  assert.deepEqual(JSON.parse(String(calls[1][8])), {
+    searchable: 2,
+    title: 1,
+    abstract: 1,
+  })
 })
 
 test('paper uploads use a server-selected protected policy and avatar files cannot be attached', async (t) => {
   const app = await createSensibleApp()
   t.after(async () => app.close())
+  app.decorate('deployment', { institution: { slug: 'example' } } as never)
   let storedFile: Record<string, unknown> | null = null
   app.decorate('config', {} as never)
   app.decorate('jwt', { sign: () => 'short-lived-file-token' } as never)
@@ -109,7 +137,7 @@ test('paper uploads use a server-selected protected policy and avatar files cann
       }),
     },
     institutions: {
-      findUnique: async () => ({ id: INSTITUTION_ID }),
+      findUnique: async () => ({ id: INSTITUTION_ID, slug: 'example', name: 'Example' }),
     },
     oss_files: {
       aggregate: async () => ({ _sum: { file_size: 0 } }),
@@ -159,6 +187,7 @@ test('paper uploads use a server-selected protected policy and avatar files cann
 test('profile avatars cannot reference protected paper files', async (t) => {
   const app = await createSensibleApp()
   t.after(async () => app.close())
+  app.decorate('deployment', { institution: { slug: 'example' } } as never)
   let updateCalled = false
   app.decorate('prisma', {
     users: {
@@ -190,6 +219,7 @@ test('profile avatars cannot reference protected paper files', async (t) => {
 test('existing accounts must confirm their password before institution activation', async (t) => {
   const app = await createSensibleApp()
   t.after(async () => app.close())
+  app.decorate('deployment', { institution: { slug: 'example' } } as never)
   const passwordHash = await bcrypt.hash('correct-password', 4)
   app.decorate('prisma', {
     institution_user_provisions: {

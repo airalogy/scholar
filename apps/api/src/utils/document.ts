@@ -5,6 +5,11 @@ export interface SplitTextOptions {
   chunkOverlap?: number
 }
 
+export interface Bm25DocumentStatistics {
+  length: number
+  termFrequencies: Record<string, number>
+}
+
 const DEFAULT_CHUNK_SIZE = 1000
 const DEFAULT_CHUNK_OVERLAP = 100
 const wordSegmenter = new Intl.Segmenter('zh-CN', { granularity: 'word' })
@@ -29,22 +34,26 @@ export const pdfToMarkdown = async (buffer: Buffer): Promise<string> => {
 }
 
 export const buildPaperEmbeddingText = (title: string, abstract: string | null): string | null => {
+  return buildPaperIndexText(title, abstract)
+}
+
+export const buildPaperIndexText = (
+  title: string,
+  abstract: string | null,
+  fullText?: string | null,
+): string | null => {
   const normalizedTitle = normalizeOptionalString(title)
   const normalizedAbstract = normalizeOptionalString(abstract)
+  const normalizedFullText = normalizeOptionalString(fullText)
+  const sections = [normalizedTitle, normalizedAbstract, normalizedFullText].filter(
+    (section): section is string => Boolean(section),
+  )
 
-  if (!normalizedTitle && !normalizedAbstract) {
+  if (sections.length === 0) {
     return null
   }
 
-  if (!normalizedTitle) {
-    return normalizedAbstract
-  }
-
-  if (!normalizedAbstract) {
-    return normalizedTitle
-  }
-
-  return `${normalizedTitle}\n\n${normalizedAbstract}`
+  return sections.join('\n\n')
 }
 
 export const splitText = async (
@@ -88,6 +97,26 @@ export const splitText = async (
 
 export const tokenizeText = (text: string): string[] => {
   return Array.from(wordSegmenter.segment(text), ({ segment }) => segment)
+}
+
+export const normalizeSearchTerms = (text: string): string[] => {
+  return tokenizeText(text)
+    .map((token) => token.trim().toLocaleLowerCase('en-US'))
+    .filter((token) => /[\p{L}\p{N}]/u.test(token))
+}
+
+export const buildBm25DocumentStatistics = (text: string): Bm25DocumentStatistics => {
+  const terms = normalizeSearchTerms(text)
+  const counts = new Map<string, number>()
+
+  for (const term of terms) {
+    counts.set(term, (counts.get(term) ?? 0) + 1)
+  }
+
+  return {
+    length: terms.length,
+    termFrequencies: Object.fromEntries(counts),
+  }
 }
 
 export const buildTsvText = (text: string): string => {

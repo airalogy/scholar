@@ -257,7 +257,7 @@ const canManageScholarTimelines = computed(() => {
 
   return (
     profile.value.admin_access.manage_platform ||
-    (publicConfig.value.deploymentMode === 'private' &&
+    (publicConfig.value.managementMode === 'self_hosted' &&
       profile.value.admin_access.manage_institutions)
   )
 })

@@ -33,17 +33,17 @@ Editable laboratory content includes the introduction, contact information, webs
 
 ### 4. Administrators provision identities, not passwords
 
-- An institution may pre-provision members before launch using an institution email, employee or student identifier, college, and laboratory information.
-- If the person already has an Airalogy Scholar account, the provision attaches the existing `user`.
+- An institution may create an `institution_people` record before launch using its canonical employee/student identifier and optional contact and organization information.
+- If the person already has an Airalogy Scholar account, an administrator explicitly links the existing `user`; email equality alone never proves identity.
 - Otherwise it remains `pending_activation` until the person completes first-login activation.
 - Administrators assign institution identity and permission but do not create or retain member passwords.
-- Institution SSO may use JIT provisioning, but the first successful SSO login grants only `member` by default.
+- Institution SSO resolves the same canonical internal ID and may use JIT account creation, but the first successful login grants only `member` by default.
 
 This preserves bulk onboarding, one account per person, future SSO protocol support, and a strict separation between authentication and elevated authorization. See [institution authentication](./institution-auth.md).
 
 ### 5. Member-paper bindings are institution-scoped
 
-- An authorized administrator may bind an institution member to one author of a paper in that institution's library.
+- An authorized administrator may bind an institution person to one author of a paper in that institution's library, even before that person has a user account.
 - Bindings support institution reporting and member presentation only.
 - They do not rewrite `papers` or `paper_authors`, merge global identities, or import all historical papers associated with a user.
 - Counts remain bounded by the institution's claims and review status.
@@ -71,14 +71,15 @@ This preserves bulk onboarding, one account per person, future SSO protocol supp
 
 - `users`: platform accounts and base profiles.
 - `institutions`: institution entities.
-- `institution_memberships`: institution membership, role, and delegated capabilities.
+- `institution_people`: canonical institution identities and their optional user, scholar, and provision links.
+- `institution_memberships`: institution authorization role and delegated capabilities for linked users.
 - `institution_user_provisions`: administrator provisioning, activation state, and activation tokens.
 - `labs`: laboratory pages owned by an institution.
 - `lab_memberships`: laboratory membership and role.
 - `papers`: globally unique paper facts.
 - `paper_submissions`: upload event, submitter, scope, file, and metadata snapshot.
 - `paper_claims`: an institution or laboratory claim, its review case, and display scope.
-- `institution_paper_author_bindings`: an institution-scoped mapping from a member to an author on a paper in that institution's library.
+- `institution_paper_author_bindings`: an institution-scoped mapping from an institution person to an author on a paper in that institution's library.
 
 A user may simultaneously be a scholar, institution owner or administrator, laboratory owner or administrator, and a reviewer. These relationships are explicit and independent.
 
@@ -122,7 +123,7 @@ A user may simultaneously be a scholar, institution owner or administrator, labo
 
 - Remove the `institution_memberships` relationship to revoke institution-private access.
 - Cascade removal of laboratory memberships under that institution.
-- Remove institution-scoped member-author bindings.
+- Retain institution-person and historical author bindings; removing membership revokes authorization, not identity or attribution.
 - Transfer ownership before removing the last owner of a laboratory.
 - Retain the global account unless the separate account-deletion process applies.
 

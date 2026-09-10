@@ -241,7 +241,7 @@
               <div class="activation-meta">{{ activationPreview.institutionName }}</div>
               <div class="activation-meta">{{ activationPreview.name }} / {{ activationPreview.email }}</div>
               <div class="activation-meta">
-                {{ activationRoleLabel }}{{ activationPreview.externalId ? ` / ${activationPreview.externalId}` : '' }}
+                {{ activationRoleLabel }} · {{ activationPreview.internalId }}
               </div>
               <div v-if="activationPreview.college || activationPreview.major || activationPreview.laboratory" class="activation-meta">
                 {{ [activationPreview.college, activationPreview.major, activationPreview.laboratory].filter(Boolean).join(' / ') }}
@@ -622,10 +622,6 @@ const applyLogin = (token: string, name: string): void => {
 }
 
 const getMethodLabel = (method: InstitutionAuthMethod): string => {
-  if (method === 'platform_account') {
-    return t('loginModal.methods.platformAccount')
-  }
-
   if (method === 'sso') {
     return t('loginModal.methods.sso')
   }

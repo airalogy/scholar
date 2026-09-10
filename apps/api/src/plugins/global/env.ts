@@ -9,8 +9,9 @@ declare module 'fastify' {
       TRUST_PROXY: string
       HOST: string
       PORT: number
-      DEPLOYMENT_MODE: 'public' | 'private'
-      PRIVATE_INSTITUTION_SLUG: string
+      MANAGEMENT_MODE: 'airalogy_managed' | 'self_hosted'
+      INSTITUTION_SLUG: string
+      CONTENT_ACCESS_MODE: 'public' | 'authenticated'
       STORAGE_PROVIDER: 'oss' | 'local'
       LOCAL_STORAGE_DIR: string
       JWT_SECRET: string
@@ -18,10 +19,10 @@ declare module 'fastify' {
       ENABLE_PUBLIC_SIGNUP: boolean
       ENABLE_AIRALOGY_OAUTH: boolean
       ENABLE_INSTITUTION_LOGIN: boolean
-      INSTITUTION_LOGIN_INSTITUTION_SLUG: string
       ENABLE_INSTITUTION_PROVISION_LOGIN: boolean
       INSTITUTION_SSO_ENABLED: boolean
       ENABLE_AI_CHAT: boolean
+      ALLOW_APPROVED_PDF_MODEL_PROCESSING: boolean
       SCHOLAR_TIMELINE_GENERATION_MODE: 'disabled' | 'request_only' | 'preview' | 'admin'
       TIMELINE_MODEL: string
       TIMELINE_CONCURRENCY: number
@@ -63,7 +64,7 @@ declare module 'fastify' {
       INSTITUTION_SSO_CLIENT_SECRET: string
       INSTITUTION_SSO_REDIRECT_URI: string
       INSTITUTION_SSO_SCOPE: string
-      INSTITUTION_SSO_EXTERNAL_ID_FIELD: string
+      INSTITUTION_SSO_INTERNAL_ID_FIELD: string
       INSTITUTION_SSO_EMAIL_FIELD: string
       INSTITUTION_SSO_NAME_FIELD: string
       INSTITUTION_SSO_USERINFO_TOKEN_MODE: 'bearer' | 'query'
@@ -80,10 +81,13 @@ const schema = Type.Object({
   TRUST_PROXY: Type.String({ default: '' }),
   HOST: Type.String({ default: 'localhost' }),
   PORT: Type.Number({ default: 3000 }),
-  DEPLOYMENT_MODE: Type.Union([Type.Literal('public'), Type.Literal('private')], {
+  MANAGEMENT_MODE: Type.Union([Type.Literal('airalogy_managed'), Type.Literal('self_hosted')], {
+    default: 'self_hosted',
+  }),
+  INSTITUTION_SLUG: Type.String({ default: '' }),
+  CONTENT_ACCESS_MODE: Type.Union([Type.Literal('public'), Type.Literal('authenticated')], {
     default: 'public',
   }),
-  PRIVATE_INSTITUTION_SLUG: Type.String({ default: '' }),
   STORAGE_PROVIDER: Type.Union([Type.Literal('oss'), Type.Literal('local')], {
     default: 'local',
   }),
@@ -94,10 +98,10 @@ const schema = Type.Object({
   ENABLE_PUBLIC_SIGNUP: Type.Boolean({ default: false }),
   ENABLE_AIRALOGY_OAUTH: Type.Boolean({ default: false }),
   ENABLE_INSTITUTION_LOGIN: Type.Boolean({ default: false }),
-  INSTITUTION_LOGIN_INSTITUTION_SLUG: Type.String({ default: '' }),
   ENABLE_INSTITUTION_PROVISION_LOGIN: Type.Boolean({ default: false }),
   INSTITUTION_SSO_ENABLED: Type.Boolean({ default: false }),
   ENABLE_AI_CHAT: Type.Boolean({ default: false }),
+  ALLOW_APPROVED_PDF_MODEL_PROCESSING: Type.Boolean({ default: false }),
   SCHOLAR_TIMELINE_GENERATION_MODE: Type.Union(
     [
       Type.Literal('disabled'),
@@ -147,7 +151,7 @@ const schema = Type.Object({
   INSTITUTION_SSO_CLIENT_SECRET: Type.String({ default: '' }),
   INSTITUTION_SSO_REDIRECT_URI: Type.String({ default: '' }),
   INSTITUTION_SSO_SCOPE: Type.String({ default: 'basic' }),
-  INSTITUTION_SSO_EXTERNAL_ID_FIELD: Type.String({ default: 'sub' }),
+  INSTITUTION_SSO_INTERNAL_ID_FIELD: Type.String({ default: '' }),
   INSTITUTION_SSO_EMAIL_FIELD: Type.String({ default: 'email' }),
   INSTITUTION_SSO_NAME_FIELD: Type.String({ default: 'name' }),
   INSTITUTION_SSO_USERINFO_TOKEN_MODE: Type.Union([Type.Literal('bearer'), Type.Literal('query')], {
