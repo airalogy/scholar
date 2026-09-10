@@ -4,11 +4,16 @@ Chinese version: [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-09-10
+
+### Added
+
+- Institution people now use one canonical, case-insensitive internal ID that can exist before a user account, link independently to user and scholar records, and retain prebound paper authorship after first verified login.
+
 ### Changed
 
 - Restored full-text hybrid paper retrieval: approved PDF text, deterministic BM25 scoring, and vector search share one index and feed relevant evidence to the paper reading assistant.
 - Scholar now has an explicit single-institution product boundary: every self-hosted deployment or Airalogy Managed tenant serves one configured institution, and runtime routes no longer expose institution switching.
-- Institution people now use one canonical, case-insensitive internal ID that can exist before a user account, link independently to user and scholar records, and retain prebound paper authorship after first verified login.
 - Institution SSO now resolves the canonical internal-ID claim, creates or links accounts transactionally, grants only the default member role, and rejects email-only or conflicting identity claims.
 - Managed tenants and self-hosted instances share one codebase while applying managed-review and direct-apply import policies respectively.
 - Public paper, scholar, laboratory, and published degree-thesis pages can now be browsed without signing in; account actions request authentication only when invoked.
@@ -34,6 +39,7 @@ Chinese version: [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)
 
 ### Quality Assurance
 
+- Version endpoint and deployment metadata tests now read the shared product version, with regression coverage rejecting mismatched release tags.
 - Added a transactional PostgreSQL upgrade fixture for existing identities, same-name members, pending invitations, appointments, paper authorship, and search index retention, and run it in CI and release verification.
 - Container CI now reads the product version from `VERSION` instead of a hard-coded release number.
 
