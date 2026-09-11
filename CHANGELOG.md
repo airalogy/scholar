@@ -4,6 +4,11 @@ Chinese version: [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)
 
 ## [Unreleased]
 
+### Fixed
+
+- Local pre-push, CI and release validation now share the same repository checks, including production dependency licenses, with regression guards against omitted checks.
+- Added a read-only GitHub run monitor with bounded network retries and distinct results for workflow failure versus an unavailable status query.
+
 ## [5.0.0] - 2026-09-11
 
 ### Breaking Changes

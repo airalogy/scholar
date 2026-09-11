@@ -41,6 +41,32 @@ if (packageJson.scripts?.prepush !== 'pnpm audit:prod && pnpm check && node scri
   )
 }
 
+const sharedChecks = (packageJson.scripts?.check ?? '').split(' && ')
+for (const command of [
+  'pnpm ci:config:check',
+  'pnpm license:check',
+  'pnpm version:check',
+  'pnpm docs:check',
+  'pnpm release:source:check',
+  'pnpm db:validate',
+  'pnpm db:generate',
+  'pnpm format:check',
+  'pnpm lint',
+  'pnpm type-check',
+  'pnpm test',
+  'pnpm build',
+  'pnpm --filter @airalogy/scholar-server smoke:dist',
+]) {
+  if (!sharedChecks.includes(command)) {
+    fail(packageJsonPath, 1, `shared check command must include ${command}`)
+  }
+}
+
+const prepushPath = path.join(repositoryRoot, '.githooks', 'pre-push')
+if (!/^pnpm prepush$/m.test(await readFile(prepushPath, 'utf8'))) {
+  fail(prepushPath, 1, 'the pre-push hook must run pnpm prepush')
+}
+
 const apiPackageJsonPath = path.join(repositoryRoot, 'apps', 'api', 'package.json')
 const apiPackageJson = JSON.parse(await readFile(apiPackageJsonPath, 'utf8'))
 
@@ -213,6 +239,13 @@ for (const fragment of requiredReleaseFragments) {
 
 const ciWorkflowPath = path.join(workflowDirectory, 'ci.yml')
 const ciWorkflow = await readFile(ciWorkflowPath, 'utf8')
+for (const [file, workflow] of [[ciWorkflowPath, ciWorkflow], [releaseWorkflowPath, releaseWorkflow]]) {
+  for (const command of ['pnpm audit:prod', 'pnpm check']) {
+    if (!workflow.split('\n').some((line) => line.trim() === `- run: ${command}`)) {
+      fail(file, 1, `workflow must run ${command} so local and cloud validation stay aligned`)
+    }
+  }
+}
 if (!/^on:\n  push:\n    branches:\n      - main\n  pull_request:/m.test(ciWorkflow)) {
   fail(ciWorkflowPath, 1, 'CI must run branch pushes only on main and use pull_request for changes')
 }
