@@ -4,6 +4,24 @@ Chinese version: [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)
 
 ## [Unreleased]
 
+## [4.0.1] - 2026-09-11
+
+### Changed
+
+- Moved feedback from a floating chat-style button to a quieter sidebar entry beside documentation, with automatically centered icon-and-label layouts, a writing icon and an accessible feedback dialog.
+
+### Fixed
+
+- Patch-release validation now permits omitted changelog categories while still rejecting mismatched English and Chinese sections or item counts.
+
+### Quality Assurance
+
+- Added feedback regression tests covering keyboard focus, draft retention, validation, duplicate submissions, mobile navigation and language switching.
+
+### Database and Deployment
+
+- No database migrations, authentication changes or new deployment settings. Upgrade API, Web and bundled documentation together to 4.0.1; the database schema remains compatible with 4.0.0.
+
 ## [4.0.0] - 2026-09-10
 
 ### Added

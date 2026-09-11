@@ -69,7 +69,7 @@ const readSectionBulletCount = (changelog, heading) => {
   const marker = `### ${heading}`
   const start = changelog.indexOf(marker)
   if (start === -1) {
-    throw new Error(`Changelog section is missing: ${marker}`)
+    return null
   }
   const contentStart = start + marker.length
   const nextSection = changelog.indexOf('\n### ', contentStart)
@@ -81,9 +81,14 @@ const readSectionBulletCount = (changelog, heading) => {
 
 const sectionPairs = [
   ['Added', '新增'],
+  ['Changed', '变更'],
+  ['Fixed', '修复'],
+  ['Deprecated', '弃用'],
+  ['Removed', '移除'],
   ['Security', '安全'],
   ['Quality Assurance', '质量保障'],
   ['Database and Deployment', '数据库与部署'],
+  ['Breaking Changes', '不兼容变更'],
 ]
 const englishChangelog = readVersionSection(changelogs.get('CHANGELOG.md'))
 const chineseChangelog = readVersionSection(changelogs.get('CHANGELOG.zh-CN.md'))

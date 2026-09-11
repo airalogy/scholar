@@ -588,7 +588,6 @@ const enUS = {
     rejectedSuccess: 'Paper returned',
   },
   feedback: {
-    open: 'Open feedback',
     close: 'Close feedback',
     panelTitle: 'Feedback',
     titleLabel: 'Title',
