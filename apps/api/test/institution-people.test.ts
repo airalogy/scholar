@@ -16,6 +16,8 @@ test('institution internal IDs are compared case-insensitively without changing 
 
 test('institution person references require exactly one supported identifier', async () => {
   const prisma = {
+    $queryRawUnsafe: async () => [],
+    institution_person_identifiers: { findUnique: async () => null },
     institution_people: {
       findFirst: async () => null,
       findUnique: async () => null,
@@ -41,6 +43,8 @@ test('a Scholar UUID resolves only through the configured institution person', a
   const scholarId = '33333333-3333-4333-8333-333333333333'
   let capturedWhere: unknown
   const prisma = {
+    $queryRawUnsafe: async () => [],
+    institution_person_identifiers: { findUnique: async () => null },
     institution_people: {
       findFirst: async ({ where }: { where: unknown }) => {
         capturedWhere = where
@@ -60,6 +64,8 @@ test('a Scholar UUID resolves only through the configured institution person', a
 test('an institution internal ID cannot be reassigned to a different user', async () => {
   let eventCount = 0
   const prisma = {
+    $queryRawUnsafe: async () => [],
+    institution_person_identifiers: { findUnique: async () => null },
     institution_people: {
       findUnique: async () => ({
         id: '22222222-2222-4222-8222-222222222222',
@@ -117,6 +123,8 @@ test('a trusted provision anchor can correct an institution internal ID', async 
   }
   let updateData: Record<string, unknown> | undefined
   const prisma = {
+    $queryRawUnsafe: async () => [],
+    institution_person_identifiers: { findUnique: async () => null },
     institution_people: {
       findUnique: async () => null,
       findFirst: async ({ where }: { where: Record<string, unknown> }) => {
@@ -145,6 +153,8 @@ test('a trusted provision anchor can correct an institution internal ID', async 
 
 test('different identity anchors cannot merge two institution people', async () => {
   const prisma = {
+    $queryRawUnsafe: async () => [],
+    institution_person_identifiers: { findUnique: async () => null },
     institution_people: {
       findUnique: async () => ({
         id: '22222222-2222-4222-8222-222222222222',
@@ -183,6 +193,8 @@ test('different identity anchors cannot merge two institution people', async () 
 test('a concurrent unique constraint race becomes a stable identity conflict', async () => {
   let eventCount = 0
   const prisma = {
+    $queryRawUnsafe: async () => [],
+    institution_person_identifiers: { findUnique: async () => null },
     institution_people: {
       findUnique: async () => null,
       findFirst: async () => null,

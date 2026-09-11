@@ -118,6 +118,19 @@ BEGIN
     SELECT 1 FROM embeddings WHERE text = 'Existing index text'
       AND bm25_length = 0 AND bm25_terms = '{}'::jsonb
   ) THEN RAISE EXCEPTION 'Existing search index was lost'; END IF;
+  IF (SELECT count(*) FROM institution_person_identifiers) <> 4 OR EXISTS (
+    SELECT 1 FROM institution_people person
+    LEFT JOIN institution_person_identifiers identifier ON identifier."personId" = person.id
+      AND identifier."institutionId" = person."institutionId"
+      AND identifier."normalizedValue" = person."normalizedInternalId"
+      AND identifier.value = person."internalId" AND identifier."isPrimary"
+      AND identifier.version = 1 AND identifier."revokedAt" IS NULL
+    WHERE identifier.id IS NULL
+  ) THEN RAISE EXCEPTION 'Identity migration did not preserve all canonical identifiers'; END IF;
+  IF (SELECT count(*) FROM institution_identity_requests) <> 0
+    OR (SELECT count(*) FROM institution_identity_challenges) <> 0 THEN
+    RAISE EXCEPTION 'Identity migration created unsolicited account associations';
+  END IF;
 END $$;
 `
 

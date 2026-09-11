@@ -12,13 +12,28 @@ Authentication, institution identity, and scholarly profile are separate concept
 
 - `users` is the login account. A person can exist in the institution directory before a user account exists.
 - `institution_people` is the institution's authoritative person record. It has one canonical `internalId`, such as an employee or student number, and may link to a `user`, a `scholar`, and an activation provision.
+- `institution_person_identifiers` reserves the canonical ID and administrator-verified aliases in one institution-scoped namespace, including revocation and session versions.
 - `user_external_identities` records the identity-provider login mapping.
 - `institution_memberships` records authorization roles and delegated capabilities.
 - `scholars` contains the public scholarly profile. It is not a login account.
 
 The canonical internal ID is unique within the configured institution, compared case-insensitively, and retained in its original display form. Do not derive it from email, name, year, degree level, or organizational unit. Scholar UUIDs and user UUIDs remain internal platform identifiers and are not substitutes for the institution ID.
 
-An institution may use multiple authentication protocols, but every protocol must resolve the same canonical internal ID. Email is contact information only and must not silently reassign an institution person.
+An institution may use multiple authentication protocols. Each verified identifier must resolve to the same institution person, through the canonical ID or a verified alias. Email is contact information only and must not silently reassign an institution person.
+
+## Multiple student or employee IDs
+
+One person can retain an old student ID and acquire another student or employee ID. Keep the existing person, user, Scholar UUID, canonical ID, memberships, and paper bindings. Add an independently verified alias instead of changing the canonical ID or merging accounts by name or email. Both active IDs then resolve to the existing account; imports and author bindings also accept active aliases.
+
+Institution owners and platform administrators manage identifiers and identity requests under **Administration → Institution → Members**. Ordinary administrators and delegated import/review members cannot do so. An owner cannot change a platform administrator's identifiers; another administrator must verify an administrator's own additional ID. Verification requires an explicit target person and a recorded basis from authoritative institution records. Names and email matches are hints, never sufficient evidence.
+
+After successful institution SSO, a binding conflict returns `409` with reason `institution_identity_conflict` and a random, 15-minute proof. The proof only permits `POST /auth/institution-identity-requests` and `POST /auth/institution-identity-requests/status`; it is not a login token. The applicant declares the old account is theirs, supplies the prior ID and an explanation, and can view only their own outcome. Invalid SSO or an inactive ID never creates such a proof. Only the proof hash is stored; the browser keeps the proof in tab-scoped session storage, not in the URL.
+
+Administrators may approve, reject, or request more information. Approval adds an alias to an explicitly selected person with an existing account; it does not create elevated permissions or merge different person/account records. Private verification notes are audited separately from the message shown to the applicant. Pending submissions and concurrent decisions are serialized; a verified ID can create at most three new requests in 24 hours. A fresh SSO attempt reopens the existing request after proof expiry.
+
+Revoked IDs stay reserved for their original person. Restoration requires a new administrative verification and increments the identifier version. New SSO sessions are bound to the exact login ID/version, so revocation invalidates those sessions immediately and restoration never revives them. **Pre-upgrade JWTs and password-login sessions lack that identifier binding and remain valid until their existing expiry**; revoking an ID is not a global account/session revocation. The canonical display ID can remain reserved and revoked while another verified ID continues to work.
+
+The migration backfills canonical IDs without inferring aliases. `pnpm db:verify:identity` exercises the workflow, permissions, concurrency, and revocation in a uniquely named temporary schema of a local test database; `pnpm db:verify:upgrade` verifies preservation of existing people and authorship. Neither test associates real people automatically.
 
 ## Prebinding papers before first login
 

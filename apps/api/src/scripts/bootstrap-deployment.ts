@@ -1,6 +1,7 @@
 import bcrypt from 'bcrypt'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '../../prisma/generated/client'
+import { lockMutationScope } from '../utils/advisory-lock'
 
 interface BootstrapInput {
   institutionName: string
@@ -66,6 +67,11 @@ const main = async (): Promise<void> => {
 
   try {
     const result = await prisma.$transaction(async (transaction) => {
+      const configuredInstitution = await transaction.institutions.findUnique({
+        where: { slug: input.institutionSlug },
+      })
+      if (configuredInstitution)
+        await lockMutationScope(transaction, 'institution-identity', configuredInstitution.id)
       const matchedUsers = await transaction.users.findMany({
         where: {
           OR: [{ email: input.ownerEmail }, { username: input.ownerUsername }],

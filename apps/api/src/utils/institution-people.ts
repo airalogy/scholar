@@ -1,23 +1,30 @@
 import crypto from 'node:crypto'
 import type { Prisma } from '../../prisma/generated/client'
+import { lockMutationScope } from './advisory-lock'
+import {
+  InstitutionPersonConflictError,
+  InstitutionPersonInputError,
+  assertInstitutionInternalId,
+  normalizeInstitutionInternalId,
+  resolveInstitutionIdentifier,
+} from './institution-identifiers'
+
+export {
+  InstitutionPersonConflictError,
+  InstitutionPersonInputError,
+  assertInstitutionInternalId,
+  normalizeInstitutionInternalId,
+} from './institution-identifiers'
 
 type InstitutionPersonClient = Pick<
   Prisma.TransactionClient,
-  'institution_people' | 'institution_person_events'
+  'institution_people' | 'institution_person_events' | 'institution_person_identifiers'
 >
 
 export interface InstitutionPersonReference {
   institutionPersonId?: string
   institutionInternalId?: string
   scholarId?: string
-}
-
-export class InstitutionPersonInputError extends Error {
-  readonly statusCode = 400
-}
-
-export class InstitutionPersonConflictError extends Error {
-  readonly statusCode = 409
 }
 
 interface UpsertInstitutionPersonInput {
@@ -31,21 +38,6 @@ interface UpsertInstitutionPersonInput {
   provisionId?: string | null
   source: string
   actorUserId?: string | null
-}
-
-export const normalizeInstitutionInternalId = (value: string): string => {
-  return value.trim().toLocaleLowerCase('en-US')
-}
-
-export const assertInstitutionInternalId = (value: string): string => {
-  const internalId = value.trim()
-  if (!internalId) {
-    throw new InstitutionPersonInputError('Institution internal ID must not be empty')
-  }
-  if (internalId.length > 100) {
-    throw new InstitutionPersonInputError('Institution internal ID must not exceed 100 characters')
-  }
-  return internalId
 }
 
 const buildPersonKey = (normalizedInternalId: string): string => {
@@ -89,22 +81,26 @@ export const resolveInstitutionPerson = async (
     })
   }
 
-  return prisma.institution_people.findUnique({
-    where: {
-      institutionId_normalizedInternalId: {
-        institutionId,
-        normalizedInternalId: normalizeInstitutionInternalId(internalId as string),
-      },
-    },
-  })
+  return (
+    (await resolveInstitutionIdentifier(prisma, institutionId, internalId as string))?.person ??
+    null
+  )
 }
 
 export const upsertInstitutionPerson = async (
-  prisma: InstitutionPersonClient,
+  prisma: Prisma.TransactionClient,
   input: UpsertInstitutionPersonInput,
 ) => {
+  // Call with the surrounding transaction: acquire this before any person row lock.
+  await lockMutationScope(prisma, 'institution-identity', input.institutionId)
   const now = new Date()
-  const internalId = assertInstitutionInternalId(input.internalId)
+  const identifier = await resolveInstitutionIdentifier(
+    prisma,
+    input.institutionId,
+    input.internalId,
+  )
+  // An alias locates a person; it must never replace that person's canonical ID.
+  const internalId = identifier?.person.internalId ?? assertInstitutionInternalId(input.internalId)
   const normalizedInternalId = normalizeInstitutionInternalId(internalId)
   const key = input.key?.trim()
   const [byInternalId, byKey, byUser, byScholar, byProvision] = await Promise.all([
@@ -147,6 +143,12 @@ export const upsertInstitutionPerson = async (
     )
   }
   const existing = candidates[0] ?? null
+
+  if (existing?.userId && existing.normalizedInternalId !== normalizedInternalId) {
+    throw new InstitutionPersonConflictError(
+      'An account-linked person requires an administrator-verified alias; its canonical ID cannot be replaced by an import',
+    )
+  }
 
   if (existing?.userId && input.userId && existing.userId !== input.userId) {
     throw new InstitutionPersonConflictError(
@@ -234,7 +236,7 @@ export const upsertInstitutionPerson = async (
 }
 
 export const linkInstitutionPersonToUser = async (
-  prisma: InstitutionPersonClient,
+  prisma: Prisma.TransactionClient,
   input: {
     institutionId: string
     personId: string
@@ -243,6 +245,7 @@ export const linkInstitutionPersonToUser = async (
     actorUserId?: string | null
   },
 ) => {
+  await lockMutationScope(prisma, 'institution-identity', input.institutionId)
   const person = await prisma.institution_people.findFirst({
     where: {
       id: input.personId,

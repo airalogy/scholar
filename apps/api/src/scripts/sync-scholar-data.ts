@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { Prisma, PrismaClient } from '../../prisma/generated/client'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { normalizeDoi } from '../utils/doi'
+import { lockMutationScope } from '../utils/advisory-lock'
 
 interface SyncedPaperRecord {
   id: string
@@ -1135,20 +1136,27 @@ const syncInstitutionPaperAuthorBindings = async (
       continue
     }
     const runAt = new Date()
-    const person = await prisma.institution_people.create({
-      data: {
-        institutionId,
-        key: `scholar:${profile.id}`,
-        internalId: `legacy-scholar:${profile.id}`,
-        normalizedInternalId: `legacy-scholar:${profile.id}`,
-        name: profile.name.trim(),
-        userId: matchingUserIds.has(profile.id) ? profile.id : null,
-        scholarId: profile.id,
-        userLinkedAt: matchingUserIds.has(profile.id) ? runAt : null,
-        scholarLinkedAt: runAt,
-        createdAt: runAt,
-        updatedAt: runAt,
-      },
+    const person = await prisma.$transaction(async (tx) => {
+      await lockMutationScope(tx, 'institution-identity', institutionId)
+      const existingPerson = await tx.institution_people.findUnique({
+        where: { institutionId_scholarId: { institutionId, scholarId: profile.id } },
+      })
+      if (existingPerson) return existingPerson
+      return tx.institution_people.create({
+        data: {
+          institutionId,
+          key: `scholar:${profile.id}`,
+          internalId: `legacy-scholar:${profile.id}`,
+          normalizedInternalId: `legacy-scholar:${profile.id}`,
+          name: profile.name.trim(),
+          userId: matchingUserIds.has(profile.id) ? profile.id : null,
+          scholarId: profile.id,
+          userLinkedAt: matchingUserIds.has(profile.id) ? runAt : null,
+          scholarLinkedAt: runAt,
+          createdAt: runAt,
+          updatedAt: runAt,
+        },
+      })
     })
     personByScholarId.set(profile.id, person)
   }

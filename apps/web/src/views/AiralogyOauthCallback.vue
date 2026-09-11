@@ -5,21 +5,22 @@
         <a-spin :size="28" />
       </div>
 
-      <h1 class="oauth-callback-title">
-        {{
-          status === 'loading'
-            ? $t('oauthCallback.processingTitle', { provider: providerLabel })
-            : $t('oauthCallback.failedTitle', { provider: providerLabel })
-        }}
-      </h1>
+      <h1 class="oauth-callback-title">{{ pageTitle }}</h1>
 
       <p class="oauth-callback-message">
         {{
           status === 'loading'
             ? $t('oauthCallback.processingDescription', { provider: providerLabel })
-            : errorMessage
+            : status === 'review' ? $t('identity.conflictDescription') : errorMessage
         }}
       </p>
+
+      <IdentityReviewRequest
+        v-if="status === 'review' && conflict"
+        :proof-token="conflict.proofToken"
+        :expires-at="conflict.expiresAt"
+        @reauthenticate="retryOauth"
+      />
 
       <div v-if="status === 'error'" class="oauth-callback-actions">
         <a-button type="primary" @click="retryOauth">
@@ -44,6 +45,8 @@ import {
 } from '@/api/auth'
 import { useAuth } from '@/composables/useAuth'
 import { usePublicConfig } from '@/composables/usePublicConfig'
+import IdentityReviewRequest from '@/components/IdentityReviewRequest.vue'
+import { cacheIdentityConflict, getIdentityConflict, restoreIdentityConflict, type IdentityConflict } from '@/api/identity'
 
 const route = useRoute()
 const router = useRouter()
@@ -51,7 +54,8 @@ const { t } = useI18n()
 const { login } = useAuth()
 const { auth: publicAuthConfig, features, defaultHomePath } = usePublicConfig()
 
-const status = ref<'loading' | 'error'>('loading')
+const status = ref<'loading' | 'error' | 'review'>('loading')
+const conflict = ref<IdentityConflict | null>(null)
 const errorMessage = ref('')
 const provider = computed<OauthProvider>(() => {
   return route.meta.oauthProvider === 'institution-sso' ? 'institution-sso' : 'airalogy'
@@ -66,6 +70,9 @@ const providerLabel = computed(() => {
     ? t('oauthCallback.providers.institutionSso')
     : t('oauthCallback.providers.airalogy')
 })
+const pageTitle = computed(() => status.value === 'review'
+  ? t('identity.conflictTitle')
+  : t(status.value === 'loading' ? 'oauthCallback.processingTitle' : 'oauthCallback.failedTitle', { provider: providerLabel.value }))
 
 const getQueryValue = (value: unknown): string => {
   return typeof value === 'string' ? value : ''
@@ -85,6 +92,7 @@ const getErrorMessage = (error: unknown, fallback: string): string => {
 }
 
 const retryOauth = (): void => {
+  cacheIdentityConflict(null)
   const isEnabled = provider.value === 'airalogy'
     ? publicAuthConfig.value.enableAiralogyOauth
     : publicAuthConfig.value.enableInstitutionSso
@@ -114,6 +122,11 @@ const handleCallback = async (): Promise<void> => {
   const code = getQueryValue(route.query.code)
   const state = getQueryValue(route.query.state)
 
+  if (provider.value === 'institution-sso' && !code && !state) {
+    conflict.value = restoreIdentityConflict()
+    if (conflict.value) { status.value = 'review'; return }
+  }
+
   if (!code || !state) {
     status.value = 'error'
     errorMessage.value = t('oauthCallback.missingParams', { provider: providerLabel.value })
@@ -127,9 +140,18 @@ const handleCallback = async (): Promise<void> => {
       ? defaultHomePath.value
       : redirectTo
 
+    cacheIdentityConflict(null)
     login(result.access_token, result.name, result.avatar_url ?? '')
     await router.replace(safeRedirectTo)
   } catch (error) {
+    const identityConflict = provider.value === 'institution-sso' ? getIdentityConflict(error) : null
+    if (identityConflict) {
+      conflict.value = identityConflict
+      cacheIdentityConflict(identityConflict)
+      status.value = 'review'
+      await router.replace({ path: route.path, query: {} })
+      return
+    }
     status.value = 'error'
     errorMessage.value = getErrorMessage(
       error,

@@ -199,6 +199,7 @@ const requiredReleaseFragments = [
   'sbom: true',
   'artifact-metadata: write',
   'pnpm release:source:verify',
+  'pnpm db:verify:identity',
   'README.zh-CN.md',
   'scholar-${{ matrix.component }}',
   'type=semver,pattern={{major}}.{{minor}}',
@@ -216,6 +217,9 @@ if (!/^on:\n  push:\n    branches:\n      - main\n  pull_request:/m.test(ciWorkf
 }
 if (!ciWorkflow.includes('pnpm release:source:verify')) {
   fail(ciWorkflowPath, 1, 'CI must verify the generated release source snapshot')
+}
+if (!ciWorkflow.includes('pnpm db:verify:identity')) {
+  fail(ciWorkflowPath, 1, 'CI must run the PostgreSQL institution identity verification')
 }
 
 const lifecycleScriptPaths = new Set()

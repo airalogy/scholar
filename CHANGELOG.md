@@ -4,6 +4,32 @@ Chinese version: [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-09-11
+
+### Added
+
+- Institution owners and platform administrators can verify additional student or employee IDs for the same person, with revocation, restoration and an audit trail. Canonical IDs, accounts, profiles and paper bindings are preserved.
+- A successfully authenticated institution SSO conflict now offers a private identity-verification request, with prior-ID declaration, status tracking, supplementary information, administrator approval or rejection, and bilingual interfaces.
+
+### Security
+
+- Names and email addresses never automatically merge accounts. Short-lived, hashed applicant proofs cannot access user accounts; identity operations reject integration credentials, cross-institution access and unauthorized or self-verification.
+- Revoking an ID invalidates new SSO sessions bound to its version. Pre-upgrade and password sessions keep their existing expiry. Reserved IDs cannot be reassigned, and imports cannot replace an account-linked canonical ID to bypass verification.
+- Updated development/build dependencies to patched Vitest, SVGO and js-yaml versions identified during release security review.
+
+### Fixed
+
+- PostgreSQL advisory-lock queries now return a driver-compatible type, avoiding mutation failures when the Prisma adapter cannot deserialize `void`.
+- Person updates, membership/provision changes, organization imports and deployment tools acquire the identity lock before person rows, preventing a deadlock with concurrent SSO sign-in.
+
+### Database and Deployment
+
+- Added canonical/alias identifiers, expiring verification challenges, requests and audit events. The additive migration preserves all existing people and authorship without inferring real-person associations. Apply database migrations before starting the new API.
+
+### Quality Assurance
+
+- Added PostgreSQL integration and bilingual UI tests for approval, permissions, replay, concurrent mutations, revocation, imports, proof expiry, draft retention and cancellation. Identity and lossless-upgrade checks run in CI and release validation.
+
 ## [4.0.1] - 2026-09-11
 
 ### Changed

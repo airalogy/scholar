@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { Prisma } from '../../prisma/generated/client'
 import type { UpsertInstitutionOrgStructureBody } from '../routes/institutions/schema'
+import { lockMutationScope } from './advisory-lock'
 import {
   assertInstitutionInternalId,
   normalizeInstitutionInternalId,
@@ -991,6 +992,7 @@ export const upsertInstitutionOrgStructure = async (
   const replaceMissing = body.replaceMissing !== false
 
   await fastify.prisma.$transaction(async (tx) => {
+    await lockMutationScope(tx, 'institution-identity', institutionId)
     for (const node of body.nodes) {
       await tx.institution_org_nodes.upsert({
         where: {

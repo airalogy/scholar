@@ -15,6 +15,12 @@ import {
   normalizeInstitutionInternalId,
   upsertInstitutionPerson,
 } from '../../../utils/institution-people'
+import {
+  assertInstitutionInternalId,
+  resolveInstitutionIdentifier,
+} from '../../../utils/institution-identifiers'
+import { lockMutationScope } from '../../../utils/advisory-lock'
+import { InstitutionIdentityLinkRequired } from '../../../identity/challenges'
 
 const INSTITUTION_SSO_CALLBACK_PATH = '/institution_sso_callback'
 
@@ -32,6 +38,8 @@ interface InstitutionSsoUser {
 
 interface InstitutionSsoSyncResult {
   user: InstitutionSsoUser
+  identifierId: string
+  identifierVersion: number
 }
 
 const getInstitutionSsoUrl = (fastify: FastifyInstance, value: string, envName: string): string => {
@@ -159,6 +167,10 @@ const fetchInstitutionSsoProfile = async (
       `Institution SSO user info is missing ${config.internalIdField}`,
     )
   }
+  assertInstitutionInternalId(internalId)
+  if (email.length > 100 || (name?.length ?? 0) > 100) {
+    throw fastify.httpErrors.badGateway('Institution SSO profile exceeds supported field lengths')
+  }
 
   return {
     email: email.toLowerCase(),
@@ -183,15 +195,10 @@ const syncInstitutionSsoUser = async (
   if (!institution) {
     throw fastify.httpErrors.internalServerError('Institution SSO target is not configured')
   }
-  const user = await fastify.prisma.$transaction(async (tx) => {
-    const person = await tx.institution_people.findUnique({
-      where: {
-        institutionId_normalizedInternalId: {
-          institutionId: institution.id,
-          normalizedInternalId,
-        },
-      },
-    })
+  return fastify.prisma.$transaction(async (tx) => {
+    await lockMutationScope(tx, 'institution-identity', institution.id)
+    const identifier = await resolveInstitutionIdentifier(tx, institution.id, profile.internalId)
+    let person = identifier?.person ?? null
     const identity = await tx.user_external_identities.findUnique({
       where: {
         provider_externalId: {
@@ -202,10 +209,18 @@ const syncInstitutionSsoUser = async (
       include: { user: true },
     })
     if (identity && person?.userId && identity.userId !== person.userId) {
-      throw fastify.httpErrors.conflict(
-        'Institution SSO identity conflicts with the existing institution person link',
-      )
+      throw new InstitutionIdentityLinkRequired(profile)
     }
+
+    if (!person && identity) {
+      person = await tx.institution_people.findUnique({
+        where: {
+          institutionId_userId: { institutionId: institution.id, userId: identity.userId },
+        },
+      })
+    }
+    if (person && !person.is_active)
+      throw fastify.httpErrors.forbidden('Institution identity is inactive')
 
     let linkedUser = identity?.user
     if (!linkedUser && person?.userId) {
@@ -214,10 +229,17 @@ const syncInstitutionSsoUser = async (
     if (!linkedUser) {
       const emailAccount = await tx.users.findUnique({ where: { email: profile.email } })
       if (emailAccount) {
-        throw fastify.httpErrors.conflict(
-          'This email belongs to an existing account; an administrator must link its institution internal ID before SSO sign-in',
-        )
+        throw new InstitutionIdentityLinkRequired(profile)
       }
+      const pending = await tx.institution_identity_requests.findFirst({
+        where: {
+          institutionId: institution.id,
+          provider: config.providerId,
+          normalizedId: normalizedInternalId,
+          status: { in: ['pending', 'needs_information'] },
+        },
+      })
+      if (pending) throw new InstitutionIdentityLinkRequired(profile)
       linkedUser = await tx.users.create({
         data: {
           email: profile.email,
@@ -236,25 +258,41 @@ const syncInstitutionSsoUser = async (
       })
     }
 
-    if (!identity) {
+    // Keep the provider's canonical account mapping. Aliases live on the person,
+    // rather than weakening other providers' one-account-per-user constraint.
+    const canonicalIdentity = await tx.user_external_identities.findFirst({
+      where: { userId: linkedUser.id, provider: config.providerId },
+    })
+    if (!canonicalIdentity) {
       await tx.user_external_identities.create({
         data: {
           userId: linkedUser.id,
           provider: config.providerId,
-          externalId: normalizedInternalId,
+          externalId: person?.normalizedInternalId ?? normalizedInternalId,
           createdAt: now,
           updatedAt: now,
         },
       })
-    } else if (identity.userId !== linkedUser.id) {
+    } else if (identity && identity.userId !== linkedUser.id) {
       throw fastify.httpErrors.conflict('Institution SSO identity is linked to another user')
     }
 
-    await upsertInstitutionPerson(tx, {
+    if (!identifier && person && identity?.userId === linkedUser.id) {
+      await tx.institution_person_identifiers.create({
+        data: {
+          institutionId: institution.id,
+          personId: person.id,
+          value: profile.internalId,
+          normalizedValue: normalizedInternalId,
+          source: 'legacy_sso',
+        },
+      })
+    }
+    const linkedPerson = await upsertInstitutionPerson(tx, {
       institutionId: institution.id,
       internalId: profile.internalId,
-      name: displayName,
-      email: profile.email,
+      name: person?.name || displayName,
+      email: person?.email ?? profile.email,
       userId: linkedUser.id,
       source: 'institution_sso',
       actorUserId: linkedUser.id,
@@ -277,10 +315,41 @@ const syncInstitutionSsoUser = async (
       update: { updatedAt: now },
     })
 
-    return linkedUser
+    let loginIdentifier =
+      identifier ??
+      (await tx.institution_person_identifiers.findUnique({
+        where: {
+          institutionId_normalizedValue: {
+            institutionId: institution.id,
+            normalizedValue: normalizedInternalId,
+          },
+        },
+      }))
+    if (!loginIdentifier && identity?.userId === linkedUser.id) {
+      // Preserve an already verified legacy SSO mapping after a historical ID correction.
+      loginIdentifier = await tx.institution_person_identifiers.create({
+        data: {
+          institutionId: institution.id,
+          personId: linkedPerson.id,
+          value: profile.internalId,
+          normalizedValue: normalizedInternalId,
+          source: 'legacy_sso',
+        },
+      })
+    }
+    if (
+      !loginIdentifier ||
+      loginIdentifier.revokedAt ||
+      loginIdentifier.personId !== linkedPerson.id
+    ) {
+      throw fastify.httpErrors.conflict('Institution login identifier could not be verified')
+    }
+    return {
+      user: linkedUser,
+      identifierId: loginIdentifier.id,
+      identifierVersion: loginIdentifier.version,
+    }
   })
-
-  return { user }
 }
 
 export const createInstitutionSsoAuthorization = (
@@ -309,7 +378,10 @@ export const completeInstitutionSsoLogin = async (
   const returnTo = verifyOauthState(fastify, config.providerId, data.state)
   const accessToken = await exchangeAuthorizationCode(fastify, data.code)
   const profile = await fetchInstitutionSsoProfile(fastify, accessToken)
-  const { user } = await syncInstitutionSsoUser(fastify, profile)
+  const { user, identifierId, identifierVersion } = await syncInstitutionSsoUser(fastify, profile)
 
-  return buildOauthCallbackResponse(fastify, user, null, returnTo)
+  return buildOauthCallbackResponse(fastify, user, null, returnTo, {
+    institutionIdentifierId: identifierId,
+    institutionIdentifierVersion: identifierVersion,
+  })
 }

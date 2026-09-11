@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { normalizeInstitutionRole } from './permissions'
 import { linkInstitutionPersonToUser } from './institution-people'
+import { lockMutationScope } from './advisory-lock'
 
 export type InstitutionProvisionStatus = 'pending_activation' | 'claimed' | 'disabled'
 
@@ -73,6 +74,7 @@ export const syncInstitutionProvisionToUser = async (
   }
 
   await fastify.prisma.$transaction(async (tx) => {
+    await lockMutationScope(tx, 'institution-identity', provision.institutionId)
     const person = await tx.institution_people.findUnique({
       where: {
         institutionId_provisionId: {

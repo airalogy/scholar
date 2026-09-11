@@ -20,6 +20,7 @@ const redactSensitiveUrl = (value: string): string => {
     'access_token',
     'id_token',
     'refresh_token',
+    'prooftoken',
   ])
   try {
     const url = new URL(value, 'http://scholar.local')
@@ -31,7 +32,7 @@ const redactSensitiveUrl = (value: string): string => {
     return `${url.pathname}${url.search}`
   } catch {
     return value.replace(
-      /([?&](?:token|client_secret|code|state|access_token|id_token|refresh_token)=)[^&]*/giu,
+      /([?&](?:token|client_secret|code|state|access_token|id_token|refresh_token|proofToken)=)[^&]*/giu,
       '$1[REDACTED]',
     )
   }
@@ -54,7 +55,13 @@ const resolveLogger = (): FastifyServerOptions['logger'] => {
   const isProduction = process.env.NODE_ENV === 'production'
   const level = process.env.LOG_LEVEL?.trim() || (isProduction ? 'info' : 'debug')
   const redact = {
-    paths: ['req.headers.authorization', 'req.headers.cookie', 'res.headers.set-cookie'],
+    paths: [
+      'req.headers.authorization',
+      'req.headers.cookie',
+      'res.headers.set-cookie',
+      'req.body.proofToken',
+      'body.proofToken',
+    ],
     censor: '[REDACTED]',
   }
   const serializers = {

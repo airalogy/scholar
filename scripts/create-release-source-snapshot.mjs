@@ -234,6 +234,7 @@ const verifySnapshot = (targetRoot) => {
     ['pnpm', ['db:migrate:deploy']],
     ['pnpm', ['db:audit:integrity']],
     ['pnpm', ['db:verify:upgrade']],
+    ['pnpm', ['db:verify:identity']],
   ]
 
   for (const [command, args] of commands) {

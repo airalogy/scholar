@@ -4,6 +4,7 @@ export const lockMutationScope = async (
   tx: Prisma.TransactionClient,
   scope:
     | 'institution'
+    | 'institution-identity'
     | 'lab'
     | 'credentials'
     | 'download'
@@ -14,7 +15,7 @@ export const lockMutationScope = async (
   id: string,
 ): Promise<void> => {
   await tx.$queryRawUnsafe(
-    'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+    'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))::text',
     `${scope}:${id}`,
   )
 }

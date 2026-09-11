@@ -84,6 +84,22 @@ const buildImportPrismaMock = (state: ImportTestState) => {
   }> = []
 
   const prisma = {
+    $queryRawUnsafe: async () => [],
+    institution_person_identifiers: {
+      findUnique: async ({
+        where,
+      }: {
+        where: { institutionId_normalizedValue: { institutionId: string; normalizedValue: string } }
+      }) => {
+        const key = where.institutionId_normalizedValue
+        const person = institutionPeople.find(
+          (item) =>
+            item.institutionId === key.institutionId &&
+            item.normalizedInternalId === key.normalizedValue,
+        )
+        return person ? { person, personId: person.id, revokedAt: null } : null
+      },
+    },
     users: {
       findUnique: async ({ where }: { where: { id?: string } }) => {
         return where.id === USER_ID ? { id: USER_ID, platform_role: 'member' } : null

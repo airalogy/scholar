@@ -24,6 +24,8 @@
       <div v-if="isLoading" class="admin-state">{{ $t('common.loading') }}</div>
       <div v-else-if="loadError" class="admin-state">{{ loadError }}</div>
       <template v-else-if="institution">
+        <InstitutionIdentityRequestsPanel v-if="canManageOwnerRole" :slug="institution.slug" />
+        <InstitutionIdentifiersPanel v-if="canManageOwnerRole" :slug="institution.slug" />
         <section class="admin-panel">
           <div class="panel-head">
             <div>
@@ -450,6 +452,8 @@ import {
 } from '@/api/institutions'
 import { searchUsers, type UserSearchItem } from '@/api/users'
 import { INSTITUTION_ROLE_LABEL_KEYS, PLATFORM_ROLE_LABEL_KEYS, PROVISION_STATUS_LABEL_KEYS } from '@/i18n/helpers'
+import InstitutionIdentityRequestsPanel from '@/components/InstitutionIdentityRequestsPanel.vue'
+import InstitutionIdentifiersPanel from '@/components/InstitutionIdentifiersPanel.vue'
 
 const route = useRoute()
 const { t, locale } = useI18n()

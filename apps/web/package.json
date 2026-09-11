@@ -1,6 +1,6 @@
 {
   "name": "@airalogy/scholar-web",
-  "version": "4.0.1",
+  "version": "4.1.0",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
@@ -35,7 +35,7 @@
     "typescript": "^5.9.3",
     "vite": "^8.2.0",
     "vite-svg-loader": "^5.1.0",
-    "vitest": "^4.1.10",
+    "vitest": "^4.1.11",
     "vue-eslint-parser": "^10.4.1",
     "vue-tsc": "^3.3.9"
   }
