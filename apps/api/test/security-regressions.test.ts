@@ -65,6 +65,7 @@ test('paper search indexing retains BM25 rows without an embedding provider', as
       papers: {
         findUnique: async () => ({
           title: 'Searchable title',
+          titles: [],
           abstract: 'Searchable abstract',
           updatedAt,
         }),
@@ -86,6 +87,8 @@ test('paper search indexing retains BM25 rows without an embedding provider', as
       },
       $transaction: async (operation: (client: unknown) => Promise<unknown>) =>
         operation({
+          ...fastify.prisma,
+          $queryRaw: async () => [],
           $executeRawUnsafe: async (...args: unknown[]) => {
             calls.push(args)
             return 1

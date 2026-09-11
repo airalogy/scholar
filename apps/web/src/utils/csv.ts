@@ -18,6 +18,7 @@ export const parseCsv = (input: string): ParsedCsvRow[] => {
   let values: string[] = []
   let value = ''
   let inQuotes = false
+  let quoteClosed = false
   let rowNumber = 1
 
   const pushRow = (): void => {
@@ -27,6 +28,7 @@ export const parseCsv = (input: string): ParsedCsvRow[] => {
     }
     values = []
     value = ''
+    quoteClosed = false
     rowNumber += 1
   }
 
@@ -37,15 +39,18 @@ export const parseCsv = (input: string): ParsedCsvRow[] => {
       if (inQuotes && text[index + 1] === '"') {
         value += '"'
         index += 1
-      } else {
-        inQuotes = !inQuotes
-      }
+      } else if (inQuotes) {
+        inQuotes = false
+        quoteClosed = true
+      } else if (!quoteClosed && value.length === 0) inQuotes = true
+      else throw new Error(`Row ${rowNumber}: a quote must start a quoted field`)
       continue
     }
 
     if (!inQuotes && character === ',') {
       values.push(value)
       value = ''
+      quoteClosed = false
       continue
     }
 
@@ -57,6 +62,9 @@ export const parseCsv = (input: string): ParsedCsvRow[] => {
       continue
     }
 
+    if (quoteClosed && !/[\t ]/u.test(character)) {
+      throw new Error(`Row ${rowNumber}: unexpected text after a quoted field`)
+    }
     value += character
   }
 

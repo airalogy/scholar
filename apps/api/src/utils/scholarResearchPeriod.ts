@@ -5,7 +5,7 @@ import { normalizeDoi } from './doi'
 export interface ScholarResearchSourcePaper {
   year: number
   title: string
-  doi: string
+  doi: string | null
   has_abstract: boolean
   source_status: string
 }
@@ -56,7 +56,7 @@ const normalizeSourcePapers = (value: unknown): ScholarResearchSourcePaper[] => 
 
       const year = typeof item.year === 'number' ? item.year : null
       const title = typeof item.title === 'string' ? item.title.trim() : ''
-      const doi = typeof item.doi === 'string' ? normalizeDoi(item.doi) : ''
+      const doi = typeof item.doi === 'string' ? normalizeDoi(item.doi) || null : null
       if (year === null || !title) {
         return null
       }
@@ -266,7 +266,7 @@ export const replaceScholarResearchTimeline = async (
   const sourceDois = [
     ...new Set(
       researchTimeline.flatMap((period) => {
-        return period.source_papers.map((paper) => normalizeDoi(paper.doi)).filter(Boolean)
+        return period.source_papers.flatMap((paper) => (paper.doi ? [normalizeDoi(paper.doi)] : []))
       }),
     ),
   ]
@@ -282,7 +282,7 @@ export const replaceScholarResearchTimeline = async (
     return (
       total +
       period.source_papers.filter((paper) => {
-        return paperIdByDoi.has(normalizeDoi(paper.doi))
+        return paper.doi !== null && paperIdByDoi.has(normalizeDoi(paper.doi))
       }).length
     )
   }, 0)
@@ -337,24 +337,24 @@ export const replaceScholarResearchTimeline = async (
       await client.scholar_research_period_papers.createMany({
         data: period.source_papers.map((paper, index) => ({
           period_id: createdPeriod.id,
-          paper_id: paperIdByDoi.get(normalizeDoi(paper.doi)) ?? null,
+          paper_id: paper.doi ? (paperIdByDoi.get(normalizeDoi(paper.doi)) ?? null) : null,
           year: paper.year,
           title_snapshot: paper.title,
-          doi_snapshot: normalizeDoi(paper.doi),
+          doi_snapshot: paper.doi ? normalizeDoi(paper.doi) : null,
           has_abstract: paper.has_abstract,
           source_status: paper.source_status || 'manual',
           display_order: index + 1,
         })),
       })
       const unmatchedPapers = period.source_papers.filter((paper) => {
-        return !paperIdByDoi.has(normalizeDoi(paper.doi))
+        return !paper.doi || !paperIdByDoi.has(normalizeDoi(paper.doi))
       })
       if (unmatchedPapers.length > 0) {
         await client.scholar_research_timeline_issues.createMany({
           data: unmatchedPapers.map((paper) => ({
             generation_id: generation.id,
             paper_id: null,
-            doi: normalizeDoi(paper.doi),
+            doi: paper.doi ? normalizeDoi(paper.doi) : null,
             issue_type: 'paper_not_matched',
             existing_year: paper.year,
             candidate_year: null,

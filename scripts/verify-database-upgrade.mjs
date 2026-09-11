@@ -131,6 +131,25 @@ BEGIN
     OR (SELECT count(*) FROM institution_identity_challenges) <> 0 THEN
     RAISE EXCEPTION 'Identity migration created unsolicited account associations';
   END IF;
+  IF (SELECT count(*) FROM paper_titles WHERE is_primary) <> 1
+    OR (SELECT count(*) FROM paper_identifiers WHERE scheme = 'doi') <> 1
+    OR NOT EXISTS (
+      SELECT 1 FROM papers paper
+      JOIN paper_titles title ON title."paperId" = paper.id AND title.is_primary
+      JOIN paper_identifiers identifier ON identifier."paperId" = paper.id AND identifier.scheme = 'doi'
+      JOIN paper_authors occurrence ON occurrence."paperId" = paper.id
+      JOIN authors author ON author.id = occurrence."authorId"
+      WHERE title.title = paper.title AND title.language = 'und'
+        AND identifier.normalized_value = paper.normalized_doi
+        AND occurrence.display_name = author.name AND occurrence."order" = 1
+        AND NOT occurrence.order_verified AND occurrence.corresponding IS NULL
+        AND cardinality(paper.language_tags) = 0 AND paper.journal_id IS NULL
+    ) THEN
+    RAISE EXCEPTION 'Bibliography migration changed legacy titles, identifiers, authors or unknown values';
+  END IF;
+  IF (SELECT count(*) FROM journals) <> 0 OR (SELECT count(*) FROM paper_metadata_events) <> 0 THEN
+    RAISE EXCEPTION 'Bibliography migration fabricated journal identities or user edit events';
+  END IF;
 END $$;
 `
 

@@ -110,6 +110,19 @@ describe('identity verification applicant', () => {
     expect(document.body.textContent).toContain('管理员正在核验')
     expect(useAuth().isLoggedIn.value).toBe(false)
   })
+  it('shows the callback heading once and does not disclose another account identifier', async () => {
+    vi.mocked(completeOauth).mockRejectedValue(new ApiError('conflict', 409, { data: { ...proof, conflictingInternalId: 'OTHER-PRIVATE-123' } }))
+    await mountCallback('/institution_sso_callback?code=code&state=state')
+    expect(document.querySelectorAll('h1')).toHaveLength(1)
+    const text = document.body.textContent ?? ''
+    expect(text.split(i18n.global.t('identity.conflictTitle'))).toHaveLength(2)
+    expect(text.split(i18n.global.t('identity.conflictDescription'))).toHaveLength(2)
+    expect(text).toContain('NEW-1')
+    expect(text).toContain('此处不展示其他账号的学号或工号')
+    expect(text).not.toContain('OTHER-PRIVATE-123')
+    expect(text).not.toContain('OLD-1')
+    expect(identity.restoreIdentityConflict()).not.toHaveProperty('conflictingInternalId')
+  })
   it('retains a failed draft and blocks duplicate requests while submitting', async () => {
     vi.mocked(identity.submitApplicantIdentityRequest).mockRejectedValueOnce(new Error('Unavailable'))
     await mount(IdentityReviewRequest, proof)

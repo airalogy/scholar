@@ -16,8 +16,8 @@ export type TimelineGenerationStatus =
 
 export interface TimelinePaperInput {
   id: string
-  doi: string
-  normalizedDoi: string
+  doi: string | null
+  normalizedDoi: string | null
   title: string
   abstract: string | null
   year: number | null
@@ -57,7 +57,7 @@ export interface PublicationMetadataCandidate {
 
 export interface TimelineIssueInput {
   paperId: string | null
-  doi: string
+  doi: string | null
   issueType: 'metadata_conflict' | 'publication_year_not_found'
   existingYear: number | null
   candidateYear: number | null

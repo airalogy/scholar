@@ -62,7 +62,7 @@ const resolveScholarPaperIds = async (
   })
   const idsByDoi = new Map<string, string>()
   for (const paper of papers) {
-    idsByDoi.set(paper.normalized_doi, paper.id)
+    if (paper.normalized_doi) idsByDoi.set(paper.normalized_doi, paper.id)
   }
 
   for (const doi of normalizedDois) {

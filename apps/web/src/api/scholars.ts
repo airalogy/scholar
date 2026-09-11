@@ -31,7 +31,7 @@ export interface AchievementGroup {
 export interface ScholarResearchSourcePaper {
   year: number
   title: string
-  doi: string
+  doi: string | null
   has_abstract: boolean
   source_status: string
 }
@@ -109,7 +109,7 @@ export type TimelineGenerationStatus =
 export interface TimelineGenerationIssue {
   id: string
   paperId: string | null
-  doi: string
+  doi: string | null
   issueType: string
   existingYear: number | null
   candidateYear: number | null

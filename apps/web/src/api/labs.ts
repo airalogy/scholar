@@ -26,7 +26,7 @@ export interface LabPaper {
   title: string
   journal_name: string | null
   publish_year: number | null
-  doi: string
+  doi: string | null
   keywords: string[]
   authors: string[]
 }

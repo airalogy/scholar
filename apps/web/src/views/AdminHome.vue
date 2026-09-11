@@ -51,6 +51,14 @@
           </div>
         </section>
 
+        <section v-if="canManageJournals" class="admin-section">
+          <router-link to="/admin/journals" class="tool-card">
+            <span class="tool-card-label">{{ $t('journals.title') }}</span>
+            <span class="tool-card-description">{{ $t('journals.description') }}</span>
+            <span class="tool-card-arrow" aria-hidden="true">&rarr;</span>
+          </router-link>
+        </section>
+
         <section v-if="canReviewContent" class="admin-section">
           <div class="section-head">
             <div>
@@ -218,6 +226,7 @@ const platformRoleLabel = computed(() => {
 })
 
 const isPlatformAdmin = computed(() => profile.value?.admin_access.manage_platform === true)
+const canManageJournals = computed(() => isPlatformAdmin.value || (publicConfig.value.managementMode === 'self_hosted' && profile.value?.admin_access.manage_institutions === true))
 const canReviewContent = computed(() => profile.value?.admin_access.review_content === true)
 const consoleEyebrow = computed(() => {
   return t(

@@ -53,7 +53,7 @@ export const UserInstitutionIdentitySchema = Type.Object({
 export const UserInstitutionPaperSchema = Type.Object({
   id: Type.String({ format: 'uuid' }),
   title: Type.String(),
-  doi: Type.String(),
+  doi: Type.Union([Type.String(), Type.Null()]),
   publishYear: Type.Union([Type.Integer(), Type.Null()]),
   authorName: Type.String(),
 })

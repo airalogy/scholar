@@ -15,3 +15,4 @@ declare module '*.svg?url' {
   const url: string
   export default url
 }
+declare const __SCHOLAR_VERSION__: string

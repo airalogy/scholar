@@ -31,7 +31,7 @@ export interface PaperResponse {
   submissionId: string | null
   title: string
   abstract: string | null
-  doi: string
+  doi: string | null
   journal_name: string | null
   publish_year: number | null
   publish_date: string | null
@@ -133,8 +133,8 @@ export function listInstitutionUploads(params: InstitutionUploadsParams): Promis
   return apiClient.get<PaperListResponse>('/papers/institution-uploads', { params }).then((r) => r.data)
 }
 
-export function getPaper(id: string): Promise<PaperResponse> {
-  return apiClient.get<PaperResponse>(`/papers/${id}`).then((r) => r.data)
+export const getPaper = async (id: string, signal?: AbortSignal): Promise<PaperResponse> => {
+  return (await apiClient.get<PaperResponse>(`/papers/${encodeURIComponent(id)}`, { signal })).data
 }
 
 export function searchPapers(q: string, limit = 50, offset = 0): Promise<SearchResponse> {

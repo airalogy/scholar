@@ -95,7 +95,7 @@ export const buildEvidenceChunks = (
   maxAbstractChars: number,
 ): string[] => {
   const chunks: string[] = []
-  let current: Array<Record<string, string | number>> = []
+  let current: Array<Record<string, string | number | null>> = []
   let currentLength = 0
 
   for (const [index, paper] of papers.entries()) {

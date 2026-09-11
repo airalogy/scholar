@@ -90,6 +90,39 @@ test('timeline evidence chunks stay inside the total prompt budget', () => {
   assert.match(chunks.join(''), /摘要缺失/u)
 })
 
+test('papers without a DOI remain in the timeline without external DOI lookups or fabricated identifiers', async () => {
+  const fastify = {
+    config: { OPENALEX_MAILTO: '' },
+    log: { warn: (): void => undefined },
+    prisma: {
+      papers: {
+        update: async (): Promise<never> => {
+          throw new Error('No metadata writes expected')
+        },
+      },
+    },
+  } as unknown as FastifyInstance
+  const papers = [
+    makePaper('no-doi', 2023, { doi: null, normalizedDoi: null }),
+    makePaper('no-year', null, { doi: null, normalizedDoi: null }),
+  ]
+  const resolved = await resolveTimelinePaperMetadata(fastify, papers, {
+    resolver: async (dois: string[]): Promise<Map<string, PublicationMetadataCandidate>> => {
+      assert.deepEqual(dois, [])
+      return new Map()
+    },
+  })
+  assert.equal(resolved.papers.length, 2)
+  assert.deepEqual(
+    resolved.issues.map((issue) => [issue.paperId, issue.doi, issue.issueType]),
+    [['no-year', null, 'publication_year_not_found']],
+  )
+  const groups = groupResearchPapersIntoCalendarWindows(resolved.papers, 5)
+  assert.equal(groups[0].papers[0].id, 'no-doi')
+  const evidence = JSON.parse(buildEvidenceChunks(groups[0].papers, 60000, 1800)[0])
+  assert.equal(evidence.papers[0].doi, null)
+})
+
 test('timeline fingerprint is stable and changes with source data or model', () => {
   const papers = [makePaper('b', 2021), makePaper('a', 2020)]
   const first = buildResearchTimelineFingerprint('scholar', papers, 'model-a', 'v1', 5)

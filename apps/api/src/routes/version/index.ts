@@ -26,7 +26,8 @@ const versionRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
         },
       },
     },
-    async () => {
+    async (_request, reply) => {
+      reply.header('Cache-Control', 'no-store')
       return {
         code: 0 as const,
         data: resolveBuildInfo(),

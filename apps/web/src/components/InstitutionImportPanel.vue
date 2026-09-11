@@ -7,6 +7,8 @@
       </div>
     </div>
 
+    <BibliographyImportPanel :slug="institution.slug" :platform-admin="institution.access.platform_role === 'platform_admin'" :can-manage-fields="institution.access.can_manage_members" @imported="emit('papersImported')" />
+
     <div class="import-grid">
       <article v-for="kind in importKinds" :key="kind" class="import-card">
         <div class="import-card-head">
@@ -121,7 +123,7 @@
             : $t('adminInstitutionContent.showImportDetails') }}
         </a-button>
         <div
-          v-if="canReviewScholarImport(record)"
+          v-if="canReviewImport(record)"
           class="import-review"
         >
           <a-input
@@ -135,7 +137,7 @@
             :loading="reviewActionId === record.id && reviewActionStatus === 'approved'"
             @click="reviewImport(record.id, 'approved')"
           >
-            {{ $t('adminInstitutionContent.approveScholarImport') }}
+            {{ $t('adminInstitutionContent.approveImportChanges') }}
           </a-button>
           <a-button
             status="danger"
@@ -190,6 +192,7 @@ import {
   type ScholarImportItem,
 } from '@/api/institutions'
 import { parseStrictCsvRecords, type ParsedCsvRecord } from '@/utils/csv'
+import BibliographyImportPanel from './BibliographyImportPanel.vue'
 
 const props = defineProps<{
   institution: InstitutionDetailResponse
@@ -200,7 +203,7 @@ const emit = defineEmits<{
 }>()
 
 const { t, locale } = useI18n()
-const importKinds: InstitutionImportKind[] = ['papers', 'scholars']
+const importKinds: InstitutionImportKind[] = ['scholars']
 
 type ImportPayloadItem = PaperImportItem | ScholarImportItem
 
@@ -564,11 +567,11 @@ const toggleImportDetail = async (importId: string): Promise<void> => {
   }
 }
 
-const canReviewScholarImport = (
+const canReviewImport = (
   record: Omit<InstitutionImportRecord, 'items'>,
 ): boolean => {
   return props.institution.access.platform_role === 'platform_admin' &&
-    record.kind === 'scholars' &&
+    (record.kind === 'scholars' || record.metadataReviewPending === true) &&
     record.status === 'pending_review'
 }
 

@@ -33,7 +33,7 @@ if (!packageManagerMatch) {
   fail(packageJsonPath, 1, 'packageManager must pin an exact pnpm version')
 }
 
-if (packageJson.scripts?.prepush !== 'pnpm audit:prod && pnpm check') {
+if (packageJson.scripts?.prepush !== 'pnpm audit:prod && pnpm check && node scripts/verify-bibliography.mjs --if-configured') {
   fail(
     packageJsonPath,
     1,
@@ -200,6 +200,7 @@ const requiredReleaseFragments = [
   'artifact-metadata: write',
   'pnpm release:source:verify',
   'pnpm db:verify:identity',
+  'pnpm db:verify:bibliography',
   'README.zh-CN.md',
   'scholar-${{ matrix.component }}',
   'type=semver,pattern={{major}}.{{minor}}',
@@ -220,6 +221,9 @@ if (!ciWorkflow.includes('pnpm release:source:verify')) {
 }
 if (!ciWorkflow.includes('pnpm db:verify:identity')) {
   fail(ciWorkflowPath, 1, 'CI must run the PostgreSQL institution identity verification')
+}
+if (!ciWorkflow.includes('pnpm db:verify:bibliography')) {
+  fail(ciWorkflowPath, 1, 'CI must run the PostgreSQL bibliography verification')
 }
 
 const lifecycleScriptPaths = new Set()

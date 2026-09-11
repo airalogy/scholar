@@ -4,6 +4,7 @@
     <p v-if="errorKey" class="request-error" role="alert">{{ $t(errorKey) }}</p>
     <template v-if="!expired && data">
       <p class="verified-id">{{ $t('identity.currentId') }}：{{ data.internalId }}</p>
+      <p v-if="!data.request" class="privacy-note">{{ $t('identity.otherIdPrivacy') }}</p>
       <div v-if="data.request" class="request-status">
         <strong>{{ $t(`identity.status.${data.request.status}`) }}</strong>
         <p v-if="data.request.applicantMessage" class="applicant-message">
@@ -21,6 +22,7 @@
           v-model="previousId"
           :input-attrs="{ id: 'identity-previous-id', autocomplete: 'off' }"
           :max-length="100"
+          :placeholder="$t('identity.previousIdPlaceholder')"
           :disabled="saving"
         />
         <label for="identity-explanation">{{ $t('identity.explanation') }}</label>

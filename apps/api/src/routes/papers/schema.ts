@@ -71,7 +71,7 @@ export const PaperResponseSchema = Type.Object({
   submissionId: Type.Union([Type.String(), Type.Null()]),
   title: Type.String(),
   abstract: Type.Union([Type.String(), Type.Null()]),
-  doi: Type.String(),
+  doi: Type.Union([Type.String(), Type.Null()]),
   journal_name: Type.Union([Type.String(), Type.Null()]),
   publish_year: Type.Union([Type.Integer(), Type.Null()]),
   publish_date: Type.Union([Type.String(), Type.Null()]),

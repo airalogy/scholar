@@ -4,6 +4,26 @@ Chinese version: [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-09-11
+
+### Breaking Changes
+
+- Paper DOI values can now be `null` in paper, scholar and related API responses. Clients must handle papers without a DOI and use the Scholar UUID or a verified external identifier for identity; no placeholder DOI is generated.
+- Apply the structured-bibliography database migration before starting the 5.0 API. Deploy the matching Web/API release together and back up the database, uploaded files and deployment configuration before upgrading; rolling back the application alone does not reverse the migration.
+
+### Changed
+
+- Added v2 paper import previews, explicit confirmation, row-level managed review and audit history; the bilingual admin console supports standard JSON and explicitly configured CSV mappings.
+- Institution custom fields have typed values, independent constraints and public/member/admin visibility. Paper details now show structured titles, authorship, affiliations, funding and permitted custom fields without exposing private import provenance to visitors.
+- Journal and metric-edition administration preserves published history. Readers select an explicit published edition for journal rankings and paper indicators, with missing values kept distinct from false.
+- Legacy submissions, edits and local source synchronization use the same transactional bibliography writer. Managed metadata reviews preserve existing content-review decisions and attachments, and failed promotions roll back the review decision.
+- Added required PostgreSQL bibliography checks to CI and release verification, with an opt-in isolated database check before local pushes. Bilingual import examples are checked against API schemas.
+- Added an anonymous-access About page linked from the sidebar footer, showing the built web version and live API version, with version-mismatch and unavailable-server states.
+- Clarified identity-verification privacy: applicants provide their own previous ID; other accounts' student or staff IDs are not disclosed. Added a regression test for duplicate conflict headings and descriptions.
+- Self-hosted paper metadata imports preserve existing claim scopes, attached files, author-person bindings and review decisions. Only a newly created institution claim is automatically approved.
+- Added a transactional bibliographic writer and structured storage for multilingual titles, external identifiers, authorship, affiliations, funding, journal editions and institution-specific fields, with lossless legacy title/DOI/author backfill and isolated PostgreSQL tests.
+- Imported metadata now queues durable search-index jobs with leases, retry limits and revision checks so interrupted work can resume without completing a newer update accidentally.
+
 ## [4.1.0] - 2026-09-11
 
 ### Added

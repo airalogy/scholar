@@ -11,6 +11,7 @@ test('version endpoint exposes repository build identity without authentication'
 
   const response = await app.inject({ method: 'GET', url: '/version' })
   assert.equal(response.statusCode, 200)
+  assert.equal(response.headers['cache-control'], 'no-store')
   const payload = response.json()
   assert.equal(payload.code, 0)
   const version = (await readFile(new URL('../../../VERSION', import.meta.url), 'utf8')).trim()

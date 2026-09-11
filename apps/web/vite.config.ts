@@ -2,9 +2,15 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import svgLoader from 'vite-svg-loader'
 import { fileURLToPath } from 'node:url'
+import { readFileSync } from 'node:fs'
+
+const scholarVersion = readFileSync(new URL('../../VERSION', import.meta.url), 'utf8').trim()
 
 export default defineConfig({
   plugins: [vue(), svgLoader()],
+  define: {
+    __SCHOLAR_VERSION__: JSON.stringify(scholarVersion),
+  },
   build: {
     license: {
       fileName: 'third-party-licenses.md'

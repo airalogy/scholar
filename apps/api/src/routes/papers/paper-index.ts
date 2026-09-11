@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import { Prisma } from '../../../prisma/generated/client'
 import { embedTexts } from '../../ai/embeddings'
 import {
   buildBm25DocumentStatistics,
@@ -28,6 +29,7 @@ interface PaperIndexSnapshot {
     title: string
     abstract: string | null
     updatedAt: Date
+    titles: Array<{ title: string; language: string; kind: string }>
   }
   claim: {
     id: string
@@ -49,21 +51,26 @@ export interface PaperIndexRefreshResult {
   fullTextIndexed: boolean
 }
 
-const deletePaperSearchIndex = async (fastify: FastifyInstance, paperId: string): Promise<void> => {
-  await fastify.prisma.$executeRawUnsafe('DELETE FROM embeddings WHERE "paperId" = $1', paperId)
-}
-
 const loadPaperIndexSnapshot = async (
   fastify: FastifyInstance,
   paperId: string,
+  prisma: Prisma.TransactionClient = fastify.prisma,
 ): Promise<PaperIndexSnapshot | null> => {
   const institution = await getConfiguredInstitution(fastify)
   const [paper, approvedClaim] = await Promise.all([
-    fastify.prisma.papers.findUnique({
+    prisma.papers.findUnique({
       where: { id: paperId },
-      select: { title: true, abstract: true, updatedAt: true },
+      select: {
+        title: true,
+        abstract: true,
+        updatedAt: true,
+        titles: {
+          select: { title: true, language: true, kind: true },
+          orderBy: [{ language: 'asc' }, { kind: 'asc' }],
+        },
+      },
     }),
-    fastify.prisma.paper_claims.findFirst({
+    prisma.paper_claims.findFirst({
       where: {
         paperId,
         institutionId: institution.id,
@@ -106,7 +113,7 @@ const loadPaperIndexSnapshot = async (
     approvedClaim.primary_submission.institutionId === institution.id
       ? approvedClaim.primary_submission
       : null) ??
-    (await fastify.prisma.paper_submissions.findFirst({
+    (await prisma.paper_submissions.findFirst({
       where: { paperId, claimId: approvedClaim.id, institutionId: institution.id },
       select: {
         id: true,
@@ -164,6 +171,7 @@ const loadPaperIndexSnapshot = async (
 const snapshotFingerprint = (snapshot: PaperIndexSnapshot): string => {
   return JSON.stringify({
     title: snapshot.paper.title,
+    titles: snapshot.paper.titles,
     abstract: snapshot.paper.abstract,
     paperUpdatedAt: snapshot.paper.updatedAt.toISOString(),
     claimId: snapshot.claim.id,
@@ -197,31 +205,43 @@ const extractApprovedPdfText = async (
   }
 }
 
+// Lock only while publishing the finished index, never during PDF/model work.
+// Review changes and file replacement cannot race the final fingerprint check.
+const lockIndexSources = async (tx: Prisma.TransactionClient, paperId: string): Promise<void> => {
+  await tx.$queryRaw(Prisma.sql`SELECT id FROM papers WHERE id = ${paperId}::uuid FOR UPDATE`)
+  await tx.$queryRaw(Prisma.sql`
+    SELECT c.id FROM paper_claims c JOIN content_review_cases r ON r.id = c."reviewCaseId"
+    WHERE c."paperId" = ${paperId}::uuid ORDER BY c.id FOR SHARE OF c, r`)
+  await tx.$queryRaw(
+    Prisma.sql`SELECT id FROM paper_submissions WHERE "paperId" = ${paperId}::uuid ORDER BY id FOR SHARE`,
+  )
+  await tx.$queryRaw(Prisma.sql`
+    SELECT f.id FROM oss_files f JOIN paper_submissions s ON s.oss_file_id = f.id
+    WHERE s."paperId" = ${paperId}::uuid ORDER BY f.id FOR SHARE OF f`)
+  await tx.$queryRaw(
+    Prisma.sql`SELECT id FROM paper_titles WHERE "paperId" = ${paperId}::uuid ORDER BY id FOR SHARE`,
+  )
+}
+
 export const refreshPaperSearchIndex = async (
   fastify: FastifyInstance,
   paperId: string,
 ): Promise<PaperIndexRefreshResult> => {
   const snapshot = await loadPaperIndexSnapshot(fastify, paperId)
-  if (!snapshot) {
-    await deletePaperSearchIndex(fastify, paperId)
-    return { status: 'removed', chunks: 0, fullTextIndexed: false }
-  }
-
-  const fullText = await extractApprovedPdfText(fastify, paperId, snapshot.file)
-  const text = buildPaperIndexText(snapshot.paper.title, snapshot.paper.abstract, fullText)
-  if (!text) {
-    await deletePaperSearchIndex(fastify, paperId)
-    fastify.log.warn({ paperId }, 'Removed paper search index because paper text is empty')
-    return { status: 'removed', chunks: 0, fullTextIndexed: false }
-  }
-
-  const chunks = await splitText(text)
+  const fullText = snapshot ? await extractApprovedPdfText(fastify, paperId, snapshot.file) : null
+  const titles = snapshot
+    ? [...new Set([snapshot.paper.title, ...snapshot.paper.titles.map((item) => item.title)])].join(
+        '\n',
+      )
+    : ''
+  const text = snapshot ? buildPaperIndexText(titles, snapshot.paper.abstract, fullText) : null
+  const chunks = text ? await splitText(text) : []
   let embeddings: Array<number[] | null> | null = null
 
-  if (canGenerateEmbeddings(fastify)) {
+  if (snapshot && chunks.length && canGenerateEmbeddings(fastify)) {
     try {
       if (fullText?.trim() && !fastify.config.ALLOW_APPROVED_PDF_MODEL_PROCESSING) {
-        const metadataText = buildPaperIndexText(snapshot.paper.title, snapshot.paper.abstract)
+        const metadataText = buildPaperIndexText(titles, snapshot.paper.abstract)
         if (metadataText) {
           const [metadataEmbedding] = await embedTexts(fastify, [metadataText])
           embeddings = Array.from({ length: chunks.length }, () => null)
@@ -238,50 +258,47 @@ export const refreshPaperSearchIndex = async (
     }
   }
 
-  const currentSnapshot = await loadPaperIndexSnapshot(fastify, paperId)
-  if (!currentSnapshot) {
-    await deletePaperSearchIndex(fastify, paperId)
-    return { status: 'removed', chunks: 0, fullTextIndexed: false }
-  }
-  if (snapshotFingerprint(currentSnapshot) !== snapshotFingerprint(snapshot)) {
-    fastify.log.info({ paperId }, 'Skipped a stale paper search index refresh')
-    return { status: 'stale', chunks: 0, fullTextIndexed: false }
-  }
-
   const createdAt = new Date()
-  await fastify.prisma.$transaction(async (transaction) => {
-    await transaction.$executeRawUnsafe('DELETE FROM embeddings WHERE "paperId" = $1', paperId)
+  const result = await fastify.prisma.$transaction(
+    async (tx): Promise<PaperIndexRefreshResult> => {
+      await lockIndexSources(tx, paperId)
+      const current = await loadPaperIndexSnapshot(fastify, paperId, tx)
+      if (
+        current &&
+        (!snapshot || snapshotFingerprint(current) !== snapshotFingerprint(snapshot))
+      ) {
+        return { status: 'stale', chunks: 0, fullTextIndexed: false }
+      }
+      await tx.$executeRawUnsafe('DELETE FROM embeddings WHERE "paperId" = $1', paperId)
+      if (!current || !chunks.length)
+        return { status: 'removed', chunks: 0, fullTextIndexed: false }
 
-    for (let index = 0; index < chunks.length; index++) {
-      const chunk = chunks[index]
-      const tsvString = buildTsvText(chunk)
-      const statistics = buildBm25DocumentStatistics(chunk)
-      const embedding = embeddings?.[index]
-      const vector = embedding ? `[${embedding.join(',')}]` : null
-
-      await transaction.$executeRawUnsafe(
-        `INSERT INTO embeddings (
-           "paperId", "segmentIndex", text, embedding, "createdAt", tsv,
-           "bm25_length", "bm25_terms"
-         )
-         VALUES ($1, $2, $3, $4::vector, $5, to_tsvector('simple', $6), $7, $8::jsonb)`,
-        paperId,
-        index,
-        chunk,
-        vector,
-        createdAt,
-        tsvString,
-        statistics.length,
-        JSON.stringify(statistics.termFrequencies),
-      )
-    }
-  })
-
-  const fullTextIndexed = Boolean(fullText?.trim())
-  const vectorizedSegments = embeddings?.filter(Boolean).length ?? 0
-  fastify.log.info(
-    { paperId, chunks: chunks.length, vectorizedSegments, fullTextIndexed },
-    'Paper search index processed',
+      for (let index = 0; index < chunks.length; index++) {
+        const chunk = chunks[index]
+        const statistics = buildBm25DocumentStatistics(chunk)
+        const embedding = embeddings?.[index]
+        await tx.$executeRawUnsafe(
+          `INSERT INTO embeddings (
+           "paperId", "segmentIndex", text, embedding, "createdAt", tsv, "bm25_length", "bm25_terms"
+         ) VALUES ($1, $2, $3, $4::vector, $5, to_tsvector('simple', $6), $7, $8::jsonb)`,
+          paperId,
+          index,
+          chunk,
+          embedding ? `[${embedding.join(',')}]` : null,
+          createdAt,
+          buildTsvText(chunk),
+          statistics.length,
+          JSON.stringify(statistics.termFrequencies),
+        )
+      }
+      return {
+        status: 'indexed',
+        chunks: chunks.length,
+        fullTextIndexed: Boolean(fullText?.trim()),
+      }
+    },
+    { timeout: 30000 },
   )
-  return { status: 'indexed', chunks: chunks.length, fullTextIndexed }
+  fastify.log.info({ paperId, ...result }, 'Paper search index processed')
+  return result
 }

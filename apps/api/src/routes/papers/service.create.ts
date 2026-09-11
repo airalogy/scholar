@@ -7,6 +7,8 @@ import { lockMutationScope } from '../../utils/advisory-lock'
 import { PROTECTED_FILE_SECURITY_PROFILE } from '../../utils/protected-files'
 import { buildClaimScopeWhere, buildSubmissionSnapshot, toClaimRecord } from './service.shared'
 import { formatPaper, resolvePaperScope } from './service.paper'
+import { ensureSubmittedPaper, legacyPaperMetadata } from '../../bibliography/legacy'
+import { enqueuePaperIndex } from '../../bibliography/index-queue'
 
 const assertCanUseUploadedFile = async (
   fastify: FastifyInstance,
@@ -70,27 +72,15 @@ export async function createPaper(fastify: FastifyInstance, body: CreatePaperBod
   const institutionId = scope.institutionId
   const result = await fastify.prisma.$transaction(async (tx) => {
     await lockMutationScope(tx, 'paper-claim', `${institutionId}:${normalizedDoi}`)
-    const paper = await tx.papers.upsert({
-      where: { normalized_doi: normalizedDoi },
-      update: {},
-      create: {
-        title: body.title,
-        abstract: body.abstract,
-        doi: normalizedDoi,
-        normalized_doi: normalizedDoi,
-        journal_name: body.journal_name,
-        publish_year: body.publish_year,
-        publish_date: body.publish_date ? new Date(body.publish_date) : null,
-        paper_type: body.paper_type,
-        language: body.language,
-        citation_count: body.citation_count,
-        pages: body.pages,
-        keywords: body.keywords ?? [],
-        link: body.link ?? null,
-        createdAt: now,
-        updatedAt: now,
+    const paper = await ensureSubmittedPaper(
+      tx,
+      legacyPaperMetadata({ ...body, doi: normalizedDoi }),
+      {
+        institutionId,
+        actorUserId: userId,
+        source: 'paper_submission',
       },
-    })
+    )
 
     const existingClaim = await tx.paper_claims.findFirst({
       where: buildClaimScopeWhere(paper.id, scope),
@@ -160,6 +150,7 @@ export async function createPaper(fastify: FastifyInstance, body: CreatePaperBod
       versionId: submission.id,
       reviewNodeId: scope.reviewNodeId,
     })
+    await enqueuePaperIndex(tx, paper.id)
     const claimWithReviewCase = await tx.paper_claims.findUnique({
       where: { id: claimId },
       include: { review_case: true },

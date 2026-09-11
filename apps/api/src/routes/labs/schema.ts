@@ -54,7 +54,7 @@ export const LabPaperSchema = Type.Object({
   title: Type.String(),
   journal_name: Type.Union([Type.String(), Type.Null()]),
   publish_year: Type.Union([Type.Integer(), Type.Null()]),
-  doi: Type.String(),
+  doi: Type.Union([Type.String(), Type.Null()]),
   keywords: Type.Array(Type.String()),
   authors: Type.Array(Type.String()),
 })
