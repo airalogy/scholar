@@ -61,7 +61,7 @@ describe(
     registerBibliometricCases(() => prisma)
     registerBibliographyLegacyCases(() => prisma)
     registerBibliographyReadCases(() => prisma)
-    before(() => {
+    before(async () => {
       assert.ok(databaseUrl)
       assert.ok(
         ['localhost', '127.0.0.1', '::1', '[::1]', 'postgres'].includes(
@@ -88,12 +88,17 @@ describe(
         })
         .join('\n')
       executeSql(`CREATE SCHEMA "${schema}"; SET search_path TO "${schema}", public;\n${sql}`)
+      // pg connection-string options override pool options; isolate raw SQL as well as Prisma.
+      const isolatedDatabaseUrl = new URL(databaseUrl)
+      isolatedDatabaseUrl.searchParams.set('schema', schema)
+      isolatedDatabaseUrl.searchParams.set('options', `-c search_path=${schema},public`)
       prisma = new PrismaClient({
-        adapter: new PrismaPg(
-          { connectionString: databaseUrl, options: `-c search_path=${schema},public` },
-          { schema },
-        ),
+        adapter: new PrismaPg({ connectionString: isolatedDatabaseUrl.toString() }, { schema }),
       })
+      const [connection] = await prisma.$queryRaw<Array<{ schema: string }>>`
+        SELECT current_schema() AS schema
+      `
+      assert.equal(connection.schema, schema, 'Raw SQL must use the isolated test schema')
     })
     after(async () => {
       await prisma?.$disconnect()
