@@ -29,8 +29,12 @@ import {
 } from './service'
 import { exchangeIntegrationToken } from './service.integration'
 import { assertAuthCapabilityEnabled } from '../../utils/deployment'
+import { identityApplicantRoutes } from './routes.identity'
+import { createIdentityChallenge, InstitutionIdentityLinkRequired } from '../../identity/challenges'
+import { IdentityConflictResponse } from '../../identity/schema'
 
 const authRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
+  await identityApplicantRoutes(fastify, {})
   fastify.post(
     '/integration-token',
     {
@@ -207,17 +211,24 @@ const authRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
         body: OauthCallbackBodySchema,
         response: {
           200: OauthCallbackResponseSchema,
+          409: IdentityConflictResponse,
         },
         security: [],
       },
     },
-    async (request) => {
+    async (request, reply) => {
       assertAuthCapabilityEnabled(
         fastify,
         'enableInstitutionSso',
         'Institution SSO is not available in this deployment',
       )
-      return completeInstitutionSsoLogin(fastify, request.body)
+      try {
+        return await completeInstitutionSsoLogin(fastify, request.body)
+      } catch (error) {
+        if (!(error instanceof InstitutionIdentityLinkRequired)) throw error
+        reply.header('Cache-Control', 'no-store')
+        return reply.code(409).send(await createIdentityChallenge(fastify, error.profile))
+      }
     },
   )
 

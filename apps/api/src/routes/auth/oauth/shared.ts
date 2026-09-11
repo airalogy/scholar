@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
+import type { InstitutionIdentityClaims } from '../../../utils/institution-identifiers'
 import type { OauthCallbackResponse } from '../schema'
 import { signAccessToken } from '../../../utils/auth'
 
@@ -304,9 +305,10 @@ export const buildOauthCallbackResponse = (
   },
   avatarUrl: string | null,
   returnTo: string,
+  identity: InstitutionIdentityClaims = {},
 ): OauthCallbackResponse => {
   return {
-    access_token: signAccessToken(fastify, user.id),
+    access_token: signAccessToken(fastify, user.id, identity),
     token_type: 'bearer',
     name: user.name,
     username: user.username,

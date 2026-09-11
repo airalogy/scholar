@@ -55,6 +55,7 @@ model users {
   created_institution_provisions institution_user_provisions[]           @relation("ProvisionCreatedBy")
   claimed_institution_provisions institution_user_provisions[]           @relation("ProvisionClaimedBy")
   external_identities            user_external_identities[]
+  identity_audit_events          institution_identity_events[]
   created_api_credentials        institution_api_credentials[]
   created_org_nodes              institution_org_nodes[]
   linked_institution_people      institution_people[]
@@ -414,6 +415,10 @@ model institutions {
   org_nodes              institution_org_nodes[]
   org_edges              institution_org_edges[]
   people                 institution_people[]
+  person_identifiers     institution_person_identifiers[]
+  identity_challenges    institution_identity_challenges[]
+  identity_requests      institution_identity_requests[]
+  identity_events        institution_identity_events[]
   person_events          institution_person_events[]
   org_positions          institution_org_positions[]
   org_appointments       institution_org_appointments[]
@@ -671,7 +676,11 @@ model institution_people {
   appointments            institution_org_appointments[]
   paper_author_bindings   institution_paper_author_bindings[]
   events                  institution_person_events[]
+  identifiers             institution_person_identifiers[]
+  identity_requests       institution_identity_requests[]
+  identity_events         institution_identity_events[]
 
+  @@unique([id, institutionId], map: "institution_people_id_institution_idx")
   @@unique([institutionId, key], map: "institution_people_institutionId_key_idx")
   @@unique([institutionId, normalizedInternalId], map: "institution_people_inst_internal_id_idx")
   @@unique([institutionId, userId], map: "institution_people_inst_user_idx")
@@ -681,6 +690,93 @@ model institution_people {
   @@index([institutionId, email])
   @@index([provisionId])
   @@index([is_active])
+}
+
+model institution_person_identifiers {
+  id              String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  institutionId   String                        @db.Uuid
+  personId        String                        @db.Uuid
+  value           String                        @db.VarChar(100)
+  normalizedValue String                        @db.VarChar(100)
+  isPrimary       Boolean                       @default(false)
+  source          String                        @db.VarChar(32)
+  version         Int                           @default(1)
+  revokedAt       DateTime?                     @db.Timestamp(6)
+  createdAt       DateTime                      @default(now()) @db.Timestamp(6)
+  updatedAt       DateTime                      @default(now()) @db.Timestamp(6)
+  institution     institutions                  @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  person          institution_people            @relation(fields: [personId, institutionId], references: [id, institutionId], onDelete: Cascade)
+  events          institution_identity_events[]
+
+  @@unique([institutionId, normalizedValue], map: "institution_identifiers_value_idx")
+  @@unique([personId], map: "institution_identifiers_primary_idx", where: raw("\"isPrimary\" = true"))
+  @@index([personId, institutionId])
+}
+
+model institution_identity_challenges {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  institutionId String       @db.Uuid
+  tokenHash     String       @unique @db.VarChar(64)
+  provider      String       @db.VarChar(100)
+  internalId    String       @db.VarChar(100)
+  normalizedId  String       @db.VarChar(100)
+  name          String       @db.VarChar(100)
+  email         String       @db.VarChar(100)
+  expiresAt     DateTime     @db.Timestamp(6)
+  createdAt     DateTime     @default(now()) @db.Timestamp(6)
+  institution   institutions @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@index([institutionId, provider, normalizedId])
+}
+
+model institution_identity_requests {
+  id                 String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  institutionId      String                        @db.Uuid
+  provider           String                        @db.VarChar(100)
+  internalId         String                        @db.VarChar(100)
+  normalizedId       String                        @db.VarChar(100)
+  name               String                        @db.VarChar(100)
+  email              String                        @db.VarChar(100)
+  previousInternalId String                        @db.VarChar(100)
+  explanation        String                        @db.VarChar(2000)
+  status             String                        @default("pending") @db.VarChar(32)
+  personId           String?                       @db.Uuid
+  applicantMessage   String?                       @db.VarChar(1000)
+  createdAt          DateTime                      @default(now()) @db.Timestamp(6)
+  updatedAt          DateTime                      @default(now()) @db.Timestamp(6)
+  reviewedAt         DateTime?                     @db.Timestamp(6)
+  institution        institutions                  @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  person             institution_people?           @relation(fields: [personId, institutionId], references: [id, institutionId], onDelete: NoAction)
+  events             institution_identity_events[]
+
+  @@unique([institutionId, provider, normalizedId], map: "institution_identity_requests_open_idx", where: raw("status IN ('pending', 'needs_information')"))
+  @@index([institutionId, status, createdAt])
+  @@index([institutionId, provider, normalizedId, createdAt])
+  @@index([personId, institutionId])
+}
+
+model institution_identity_events {
+  id            String                          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  institutionId String                          @db.Uuid
+  personId      String?                         @db.Uuid
+  identifierId  String?                         @db.Uuid
+  requestId     String?                         @db.Uuid
+  actorUserId   String?                         @db.Uuid
+  action        String                          @db.VarChar(40)
+  notes         String                          @db.VarChar(2000)
+  createdAt     DateTime                        @default(now()) @db.Timestamp(6)
+  institution   institutions                    @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  person        institution_people?             @relation(fields: [personId, institutionId], references: [id, institutionId], onDelete: NoAction)
+  identifier    institution_person_identifiers? @relation(fields: [identifierId], references: [id], onDelete: NoAction)
+  request       institution_identity_requests?  @relation(fields: [requestId], references: [id], onDelete: NoAction)
+  actor         users?                          @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([institutionId, createdAt])
+  @@index([personId, institutionId])
+  @@index([identifierId])
+  @@index([requestId])
+  @@index([actorUserId])
 }
 
 model institution_person_events {

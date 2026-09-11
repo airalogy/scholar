@@ -3,6 +3,7 @@ import fp from 'fastify-plugin'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { assertUserExists, isPublicRoute, resolveAccessTokenUserId } from '../../utils/auth'
 import { INTEGRATION_TOKEN_TYPE, type IntegrationScope } from '../../utils/integration-auth'
+import { assertInstitutionIdentitySession } from '../../utils/institution-identifiers'
 
 declare module '@fastify/jwt' {
   interface FastifyJWT {
@@ -17,6 +18,8 @@ declare module '@fastify/jwt' {
       institutionId?: string
       scopes?: IntegrationScope[]
       credentialVersion?: number
+      institutionIdentifierId?: string
+      institutionIdentifierVersion?: number
     }
     user: {
       userId: string
@@ -29,6 +32,8 @@ declare module '@fastify/jwt' {
       institutionId?: string
       scopes?: IntegrationScope[]
       credentialVersion?: number
+      institutionIdentifierId?: string
+      institutionIdentifierVersion?: number
     }
   }
 }
@@ -115,6 +120,9 @@ export default fp(async (fastify: FastifyInstance) => {
 
     const userId = resolveAccessTokenUserId(fastify, request.user)
     await assertUserExists(fastify, userId)
+    if (!(await assertInstitutionIdentitySession(fastify.prisma, userId, request.user))) {
+      throw fastify.httpErrors.unauthorized('Institution sign-in identity is no longer active')
+    }
   })
 
   fastify.addHook('onRequest', async (request) => {

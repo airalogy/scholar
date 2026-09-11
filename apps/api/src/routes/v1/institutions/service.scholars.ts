@@ -14,7 +14,7 @@ import {
   resolveAcademicSubjects,
 } from '../../../utils/academic-subjects'
 import {
-  normalizeInstitutionInternalId,
+  resolveInstitutionPerson,
   upsertInstitutionPerson,
 } from '../../../utils/institution-people'
 
@@ -118,13 +118,8 @@ export const applyScholarImportItem = async (
 
   return fastify.prisma.$transaction(async (tx) => {
     const now = new Date()
-    const person = await tx.institution_people.findUnique({
-      where: {
-        institutionId_normalizedInternalId: {
-          institutionId,
-          normalizedInternalId: normalizeInstitutionInternalId(externalId),
-        },
-      },
+    const person = await resolveInstitutionPerson(tx, institutionId, {
+      institutionInternalId: externalId,
     })
     const linkedPaperIds =
       item.paper_dois === undefined ? undefined : await resolveScholarPaperIds(tx, item.paper_dois)

@@ -1,4 +1,8 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
+import {
+  assertInstitutionIdentitySession,
+  type InstitutionIdentityClaims,
+} from './institution-identifiers'
 
 export const ACCESS_TOKEN_TYPE = 'access'
 
@@ -85,12 +89,17 @@ export const resolveOptionalAccessTokenUserId = async (
   try {
     const userId = resolveAccessTokenUserId(fastify, request.user)
     await assertUserExists(fastify, userId)
+    if (!(await assertInstitutionIdentitySession(fastify.prisma, userId, request.user))) return null
     return userId
   } catch {
     return null
   }
 }
 
-export const signAccessToken = (fastify: FastifyInstance, userId: string): string => {
-  return fastify.jwt.sign({ userId, token_type: ACCESS_TOKEN_TYPE })
+export const signAccessToken = (
+  fastify: FastifyInstance,
+  userId: string,
+  identity: InstitutionIdentityClaims = {},
+): string => {
+  return fastify.jwt.sign({ userId, token_type: ACCESS_TOKEN_TYPE, ...identity })
 }

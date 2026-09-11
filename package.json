@@ -1,6 +1,6 @@
 {
   "name": "airalogy-scholar",
-  "version": "4.0.1",
+  "version": "4.1.0",
   "private": true,
   "description": "Airalogy Scholar - Vue 3 + Vite + Arco Design + Fastify",
   "bugs": {
@@ -41,6 +41,7 @@
     "db:validate": "node scripts/run-prisma-command.mjs db:validate",
     "db:audit:integrity": "pnpm --filter @airalogy/scholar-server db:audit:integrity",
     "db:verify:upgrade": "node scripts/verify-database-upgrade.mjs",
+    "db:verify:identity": "node scripts/verify-institution-identity.mjs",
     "db:studio": "pnpm --filter @airalogy/scholar-server db:studio",
     "db:seed": "pnpm --filter @airalogy/scholar-server db:seed",
     "bootstrap:deployment": "pnpm --filter @airalogy/scholar-server bootstrap:deployment",

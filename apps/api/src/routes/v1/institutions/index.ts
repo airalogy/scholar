@@ -1,4 +1,5 @@
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
+import { identityAdminRoutes } from './routes.identity'
 import {
   IdempotencyHeadersSchema,
   ImportListQuerySchema,
@@ -26,6 +27,7 @@ import { getDefaultReviewWorkflow, upsertDefaultReviewWorkflow } from './service
 const IMPORT_BODY_LIMIT = 10 * 1024 * 1024
 
 const institutionImportRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
+  await identityAdminRoutes(fastify, {})
   fastify.get(
     '/:slug/review-workflows/:contentType',
     {
