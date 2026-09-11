@@ -64,7 +64,7 @@ export const ReviewTimelineGenerationBodySchema = Type.Object({
 export const TimelineGenerationIssueSchema = Type.Object({
   id: Type.String(),
   paperId: Type.Union([Type.String({ format: 'uuid' }), Type.Null()]),
-  doi: Type.String(),
+  doi: Type.Union([Type.String(), Type.Null()]),
   issueType: Type.String(),
   existingYear: Type.Union([Type.Integer(), Type.Null()]),
   candidateYear: Type.Union([Type.Integer(), Type.Null()]),

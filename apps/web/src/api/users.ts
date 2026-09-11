@@ -54,7 +54,7 @@ export interface UserInstitutionIdentity {
 export interface UserInstitutionPaper {
   id: string
   title: string
-  doi: string
+  doi: string | null
   publishYear: number | null
   authorName: string
 }

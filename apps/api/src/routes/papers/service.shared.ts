@@ -63,7 +63,7 @@ export interface FormattedPaper {
   submissionId: string | null
   title: string
   abstract: string | null
-  doi: string
+  doi: string | null
   journal_name: string | null
   publish_year: number | null
   publish_date: string | null

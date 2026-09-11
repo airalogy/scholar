@@ -23,6 +23,8 @@ import { syncPaperImportItem } from './service.papers'
 import { applyScholarImportItem, validateScholarImportItem } from './service.scholars'
 import { assertPlatformAdmin } from '../../../utils/permissions'
 import { normalizeDoi } from '../../../utils/doi'
+import { BibliographyConflict } from '../../../bibliography/identity'
+import { reviewLegacyPaperImport } from './service.paper-import-review'
 
 const errorMessage = (error: unknown): string => {
   return error instanceof Error ? error.message : 'Import row failed'
@@ -163,6 +165,14 @@ const executeImport = async <T>(
           ...(await options.process(item, importItem.id)),
         }
       } catch (error) {
+        if (error instanceof BibliographyConflict) {
+          await fastify.prisma.institution_data_import_issues.deleteMany({
+            where: { itemId: importItem.id },
+          })
+          await fastify.prisma.institution_data_import_issues.createMany({
+            data: error.issues.map((issue) => ({ itemId: importItem.id, ...issue })),
+          })
+        }
         result = {
           index,
           key: key || null,
@@ -299,6 +309,7 @@ const refreshPaperImportStatus = async (
       importId,
       status: 'pending',
       targetId: { not: null },
+      baseFingerprint: null,
     },
   })
   if (pendingItems.length === 0) {
@@ -368,7 +379,7 @@ export const getImport = async (
   const record = await fastify.prisma.institution_data_imports.findUnique({
     where: { id: importId },
   })
-  if (!record || record.institutionId !== institution.id) {
+  if (!record || record.institutionId !== institution.id || record.schemaVersion !== 1) {
     throw fastify.httpErrors.notFound('Import record not found')
   }
   if (record.kind === 'papers' && record.status === 'pending_review') {
@@ -414,6 +425,9 @@ export const reviewScholarImport = async (
   if (!record || record.institutionId !== institution.id) {
     throw fastify.httpErrors.notFound('Import record not found')
   }
+  if (record.schemaVersion !== 1) throw fastify.httpErrors.notFound('Import record not found')
+  if (record.kind === 'papers')
+    return reviewLegacyPaperImport(fastify, institution.id, importId, reviewerId, body)
   if (record.kind !== 'scholars') {
     throw fastify.httpErrors.badRequest('Only pending scholar imports can be reviewed')
   }

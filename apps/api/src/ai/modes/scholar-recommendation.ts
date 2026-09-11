@@ -9,7 +9,7 @@ import {
 import type { AiMessage, AiModeHandler } from '../types'
 
 export interface ScholarSearchResult {
-  doi: string
+  doi: string | null
   scholarIds: string[]
   scholarNames: string[]
   title: string | null
@@ -34,7 +34,7 @@ const formatScholarContext = (results: ScholarSearchResult[]): string => {
       return [
         `【论文 ${index + 1}】`,
         `标题：${result.title?.trim() || '未命名论文'}`,
-        `DOI：${result.doi}`,
+        result.doi ? `DOI：${result.doi}` : null,
         `相关学者：${scholars}`,
         abstract ? `摘要：${abstract.slice(0, 500)}` : null,
       ]

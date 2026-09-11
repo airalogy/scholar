@@ -1,46 +1,66 @@
 # 管理后台导入
 
-机构管理后台提供 CSV 选择、表头校验、数据预览、导入提交和历史查询。浏览器会把 CSV 转换为 JSON 后调用与系统接入相同的批量导入 API；服务器仍会完整复验数据。
+机构管理后台用于预览、确认和追踪导入。论文 CSV 在浏览器中转换为 Scholar v2 标准 JSON；服务器会独立校验每行数据后再写入。
 
 ## 授予成员权限
 
-机构 owner 或有成员管理权限的管理员可以在成员设置中开启“允许数据导入”。该开关对应 `can_import_data`，不会同时授予审核、成员管理或凭证管理权限。
+机构 owner 或有成员管理权限的管理员可以开启“允许数据导入”（`can_import_data`）。平台管理员与机构 owner/admin 默认具有导入权限。导入权限不会同时授予审核、成员管理或凭证管理权限。
 
-以下角色无需单独开启：
+## 导入论文
 
-- 平台管理员 `platform_admin`
-- 机构 `owner`
-- 机构 `admin`
+1. 打开“论文数据导入”，选择 CSV 或标准 JSON，每批最多 500 条、10 MB。
+2. CSV 需明确选择要导入的列及其字段映射；未知列不会按名称自动猜测含义。
+3. 点击“检查并预览”，检查逐条错误、警告和字段差异；此时尚未修改论文数据。
+4. 选中有效条目，阅读后确认接受其中的警告。
+5. 确认导入；Airalogy Managed 租户则提交审核。
+6. 在导入记录中检查逐条结果，以及独立的论文内容审核状态。
 
-## CSV 要求
+论文需有题名或多语言主标题，并提供 DOI、带命名空间的稳定外部编号，或现有 Scholar 论文 ID。v2 不强制要求 DOI，不能虚构 DOI，也不能仅凭姓名或题名相同判断身份。
 
-单个文件最多 500 行。论文必须提供 `title` 和 `doi`；学者必须提供 `external_id` 和 `name`。在学者导入中，`external_id` 表示机构的规范工号/学号，不是 Scholar UUID、邮箱或姓名。
+JSON 模板与[批量导入 API](/zh/integration/bulk-import)介绍了多语言题名、语种、作者顺序、通讯作者、机构署名、基金、采集来源与期刊版本。复杂 CSV 单元格使用 JSON 数组或对象。调整作者顺序时保留稳定的作者来源键；作者姓名不会自动绑定机构人员或登录账号。
 
-常用论文列：
+### CSV 值转换
 
-```text
-title,doi,publish_year,paper_type,language,abstract,journal_name,publish_date,citation_count,pages,link,keywords
-```
+- 空白单元格默认表示“未提供”，保留已有值。
+- 布尔字段使用 JSON `true`/`false`；来源若采用 `0/1`，需明确选择对应转换。
+- 清空可空的专有字段时，明确选择空白转 `null`。必填字段不能清空。
+- 格式错误的 CSV、非法 JSON 和非有限数值会被拒绝，不会静默转换。
 
-常用学者列：
+学校专用的映射配置应保存在私有存储或私有部署仓库。原始表格、转换结果和导入报告属于数据，不属于公共源码。
 
-```text
-external_id,name,avatar,college,title,lab,office,email,phone,bio,join_year,research_directions,education,achievements,research_timeline,letter_index,subjects,subject_codes,paper_dois
-```
+## 配置机构专有字段
 
-`keywords`、`research_directions`、`education`、`achievements`、`research_timeline`、`subjects`、`subject_codes` 和 `paper_dois` 等数组字段，在 CSV 单元格中应填写合法 JSON 数组，例如：
+机构 owner/admin 可配置“机构专有字段”，选择稳定标识、显示名称、类型、必填性和可见范围。支持文本、数值、布尔值、日期、单选和多选，并可设置相应范围或选项约束。
+
+字段默认仅管理员可见。只有明确设为公开的字段才展示给访客；机构内字段要求机构成员身份。停用会保留历史数据，使用中的字段不能更换类型或移除已有选项，新约束必须兼容已有记录。预览后若调整字段定义，需重新预览。
+
+## 管理期刊与评价版本
+
+有权管理员可打开“期刊与评价版本”。自托管机构的 owner/admin 可管理本机构目录；Airalogy Managed 中需要平台管理员权限。
+
+期刊导入通过 Scholar 期刊 ID 或有效的 ISSN/eISSN/ISSN-L 识别，不能仅凭名称自动合并。每个 JCR、中科院分区或 ESI 版本记录来源、版本与修订号以及已知日期。先核查草稿记录，再发布；已发布版本被冻结，修正需创建新修订版。
+
+JCR 学科与 JIF/JCI 分区必须明确对应，中科院大类和小类分别记录。ESI 高被引、热点指标属于具体论文和一个有日期的版本。缺少记录表示未知，不是 `false`。
+
+论文详情只展示已发布的评价版本，由读者选择；不会根据论文发表年份自动猜测适用版本。
+
+## 导入学者
+
+学者 CSV 需保留下载模板的完整表头。每行必填 `external_id`（机构的规范学号/工号）与 `name`，该编号不是 Scholar UUID、邮箱或姓名。
+
+`college`、`research_directions`、`education`、`achievements`、`research_timeline`、`subject_codes`、`paper_dois` 等字段填写 JSON 数组。例如研究方向使用对象而非纯字符串：
 
 ```csv
 external_id,name,research_directions,paper_dois
-HR-00042,示例学者,"[""合成生物学"",""生物信息学""]","[""10.1000/example.1""]"
+HR-00042,示例学者,"[{""name"":""合成生物学""}]","[""10.1000/example.1""]"
 ```
 
-## 导入后的处理
+此片段仅说明单元格语法，不是完整上传模板。上传时需保留完整表头。使用 `paper_dois` 前请先导入相应论文。
 
-提交后请在“导入历史”中检查：
+## 审核、重试与历史
 
-- 批次总体状态和成功、待审核、失败数量。
-- 每一行的 `created/updated/unchanged/pending/error` 结果。
-- 校验错误、审核状态和审核意见。
+自托管实例中，有效论文在确认导入后生效。托管模式的元数据变更需平台审核，新建论文认领还需经过机构内容审核。元数据更新保留已有附件、作者人员绑定和审核决定，不会暗中重新批准已拒绝的内容。
 
-Airalogy Managed 租户中的导入变更进入托管审核流程，审核前不覆盖正式数据。机构自托管实例中，通过校验的数据直接生效。两种方式都保留逐条结果和审计记录。
+导入记录显示逐条拟执行操作、处理与审核状态、错误、警告及处理说明。修正失败条目后新建批次；若预览后正式数据发生变化，应重新预览，不强制覆盖。重复确认不会再次写入已完成条目。
+
+旧集成仍可使用 v1 论文导入；托管模式下，已有认领的元数据更新进入独立导入审核，新认领使用内容审核。

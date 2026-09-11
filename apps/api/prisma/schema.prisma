@@ -10,6 +10,7 @@ datasource db {
 }
 
 model users {
+  bibliography_events            paper_metadata_events[]
   id                             String                                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name                           String                                  @db.VarChar(100)
   email                          String                                  @unique(map: "users_email_idx") @db.VarChar(100)
@@ -44,6 +45,8 @@ model users {
   forum_likes                    forum_likes[]
   import_requests                institution_data_imports[]              @relation("ImportActorUser")
   reviewed_imports               institution_data_imports[]              @relation("ImportReviewedBy")
+  import_decisions               institution_data_import_decisions[]
+  bibliometric_events            bibliometric_edition_events[]
   join_requests                  institution_join_requests[]             @relation("JoinRequestUser")
   reviewed_join_requests         institution_join_requests[]             @relation("JoinRequestReviewedBy")
   created_paper_author_bindings  institution_paper_author_bindings[]     @relation("PaperAuthorBindingCreatedBy")
@@ -84,7 +87,7 @@ model user_external_identities {
 
 model authors {
   id                         String                              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name                       String                              @db.VarChar(100)
+  name                       String                              @db.VarChar(500)
   email                      String?                             @db.VarChar(100)
   phone                      String?                             @db.VarChar(100)
   createdAt                  DateTime                            @db.Timestamp(6)
@@ -160,14 +163,25 @@ model file_access_audits {
 }
 
 model paper_authors {
-  id       Int     @id @default(autoincrement())
-  paperId  String  @db.Uuid
-  authorId String  @db.Uuid
-  order    Int     @db.SmallInt
-  paper    papers  @relation(fields: [paperId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "paper_authors_paperId_fkey")
-  author   authors @relation(fields: [authorId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "paper_authors_authorId_fkey")
+  id                 Int                         @id @default(autoincrement())
+  paperId            String                      @db.Uuid
+  authorId           String                      @db.Uuid
+  order              Int                         @db.SmallInt
+  display_name       String?                     @db.VarChar(500)
+  source_key         String?                     @db.VarChar(200)
+  source             String                      @default("legacy") @db.VarChar(32)
+  order_verified     Boolean                     @default(false)
+  corresponding      Boolean?
+  equal_contribution Boolean?
+  contributor_type   String                      @default("person") @db.VarChar(16)
+  orcid              String?                     @db.VarChar(64)
+  affiliations       paper_author_affiliations[]
+  paper              papers                      @relation(fields: [paperId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "paper_authors_paperId_fkey")
+  author             authors                     @relation(fields: [authorId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "paper_authors_authorId_fkey")
 
   @@unique([paperId, authorId], map: "paper_authors_paperId_authorId_idx")
+  @@unique([paperId, source_key])
+  @@unique([id, paperId])
   @@index([authorId])
 }
 
@@ -175,9 +189,24 @@ model papers {
   id                              String                              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   title                           String                              @db.VarChar(500)
   abstract                        String?                             @db.VarChar
-  doi                             String                              @db.VarChar(100)
-  normalized_doi                  String                              @unique(map: "papers_normalized_doi_key") @db.VarChar(100)
-  journal_name                    String?                             @db.VarChar(100)
+  doi                             String?                             @db.VarChar(200)
+  normalized_doi                  String?                             @unique(map: "papers_normalized_doi_key") @db.VarChar(200)
+  journal_name                    String?                             @db.VarChar(500)
+  journal_id                      String?                             @db.Uuid
+  language_tags                   String[]                            @default([])
+  document_type                   String?                             @db.VarChar(64)
+  publication_status              String?                             @db.VarChar(32)
+  bibliography_revision           Int                                 @default(0)
+  journal                         journals?                           @relation(fields: [journal_id], references: [id], onDelete: Restrict)
+  titles                          paper_titles[]
+  identifiers                     paper_identifiers[]
+  affiliations                    paper_affiliations[]
+  funding                         paper_funding[]
+  sources                         paper_sources[]
+  institution_metadata            institution_paper_metadata[]
+  indicators                      paper_indicators[]
+  metadata_events                 paper_metadata_events[]
+  index_job                       paper_index_jobs?
   publish_year                    Int?                                @db.SmallInt
   publish_date                    DateTime?                           @db.Date
   publication_metadata_source     String?                             @db.VarChar(32)
@@ -204,6 +233,7 @@ model papers {
   institution_person_events       institution_person_events[]
 
   @@index([doi])
+  @@index([journal_id])
 }
 
 model chats {
@@ -394,43 +424,46 @@ model lab_memberships {
 }
 
 model institutions {
-  id                     String                                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name                   String                                 @db.VarChar(200)
-  slug                   String                                 @unique(map: "institutions_slug_idx") @db.VarChar(200)
-  summary                String?                                @db.VarChar
-  website                String?                                @db.VarChar(255)
-  createdAt              DateTime                               @default(now()) @db.Timestamp(6)
-  updatedAt              DateTime                               @default(now()) @db.Timestamp(6)
-  labs                   labs[]
-  memberships            institution_memberships[]
-  imports                institution_data_imports[]
-  join_requests          institution_join_requests[]
-  paper_author_bindings  institution_paper_author_bindings[]
-  paper_claims           paper_claims[]
-  paper_submissions      paper_submissions[]
-  file_access_audits     file_access_audits[]
-  api_credentials        institution_api_credentials[]
-  user_provisions        institution_user_provisions[]
-  stored_files           oss_files[]
-  org_nodes              institution_org_nodes[]
-  org_edges              institution_org_edges[]
-  people                 institution_people[]
-  person_identifiers     institution_person_identifiers[]
-  identity_challenges    institution_identity_challenges[]
-  identity_requests      institution_identity_requests[]
-  identity_events        institution_identity_events[]
-  person_events          institution_person_events[]
-  org_positions          institution_org_positions[]
-  org_appointments       institution_org_appointments[]
-  review_workflows       institution_review_workflows[]
-  review_bindings        institution_review_workflow_bindings[]
-  review_workflow_steps  institution_review_workflow_steps[]
-  content_review_cases   content_review_cases[]
-  content_review_steps   content_review_step_instances[]
-  content_review_actions content_review_actions[]
-  degree_theses          degree_theses[]
-  academic_subjects      academic_subjects[]
-  subject_mappings       institution_subject_mappings[]
+  bibliography_metadata   institution_paper_metadata[]
+  bibliography_sources    paper_sources[]
+  paper_field_definitions institution_paper_field_definitions[]
+  id                      String                                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                    String                                 @db.VarChar(200)
+  slug                    String                                 @unique(map: "institutions_slug_idx") @db.VarChar(200)
+  summary                 String?                                @db.VarChar
+  website                 String?                                @db.VarChar(255)
+  createdAt               DateTime                               @default(now()) @db.Timestamp(6)
+  updatedAt               DateTime                               @default(now()) @db.Timestamp(6)
+  labs                    labs[]
+  memberships             institution_memberships[]
+  imports                 institution_data_imports[]
+  join_requests           institution_join_requests[]
+  paper_author_bindings   institution_paper_author_bindings[]
+  paper_claims            paper_claims[]
+  paper_submissions       paper_submissions[]
+  file_access_audits      file_access_audits[]
+  api_credentials         institution_api_credentials[]
+  user_provisions         institution_user_provisions[]
+  stored_files            oss_files[]
+  org_nodes               institution_org_nodes[]
+  org_edges               institution_org_edges[]
+  people                  institution_people[]
+  person_identifiers      institution_person_identifiers[]
+  identity_challenges     institution_identity_challenges[]
+  identity_requests       institution_identity_requests[]
+  identity_events         institution_identity_events[]
+  person_events           institution_person_events[]
+  org_positions           institution_org_positions[]
+  org_appointments        institution_org_appointments[]
+  review_workflows        institution_review_workflows[]
+  review_bindings         institution_review_workflow_bindings[]
+  review_workflow_steps   institution_review_workflow_steps[]
+  content_review_cases    content_review_cases[]
+  content_review_steps    content_review_step_instances[]
+  content_review_actions  content_review_actions[]
+  degree_theses           degree_theses[]
+  academic_subjects       academic_subjects[]
+  subject_mappings        institution_subject_mappings[]
 }
 
 model institution_memberships {
@@ -480,23 +513,24 @@ model institution_user_provisions {
 }
 
 model institution_api_credentials {
-  id            String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  institutionId String                     @db.Uuid
-  name          String                     @db.VarChar(100)
-  clientId      String                     @unique(map: "institution_api_credentials_clientId_idx") @db.VarChar(64)
-  secretHash    String                     @db.VarChar
-  scopes        String[]                   @default([]) @db.VarChar
-  expiresAt     DateTime                   @db.Timestamp(6)
-  revokedAt     DateTime?                  @db.Timestamp(6)
-  secretVersion Int                        @default(1)
-  lastUsedAt    DateTime?                  @db.Timestamp(6)
-  lastUsedIp    String?                    @db.VarChar(128)
-  createdBy     String                     @db.Uuid
-  createdAt     DateTime                   @default(now()) @db.Timestamp(6)
-  updatedAt     DateTime                   @default(now()) @db.Timestamp(6)
-  institution   institutions               @relation(fields: [institutionId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_api_credentials_institutionId_fkey")
-  created_by    users                      @relation(fields: [createdBy], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "institution_api_credentials_createdBy_fkey")
+  id            String                              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  institutionId String                              @db.Uuid
+  name          String                              @db.VarChar(100)
+  clientId      String                              @unique(map: "institution_api_credentials_clientId_idx") @db.VarChar(64)
+  secretHash    String                              @db.VarChar
+  scopes        String[]                            @default([]) @db.VarChar
+  expiresAt     DateTime                            @db.Timestamp(6)
+  revokedAt     DateTime?                           @db.Timestamp(6)
+  secretVersion Int                                 @default(1)
+  lastUsedAt    DateTime?                           @db.Timestamp(6)
+  lastUsedIp    String?                             @db.VarChar(128)
+  createdBy     String                              @db.Uuid
+  createdAt     DateTime                            @default(now()) @db.Timestamp(6)
+  updatedAt     DateTime                            @default(now()) @db.Timestamp(6)
+  institution   institutions                        @relation(fields: [institutionId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_api_credentials_institutionId_fkey")
+  created_by    users                               @relation(fields: [createdBy], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "institution_api_credentials_createdBy_fkey")
   imports       institution_data_imports[]
+  decisions     institution_data_import_decisions[]
 
   @@index([institutionId])
   @@index([createdBy])
@@ -505,34 +539,39 @@ model institution_api_credentials {
 }
 
 model institution_data_imports {
-  id             String                          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  institutionId  String                          @db.Uuid
-  kind           String                          @db.VarChar(32)
-  status         String                          @default("processing") @db.VarChar(32)
-  idempotencyKey String                          @db.VarChar(128)
-  requestDigest  String                          @db.VarChar(64)
-  actorType      String                          @db.VarChar(16)
-  actorUserId    String?                         @db.Uuid
-  actorScopes    String[]                        @default([]) @db.VarChar
-  credentialId   String?                         @db.Uuid
-  sourceIp       String?                         @db.VarChar(128)
-  userAgent      String?                         @db.VarChar(1000)
-  totalRows      Int                             @default(0)
-  createdCount   Int                             @default(0)
-  updatedCount   Int                             @default(0)
-  unchangedCount Int                             @default(0)
-  pendingCount   Int                             @default(0)
-  errorCount     Int                             @default(0)
-  reviewedBy     String?                         @db.Uuid
-  reviewNotes    String?                         @db.VarChar
-  reviewedAt     DateTime?                       @db.Timestamp(6)
-  createdAt      DateTime                        @default(now()) @db.Timestamp(6)
-  updatedAt      DateTime                        @default(now()) @db.Timestamp(6)
-  institution    institutions                    @relation(fields: [institutionId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_data_imports_institutionId_fkey")
-  actor_user     users?                          @relation("ImportActorUser", fields: [actorUserId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "institution_data_imports_actorUserId_fkey")
-  credential     institution_api_credentials?    @relation(fields: [credentialId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "institution_data_imports_credentialId_fkey")
-  reviewed_by    users?                          @relation("ImportReviewedBy", fields: [reviewedBy], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "institution_data_imports_reviewedBy_fkey")
-  items          institution_data_import_items[]
+  id              String                          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  institutionId   String                          @db.Uuid
+  kind            String                          @db.VarChar(32)
+  status          String                          @default("processing") @db.VarChar(32)
+  idempotencyKey  String                          @db.VarChar(128)
+  requestDigest   String                          @db.VarChar(64)
+  schemaVersion   Int                             @default(1)
+  sourceName      String?                         @db.VarChar(255)
+  processingToken String?                         @db.Uuid
+  leaseExpiresAt  DateTime?                       @db.Timestamp(6)
+  appliedAt       DateTime?                       @db.Timestamp(6)
+  actorType       String                          @db.VarChar(16)
+  actorUserId     String?                         @db.Uuid
+  actorScopes     String[]                        @default([]) @db.VarChar
+  credentialId    String?                         @db.Uuid
+  sourceIp        String?                         @db.VarChar(128)
+  userAgent       String?                         @db.VarChar(1000)
+  totalRows       Int                             @default(0)
+  createdCount    Int                             @default(0)
+  updatedCount    Int                             @default(0)
+  unchangedCount  Int                             @default(0)
+  pendingCount    Int                             @default(0)
+  errorCount      Int                             @default(0)
+  reviewedBy      String?                         @db.Uuid
+  reviewNotes     String?                         @db.VarChar
+  reviewedAt      DateTime?                       @db.Timestamp(6)
+  createdAt       DateTime                        @default(now()) @db.Timestamp(6)
+  updatedAt       DateTime                        @default(now()) @db.Timestamp(6)
+  institution     institutions                    @relation(fields: [institutionId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_data_imports_institutionId_fkey")
+  actor_user      users?                          @relation("ImportActorUser", fields: [actorUserId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "institution_data_imports_actorUserId_fkey")
+  credential      institution_api_credentials?    @relation(fields: [credentialId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "institution_data_imports_credentialId_fkey")
+  reviewed_by     users?                          @relation("ImportReviewedBy", fields: [reviewedBy], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "institution_data_imports_reviewedBy_fkey")
+  items           institution_data_import_items[]
 
   @@unique([institutionId, kind, idempotencyKey], map: "institution_data_imports_inst_kind_key_idx")
   @@index([institutionId, createdAt])
@@ -543,23 +582,342 @@ model institution_data_imports {
 }
 
 model institution_data_import_items {
-  id          String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  importId    String                   @db.Uuid
-  rowIndex    Int
-  externalKey String?                  @db.VarChar(200)
-  targetId    String?                  @db.Uuid
-  action      String                   @default("pending") @db.VarChar(32)
-  status      String                   @default("pending") @db.VarChar(32)
-  message     String?                  @db.VarChar
-  payload     Json
-  createdAt   DateTime                 @default(now()) @db.Timestamp(6)
-  updatedAt   DateTime                 @default(now()) @db.Timestamp(6)
-  import      institution_data_imports @relation(fields: [importId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_data_import_items_importId_fkey")
+  id              String                              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  importId        String                              @db.Uuid
+  rowIndex        Int
+  externalKey     String?                             @db.VarChar(200)
+  targetId        String?                             @db.Uuid
+  action          String                              @default("pending") @db.VarChar(32)
+  status          String                              @default("pending") @db.VarChar(32)
+  message         String?                             @db.VarChar
+  payload         Json
+  sourceRow       Int?
+  baseFingerprint String?                             @db.VarChar(64)
+  previewChanges  Json?
+  resolvedPaperId String?                             @db.Uuid
+  decision        String?                             @db.VarChar(32)
+  decisionNotes   String?
+  decidedAt       DateTime?                           @db.Timestamp(6)
+  issues          institution_data_import_issues[]
+  decisions       institution_data_import_decisions[]
+  metadata_events paper_metadata_events[]
+  createdAt       DateTime                            @default(now()) @db.Timestamp(6)
+  updatedAt       DateTime                            @default(now()) @db.Timestamp(6)
+  import          institution_data_imports            @relation(fields: [importId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_data_import_items_importId_fkey")
 
   @@unique([importId, rowIndex], map: "institution_data_import_items_import_row_idx")
   @@index([importId])
   @@index([targetId])
   @@index([status])
+}
+
+model institution_data_import_decisions {
+  id           String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  itemId       String                        @db.Uuid
+  decision     String                        @db.VarChar(32)
+  notes        String?
+  actorType    String                        @db.VarChar(16)
+  actorUserId  String?                       @db.Uuid
+  credentialId String?                       @db.Uuid
+  actorScopes  String[]                      @default([]) @db.VarChar
+  sourceIp     String?                       @db.VarChar(128)
+  userAgent    String?                       @db.VarChar(1000)
+  createdAt    DateTime                      @default(now()) @db.Timestamp(6)
+  item         institution_data_import_items @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  actor        users?                        @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  credential   institution_api_credentials?  @relation(fields: [credentialId], references: [id], onDelete: SetNull)
+
+  @@index([itemId, createdAt])
+  @@index([actorUserId])
+  @@index([credentialId])
+}
+
+model paper_titles {
+  id         String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paperId    String  @db.Uuid
+  language   String  @db.VarChar(64)
+  kind       String  @default("original") @db.VarChar(32)
+  title      String
+  is_primary Boolean @default(false)
+  source     String  @db.VarChar(255)
+  paper      papers  @relation(fields: [paperId], references: [id], onDelete: Cascade)
+
+  @@unique([paperId, language, kind])
+  @@unique([paperId], map: "paper_titles_one_primary", where: raw("is_primary"))
+}
+
+model paper_identifiers {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paperId          String   @db.Uuid
+  scheme           String   @db.VarChar(64)
+  value            String   @db.VarChar(500)
+  normalized_value String   @db.VarChar(500)
+  source           String   @db.VarChar(255)
+  createdAt        DateTime @default(now()) @db.Timestamp(6)
+  paper            papers   @relation(fields: [paperId], references: [id], onDelete: Cascade)
+
+  @@unique([scheme, normalized_value])
+  @@unique([paperId], map: "paper_identifiers_one_doi", where: raw("scheme = 'doi'"))
+  @@index([paperId])
+}
+
+model journals {
+  id          String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String                @db.VarChar(500)
+  publisher   String?               @db.VarChar(500)
+  createdAt   DateTime              @default(now()) @db.Timestamp(6)
+  updatedAt   DateTime              @default(now()) @db.Timestamp(6)
+  identifiers journal_identifiers[]
+  names       journal_names[]
+  rankings    journal_rankings[]
+  papers      papers[]
+}
+
+model journal_identifiers {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  journalId String   @db.Uuid
+  scheme    String   @db.VarChar(32)
+  value     String   @db.VarChar(32)
+  journal   journals @relation(fields: [journalId], references: [id], onDelete: Cascade)
+
+  @@unique([scheme, value])
+  @@index([journalId])
+}
+
+model journal_names {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  journalId       String   @db.Uuid
+  name            String   @db.VarChar(500)
+  normalized_name String   @db.VarChar(500)
+  start_year      Int?
+  end_year        Int?
+  journal         journals @relation(fields: [journalId], references: [id], onDelete: Cascade)
+
+  @@unique([journalId, normalized_name])
+  @@index([normalized_name])
+}
+
+model bibliometric_editions {
+  id               String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  system           String                        @db.VarChar(32)
+  version          String                        @db.VarChar(100)
+  revision         Int                           @default(1)
+  content_revision Int                           @default(0)
+  metric_year      Int?
+  released_on      DateTime?                     @db.Date
+  observed_on      DateTime?                     @db.Date
+  source           String                        @db.VarChar(255)
+  source_url       String?
+  status           String                        @default("draft") @db.VarChar(16)
+  createdAt        DateTime                      @default(now()) @db.Timestamp(6)
+  publishedAt      DateTime?                     @db.Timestamp(6)
+  rankings         journal_rankings[]
+  indicators       paper_indicators[]
+  events           bibliometric_edition_events[]
+
+  @@unique([system, version, revision])
+  @@index([system, status, released_on])
+}
+
+model bibliometric_edition_events {
+  id          String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  editionId   String                @db.Uuid
+  actorUserId String?               @db.Uuid
+  action      String                @db.VarChar(32)
+  notes       String
+  changes     Json?
+  createdAt   DateTime              @default(now()) @db.Timestamp(6)
+  edition     bibliometric_editions @relation(fields: [editionId], references: [id], onDelete: Restrict)
+  actor       users?                @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([editionId, createdAt])
+  @@index([actorUserId])
+}
+
+model journal_rankings {
+  id             String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  journalId      String                @db.Uuid
+  editionId      String                @db.Uuid
+  category_level String                @db.VarChar(32)
+  category       String                @db.VarChar(500)
+  metric         String                @db.VarChar(32)
+  quartile       Int?                  @db.SmallInt
+  is_top         Boolean?
+  source         String                @db.VarChar(255)
+  journal        journals              @relation(fields: [journalId], references: [id], onDelete: Restrict)
+  edition        bibliometric_editions @relation(fields: [editionId], references: [id], onDelete: Restrict)
+
+  @@unique([journalId, editionId, category_level, category, metric], map: "journal_rankings_identity")
+  @@index([editionId])
+}
+
+model paper_indicators {
+  id        String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paperId   String                @db.Uuid
+  editionId String                @db.Uuid
+  kind      String                @db.VarChar(32)
+  category  String                @default("") @db.VarChar(255)
+  value     Boolean
+  source    String                @db.VarChar(255)
+  paper     papers                @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  edition   bibliometric_editions @relation(fields: [editionId], references: [id], onDelete: Restrict)
+
+  @@unique([paperId, editionId, kind, category])
+  @@index([editionId])
+}
+
+model paper_affiliations {
+  id                String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paperId           String                      @db.Uuid
+  source_key        String                      @db.VarChar(200)
+  raw_name          String
+  organization_name String?                     @db.VarChar(500)
+  department        String?                     @db.VarChar(500)
+  country_code      String?                     @db.VarChar(2)
+  ror_id            String?                     @db.VarChar(100)
+  source            String                      @db.VarChar(255)
+  paper             papers                      @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  authors           paper_author_affiliations[]
+
+  @@unique([paperId, source_key])
+  @@unique([id, paperId])
+}
+
+model paper_author_affiliations {
+  paperId       String             @db.Uuid
+  authorshipId  Int
+  affiliationId String             @db.Uuid
+  authorship    paper_authors      @relation(fields: [authorshipId, paperId], references: [id, paperId], onDelete: Cascade)
+  affiliation   paper_affiliations @relation(fields: [affiliationId, paperId], references: [id, paperId], onDelete: Cascade)
+
+  @@id([authorshipId, affiliationId])
+  @@index([affiliationId, paperId])
+}
+
+model paper_funding {
+  id                String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paperId           String  @db.Uuid
+  source_key        String  @db.VarChar(200)
+  funder_name       String?
+  funder_identifier String? @db.VarChar(255)
+  award_number      String? @db.VarChar(255)
+  raw_text          String
+  source            String  @db.VarChar(255)
+  paper             papers  @relation(fields: [paperId], references: [id], onDelete: Cascade)
+
+  @@unique([paperId, source_key])
+}
+
+model paper_sources {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  institutionId String       @db.Uuid
+  paperId       String       @db.Uuid
+  provider      String       @db.VarChar(64)
+  external_id   String?      @db.VarChar(500)
+  collected_on  DateTime?    @db.Date
+  first_seen_at DateTime     @default(now()) @db.Timestamp(6)
+  last_seen_at  DateTime     @default(now()) @db.Timestamp(6)
+  paper         papers       @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  institution   institutions @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+
+  @@unique([institutionId, paperId, provider])
+  @@index([paperId])
+}
+
+model institution_paper_metadata {
+  id                         String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  institutionId              String       @db.Uuid
+  paperId                    String       @db.Uuid
+  owning_units               String[]     @default([])
+  secondary_units            String[]     @default([])
+  signature_type             String?      @db.VarChar(100)
+  reported_affiliation_count Int?
+  source_author_order        String?
+  cooperation_types          String[]     @default([])
+  cooperation_description    String?
+  source                     String       @db.VarChar(255)
+  updatedAt                  DateTime     @default(now()) @db.Timestamp(6)
+  custom_fields              Json         @default("{}")
+  institution                institutions @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  paper                      papers       @relation(fields: [paperId], references: [id], onDelete: Cascade)
+
+  @@unique([institutionId, paperId])
+  @@index([paperId])
+  @@index([custom_fields], type: Gin)
+}
+
+model institution_paper_field_definitions {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  institutionId String       @db.Uuid
+  key           String       @db.VarChar(100)
+  label         String       @db.VarChar(200)
+  label_en      String?      @db.VarChar(200)
+  field_type    String       @db.VarChar(32)
+  is_required   Boolean      @default(false)
+  min_value     Float?
+  max_value     Float?
+  max_length    Int          @default(10000)
+  min_date      DateTime?    @db.Date
+  max_date      DateTime?    @db.Date
+  options       String[]     @default([])
+  visibility    String       @default("admin") @db.VarChar(16)
+  is_active     Boolean      @default(true)
+  display_order Int          @default(0)
+  createdAt     DateTime     @default(now()) @db.Timestamp(6)
+  updatedAt     DateTime     @default(now()) @db.Timestamp(6)
+  institution   institutions @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+
+  @@unique([institutionId, key])
+}
+
+model institution_data_import_issues {
+  id             String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  itemId         String                        @db.Uuid
+  code           String                        @db.VarChar(64)
+  severity       String                        @db.VarChar(16)
+  field          String                        @db.VarChar(255)
+  message        String
+  incoming_value String?
+  existing_value String?
+  resolution     String?                       @db.VarChar(32)
+  resolvedAt     DateTime?                     @db.Timestamp(6)
+  item           institution_data_import_items @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId, severity])
+}
+
+model paper_metadata_events {
+  id              String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paperId         String                         @db.Uuid
+  importItemId    String?                        @db.Uuid
+  actorUserId     String?                        @db.Uuid
+  action          String                         @db.VarChar(32)
+  source          String                         @db.VarChar(255)
+  before_snapshot Json?
+  after_snapshot  Json
+  createdAt       DateTime                       @default(now()) @db.Timestamp(6)
+  paper           papers                         @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  import_item     institution_data_import_items? @relation(fields: [importItemId], references: [id], onDelete: SetNull)
+  actor           users?                         @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([paperId, createdAt])
+  @@index([importItemId])
+  @@index([actorUserId])
+}
+
+model paper_index_jobs {
+  paperId     String    @id @db.Uuid
+  status      String    @default("queued") @db.VarChar(16)
+  revision    Int       @default(1)
+  attempts    Int       @default(0)
+  availableAt DateTime  @default(now()) @db.Timestamp(6)
+  leaseUntil  DateTime? @db.Timestamp(6)
+  leaseOwner  String?   @db.VarChar(64)
+  lastError   String?
+  updatedAt   DateTime  @default(now()) @db.Timestamp(6)
+  paper       papers    @relation(fields: [paperId], references: [id], onDelete: Cascade)
+
+  @@index([status, availableAt])
 }
 
 model institution_join_requests {
@@ -1280,7 +1638,7 @@ model scholar_research_period_papers {
   paper_id       String?                  @db.Uuid
   year           Int
   title_snapshot String
-  doi_snapshot   String
+  doi_snapshot   String?
   has_abstract   Boolean                  @default(false)
   source_status  String                   @db.VarChar(32)
   display_order  Int
@@ -1310,7 +1668,7 @@ model scholar_research_timeline_issues {
   id              BigInt                                @id @default(autoincrement())
   generation_id   String                                @db.Uuid
   paper_id        String?                               @db.Uuid
-  doi             String                                @default("") @db.VarChar(200)
+  doi             String?                               @db.VarChar(200)
   issue_type      String                                @db.VarChar(32)
   existing_year   Int?
   candidate_year  Int?

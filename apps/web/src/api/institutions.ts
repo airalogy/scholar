@@ -289,6 +289,7 @@ export interface InstitutionImportRecord {
   institutionId: string
   kind: InstitutionImportKind
   status: InstitutionImportStatus
+  metadataReviewPending?: boolean
   actorType: 'user' | 'integration'
   summary: {
     total: number

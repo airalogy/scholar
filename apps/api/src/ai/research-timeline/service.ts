@@ -93,7 +93,7 @@ export const resolveTimelinePaperMetadata = async (
   dependencies: TimelineMetadataDependencies = {},
 ): Promise<{ papers: TimelinePaperInput[]; issues: TimelineIssueInput[] }> => {
   const candidates = await (dependencies.resolver ?? resolvePublicationMetadata)(
-    papers.map((paper) => paper.normalizedDoi),
+    papers.flatMap((paper) => (paper.normalizedDoi ? [paper.normalizedDoi] : [])),
     {
       mailto: fastify.config.OPENALEX_MAILTO,
       onWarning: (message) => fastify.log.warn({ message }, 'Publication metadata warning'),
@@ -104,7 +104,7 @@ export const resolveTimelinePaperMetadata = async (
   const resolvedPapers: TimelinePaperInput[] = []
 
   for (const paper of papers) {
-    const candidate = candidates.get(paper.normalizedDoi)
+    const candidate = paper.normalizedDoi ? candidates.get(paper.normalizedDoi) : undefined
     const candidateDate = parsePublicationDate(candidate?.publicationDate ?? null)
     let year = paper.year
     let publicationDate = paper.publicationDate

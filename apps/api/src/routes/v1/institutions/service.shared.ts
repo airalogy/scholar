@@ -240,6 +240,7 @@ export const formatImportItem = (item: {
 })
 
 const formatImportBase = (record: {
+  _count?: { items: number }
   id: string
   institutionId: string
   kind: string
@@ -262,6 +263,7 @@ const formatImportBase = (record: {
   kind: normalizeImportKind(record.kind),
   status: normalizeImportStatus(record.status),
   actorType: record.actorType === 'integration' ? ('integration' as const) : ('user' as const),
+  metadataReviewPending: Boolean(record._count?.items),
   summary: {
     total: record.totalRows,
     created: record.createdCount,
@@ -296,6 +298,9 @@ export const getFormattedImport = async (
 
   return {
     ...formatImportBase(record),
+    metadataReviewPending: items.some(
+      (item) => item.status === 'pending' && item.baseFingerprint !== null,
+    ),
     items: items.map(formatImportItem),
   }
 }
@@ -311,11 +316,17 @@ export const listFormattedImports = async (
 ) => {
   const where = {
     institutionId,
+    schemaVersion: 1,
     ...(query.kind ? { kind: query.kind } : {}),
   }
   const [records, total] = await Promise.all([
     fastify.prisma.institution_data_imports.findMany({
       where,
+      include: {
+        _count: {
+          select: { items: { where: { status: 'pending', baseFingerprint: { not: null } } } },
+        },
+      },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: query.limit ?? 20,
       skip: query.offset ?? 0,

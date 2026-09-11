@@ -52,6 +52,7 @@ jobs:
       - run: pnpm db:audit:integrity
       - run: pnpm db:verify:upgrade
       - run: pnpm db:verify:identity
+      - run: pnpm db:verify:bibliography
       - run: pnpm license:check
       - run: pnpm check
       - run: pnpm release:source:verify

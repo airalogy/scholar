@@ -25,8 +25,13 @@ describe('public route policies', () => {
     'LabDetail',
     'Theses',
     'ThesisDetail',
+    'About',
   ])('allows anonymous browsing on %s', (name) => {
     expect(routeByName(name).meta?.allowAnonymous).toBe(true)
+  })
+
+  it('keeps version information available even when institution content requires sign-in', () => {
+    expect(routeByName('About').meta?.publicContent).not.toBe(true)
   })
 
   it.each([

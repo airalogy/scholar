@@ -8,6 +8,54 @@ const INSTITUTION_ID = '22222222-2222-4222-8222-222222222222'
 const PAPER_ID = '33333333-3333-4333-8333-333333333333'
 const FILE_ID = '44444444-4444-4444-8444-444444444444'
 
+test('the final snapshot check runs inside the publishing transaction and cannot overwrite newer metadata', async () => {
+  let publishing = false
+  let writes = 0
+  let locks = 0
+  const updatedAt = new Date('2026-09-01')
+  const prisma = {
+    institutions: { findUnique: async () => ({ id: INSTITUTION_ID, slug: 'example' }) },
+    papers: {
+      findUnique: async () => ({
+        title: publishing ? 'New title' : 'Old title',
+        titles: [],
+        abstract: null,
+        updatedAt,
+      }),
+    },
+    paper_claims: {
+      findFirst: async () => ({
+        id: 'claim',
+        updatedAt,
+        submissionId: null,
+        primary_submission: null,
+      }),
+    },
+    paper_submissions: { findFirst: async () => null },
+    $queryRaw: async () => {
+      locks += 1
+      return []
+    },
+    $executeRawUnsafe: async () => {
+      writes += 1
+      return 1
+    },
+    $transaction: async (operation: (client: unknown) => Promise<unknown>) => {
+      publishing = true
+      return operation(prisma)
+    },
+  }
+  const app = {
+    prisma,
+    deployment: { institution: { slug: 'example' } },
+    config: {},
+    log: { info: () => undefined },
+  } as unknown as FastifyInstance
+  assert.equal((await refreshPaperSearchIndex(app, PAPER_ID)).status, 'stale')
+  assert.equal(writes, 0)
+  assert.ok(locks > 0)
+})
+
 const createPdf = async (): Promise<Buffer> => {
   const document = await PDFDocument.create()
   const font = await document.embedFont(StandardFonts.Helvetica)
@@ -44,7 +92,12 @@ test('approved PDF text is included in the local BM25 paper index', async () => 
         findUnique: async () => ({ id: INSTITUTION_ID, slug: 'example', name: 'Example' }),
       },
       papers: {
-        findUnique: async () => ({ title: 'Paper title', abstract: 'Abstract', updatedAt }),
+        findUnique: async () => ({
+          title: 'Paper title',
+          titles: [],
+          abstract: 'Abstract',
+          updatedAt,
+        }),
       },
       paper_claims: {
         findFirst: async () => ({
@@ -74,6 +127,8 @@ test('approved PDF text is included in the local BM25 paper index', async () => 
       $executeRawUnsafe: async () => 1,
       $transaction: async (operation: (client: unknown) => Promise<unknown>) =>
         operation({
+          ...fastify.prisma,
+          $queryRaw: async () => [],
           $executeRawUnsafe: async (...args: unknown[]) => {
             calls.push(args)
             return 1

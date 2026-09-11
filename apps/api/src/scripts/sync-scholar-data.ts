@@ -1,16 +1,18 @@
 import process from 'node:process'
-import { randomUUID } from 'node:crypto'
 import { Prisma, PrismaClient } from '../../prisma/generated/client'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { normalizeDoi } from '../utils/doi'
 import { lockMutationScope } from '../utils/advisory-lock'
+import { writePaperBibliography } from '../bibliography/write'
+import { BibliographyConflict } from '../bibliography/identity'
+import { ensureBibliographyClaim } from '../bibliography/claims'
 
 interface SyncedPaperRecord {
   id: string
   title: string
   abstract: string | null
-  doi: string
-  normalized_doi: string
+  doi: string | null
+  normalized_doi: string | null
   journal_name: string | null
   publish_year: number | null
   publish_date: Date | null
@@ -20,36 +22,6 @@ interface SyncedPaperRecord {
   pages: string | null
   keywords: string[]
   link: string | null
-  createdAt: Date
-  updatedAt: Date
-}
-
-interface ClaimRecord {
-  id: string
-  paperId: string
-  institutionId: string
-  labId: string | null
-  submittedBy: string
-  submissionId: string | null
-  reviewCaseId: string
-  review_status: string
-  review_notes: string | null
-  reviewedBy: string | null
-  reviewedAt: Date | null
-  createdAt: Date
-  updatedAt: Date
-}
-
-interface SubmissionRecord {
-  id: string
-  paperId: string
-  claimId: string | null
-  userId: string
-  institutionId: string | null
-  labId: string | null
-  oss_file_id: string | null
-  metadata_snapshot: Prisma.JsonValue
-  notes: string | null
   createdAt: Date
   updatedAt: Date
 }
@@ -110,7 +82,7 @@ interface SummaryCounters {
   publicClaims: {
     created: number
     updated: number
-    approvedExisting: number
+    preservedExisting: number
   }
   submissions: {
     created: number
@@ -118,8 +90,6 @@ interface SummaryCounters {
   }
 }
 
-const DEFAULT_PAPER_TYPE = 1
-const DEFAULT_LANGUAGE = 1
 const CHUNK_SIZE = 500
 const DRY_RUN_FLAG = '--dry-run'
 const CLEAR_FLAG = '--clear'
@@ -192,7 +162,7 @@ const summary: SummaryCounters = {
   publicClaims: {
     created: 0,
     updated: 0,
-    approvedExisting: 0,
+    preservedExisting: 0,
   },
   submissions: {
     created: 0,
@@ -325,19 +295,6 @@ const printSummary = () => {
       2,
     ),
   )
-}
-
-const groupBy = <T, K>(items: T[], getKey: (item: T) => K): Map<K, T[]> => {
-  const grouped = new Map<K, T[]>()
-
-  for (const item of items) {
-    const key = getKey(item)
-    const existing = grouped.get(key) ?? []
-    existing.push(item)
-    grouped.set(key, existing)
-  }
-
-  return grouped
 }
 
 const loadPapersByDoi = async (dois: string[]) => {
@@ -651,47 +608,6 @@ const loadScholarLinksByScholarId = async (scholarIds: string[]) => {
   return results
 }
 
-const loadClaimsByPaperId = async (paperIds: string[]) => {
-  const results: ClaimRecord[] = []
-
-  for (const chunk of chunkArray(paperIds, CHUNK_SIZE)) {
-    const claims = await prisma.paper_claims.findMany({
-      where: {
-        paperId: { in: chunk },
-      },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-      include: { review_case: true },
-    })
-    results.push(
-      ...claims.map((claim) => ({
-        ...claim,
-        review_status: claim.review_case.status,
-        review_notes: claim.review_case.decision_notes,
-        reviewedBy: claim.review_case.decidedBy,
-        reviewedAt: claim.review_case.decidedAt,
-      })),
-    )
-  }
-
-  return results
-}
-
-const loadSubmissionsByPaperId = async (paperIds: string[]) => {
-  const results: SubmissionRecord[] = []
-
-  for (const chunk of chunkArray(paperIds, CHUNK_SIZE)) {
-    const submissions = await prisma.paper_submissions.findMany({
-      where: {
-        paperId: { in: chunk },
-      },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-    })
-    results.push(...submissions)
-  }
-
-  return results
-}
-
 const selectAdminUser = async () => {
   const admin = await prisma.users.findFirst({
     where: {
@@ -729,118 +645,77 @@ const selectInstitutionByName = async (name: string) => {
   return institution
 }
 
-const syncPapers = async () => {
-  const sourcePapers = await prisma.scholar_source_papers.findMany({
-    orderBy: [{ createdAt: 'asc' }, { doi: 'asc' }],
-  })
-  const sourceDois = sourcePapers.map((paper) => normalizeDoi(paper.doi))
-  const existingPapers = await loadPapersByDoi(sourceDois)
-  const existingPaperGroups = groupBy(existingPapers, (paper) => paper.normalized_doi)
+const syncPapers = async (
+  institutionId: string,
+  actorUserId: string,
+): Promise<{ finalPaperMap: Map<string, SyncedPaperRecord> }> => {
   const finalPaperMap = new Map<string, SyncedPaperRecord>()
-
-  for (const sourcePaper of sourcePapers) {
-    const doi = normalizeDoi(sourcePaper.doi)
-    const title = sourcePaper.title.trim()
-    const missingFields: string[] = []
-
-    if (!doi) missingFields.push('doi')
-    if (!title) missingFields.push('title')
-
-    if (missingFields.length > 0) {
-      summary.papers.skipped += 1
-      logWarn(
-        `Skipped scholar_source_papers row missing ${missingFields.join(', ')}: doi="${sourcePaper.doi}"`,
-      )
-      continue
+  let cursor: string | undefined
+  class SourcePreview extends Error {
+    constructor(
+      readonly result: { paper: SyncedPaperRecord; action: 'created' | 'updated' | 'unchanged' },
+    ) {
+      super('Rollback source preview')
     }
-
-    const publishYear = null
-    const abstract = normalizeOptionalString(sourcePaper.abstract)
-    const existingMatches = existingPaperGroups.get(doi) ?? []
-
-    if (existingMatches.length > 1) {
-      summary.papers.conflicts += 1
-      logWarn(`Skipped DOI "${doi}" because papers has duplicate rows`)
-      continue
-    }
-
-    const runAt = new Date()
-
-    if (existingMatches.length === 0) {
-      const createData = {
-        title,
-        abstract,
-        doi,
-        normalized_doi: doi,
-        journal_name: null,
-        publish_year: publishYear,
-        publish_date: null,
-        paper_type: DEFAULT_PAPER_TYPE,
-        language: DEFAULT_LANGUAGE,
-        citation_count: null,
-        pages: null,
-        keywords: [],
-        link: null,
-        createdAt: runAt,
-        updatedAt: runAt,
-      } satisfies Prisma.papersCreateInput
-
-      const createdPaper = isDryRun
-        ? ({
-            id: `dry-run-paper:${doi}`,
-            ...createData,
-          } satisfies SyncedPaperRecord)
-        : await prisma.papers.create({ data: createData })
-
-      summary.papers.created += 1
-      finalPaperMap.set(doi, createdPaper)
-      continue
-    }
-
-    const existingPaper = existingMatches[0]
-    const hasChanges =
-      existingPaper.title !== title ||
-      existingPaper.abstract !== abstract ||
-      existingPaper.publish_year !== publishYear
-
-    if (!hasChanges) {
-      summary.papers.unchanged += 1
-      finalPaperMap.set(doi, existingPaper)
-      continue
-    }
-
-    const updateData = {
-      title,
-      abstract,
-      doi,
-      normalized_doi: doi,
-      publish_year: publishYear,
-      updatedAt: runAt,
-    } satisfies Prisma.papersUpdateInput
-
-    const updatedPaper = isDryRun
-      ? ({
-          ...existingPaper,
-          title,
-          abstract,
-          doi,
-          normalized_doi: doi,
-          publish_year: publishYear,
-          updatedAt: runAt,
-        } satisfies SyncedPaperRecord)
-      : await prisma.papers.update({
-          where: { id: existingPaper.id },
-          data: updateData,
+  }
+  while (true) {
+    const sourcePapers = await prisma.scholar_source_papers.findMany({
+      take: CHUNK_SIZE,
+      orderBy: { doi: 'asc' },
+      ...(cursor ? { cursor: { doi: cursor }, skip: 1 } : {}),
+      select: { doi: true, title: true, abstract: true },
+    })
+    if (!sourcePapers.length) break
+    for (const source of sourcePapers) {
+      const doi = normalizeDoi(source.doi)
+      if (finalPaperMap.has(doi)) {
+        summary.papers.conflicts += 1
+        logWarn(
+          'Skipped a duplicate normalized source DOI; reconcile the source records before importing',
+        )
+        continue
+      }
+      try {
+        const operation = async (
+          tx: Prisma.TransactionClient,
+        ): Promise<{ paper: SyncedPaperRecord; action: 'created' | 'updated' | 'unchanged' }> => {
+          const write = await writePaperBibliography(
+            tx,
+            {
+              doi,
+              title: source.title.trim(),
+              abstract: normalizeOptionalString(source.abstract) ?? undefined,
+            },
+            { institutionId, actorUserId, source: 'scholar_source_sync' },
+          )
+          const result = {
+            action: write.action,
+            paper: await tx.papers.findUniqueOrThrow({ where: { id: write.paperId } }),
+          }
+          if (isDryRun) throw new SourcePreview(result)
+          return result
+        }
+        let result: { paper: SyncedPaperRecord; action: 'created' | 'updated' | 'unchanged' }
+        try {
+          result = await prisma.$transaction(operation, { timeout: 30000 })
+        } catch (error) {
+          if (!(error instanceof SourcePreview)) throw error
+          result = error.result
+        }
+        summary.papers[result.action] += 1
+        finalPaperMap.set(doi, {
+          ...result.paper,
+          id: isDryRun && result.action === 'created' ? `dry-run-paper:${doi}` : result.paper.id,
         })
-
-    summary.papers.updated += 1
-    finalPaperMap.set(doi, updatedPaper)
+      } catch (error) {
+        if (!(error instanceof BibliographyConflict)) throw error
+        summary.papers.conflicts += 1
+        logWarn(`Skipped invalid source metadata: ${error.message}`)
+      }
+    }
+    cursor = sourcePapers.at(-1)!.doi
   }
-
-  return {
-    sourcePapers,
-    finalPaperMap,
-  }
+  return { finalPaperMap }
 }
 
 const syncScholars = async () => {
@@ -1247,297 +1122,38 @@ const syncInstitutionPaperAuthorBindings = async (
   }
 }
 
-const ensureSubmissionForClaim = async (
-  claim: ClaimRecord,
-  paper: SyncedPaperRecord,
-  adminUserId: string,
-  institutionId: string,
-  submissionByClaimId: Map<string, SubmissionRecord[]>,
-) => {
-  const runAt = new Date()
-  const snapshot = buildSubmissionSnapshot(paper)
-  const linkedSubmissions = submissionByClaimId.get(claim.id) ?? []
-  const linkedSubmission = claim.submissionId
-    ? (linkedSubmissions.find((submission) => submission.id === claim.submissionId) ?? null)
-    : (linkedSubmissions[0] ?? null)
-
-  if (!linkedSubmission) {
-    if (!isDryRun) {
-      const createdSubmission = await prisma.paper_submissions.create({
-        data: {
-          paperId: paper.id,
-          claimId: claim.id,
-          userId: adminUserId,
-          institutionId,
-          labId: null,
-          oss_file_id: null,
-          metadata_snapshot: snapshot,
-          notes: null,
-          createdAt: runAt,
-          updatedAt: runAt,
-        },
-      })
-
-      if (claim.submissionId !== createdSubmission.id) {
-        await prisma.paper_claims.update({
-          where: { id: claim.id },
-          data: {
-            submissionId: createdSubmission.id,
-            updatedAt: runAt,
-          },
-        })
-        claim.submissionId = createdSubmission.id
-        claim.updatedAt = runAt
-      }
-
-      const nextList = submissionByClaimId.get(claim.id) ?? []
-      nextList.push(createdSubmission)
-      submissionByClaimId.set(claim.id, nextList)
-    }
-
-    summary.submissions.created += 1
-    return
-  }
-
-  const shouldUpdateSubmission =
-    linkedSubmission.userId !== adminUserId ||
-    linkedSubmission.institutionId !== institutionId ||
-    linkedSubmission.labId !== null ||
-    linkedSubmission.oss_file_id !== null ||
-    linkedSubmission.notes !== null ||
-    JSON.stringify(linkedSubmission.metadata_snapshot) !== JSON.stringify(snapshot)
-
-  if (!isDryRun) {
-    if (shouldUpdateSubmission) {
-      const updatedSubmission = await prisma.paper_submissions.update({
-        where: { id: linkedSubmission.id },
-        data: {
-          userId: adminUserId,
-          institutionId,
-          labId: null,
-          oss_file_id: null,
-          metadata_snapshot: snapshot,
-          notes: null,
-          updatedAt: runAt,
-        },
-      })
-
-      if (claim.submissionId !== updatedSubmission.id) {
-        await prisma.paper_claims.update({
-          where: { id: claim.id },
-          data: {
-            submissionId: updatedSubmission.id,
-            updatedAt: runAt,
-          },
-        })
-        claim.submissionId = updatedSubmission.id
-        claim.updatedAt = runAt
-      }
-
-      submissionByClaimId.set(
-        claim.id,
-        linkedSubmissions.map((submission) => {
-          return submission.id === updatedSubmission.id ? updatedSubmission : submission
-        }),
-      )
-    } else if (claim.submissionId !== linkedSubmission.id) {
-      await prisma.paper_claims.update({
-        where: { id: claim.id },
-        data: {
-          submissionId: linkedSubmission.id,
-          updatedAt: runAt,
-        },
-      })
-      claim.submissionId = linkedSubmission.id
-      claim.updatedAt = runAt
-    }
-  } else if (!shouldUpdateSubmission && claim.submissionId === linkedSubmission.id) {
-    return
-  }
-
-  summary.submissions.updated += 1
-}
-
 const ensurePublicClaims = async (
   finalPaperMap: Map<string, SyncedPaperRecord>,
   adminUserId: string,
   institutionId: string,
-) => {
-  const syncedPapers = [...finalPaperMap.values()]
-  const realPapers = syncedPapers.filter((paper) => !paper.id.startsWith('dry-run-paper:'))
-  const realPaperIds = realPapers.map((paper) => paper.id)
-  const claims = await loadClaimsByPaperId(realPaperIds)
-  const submissions = await loadSubmissionsByPaperId(realPaperIds)
-  const claimsByPaperId = groupBy(claims, (claim) => claim.paperId)
-  const submissionsByClaimId = groupBy(
-    submissions.filter(
-      (submission): submission is SubmissionRecord & { claimId: string } =>
-        submission.claimId !== null,
-    ),
-    (submission) => submission.claimId,
-  )
-
-  for (const paper of syncedPapers) {
-    const paperClaims = claimsByPaperId.get(paper.id) ?? []
-    const institutionClaims = paperClaims.filter((claim) => {
-      return claim.institutionId === institutionId && claim.labId === null
-    })
-    const approvedInstitutionClaim =
-      institutionClaims.find((claim) => claim.review_status === 'approved') ?? null
-    let activeClaim = approvedInstitutionClaim ?? institutionClaims[0] ?? null
-
-    if (!activeClaim) {
-      const runAt = new Date()
-
-      if (!isDryRun) {
-        const claimId = randomUUID()
-        const reviewCase = await prisma.content_review_cases.create({
-          data: {
-            institutionId,
-            content_type: 'paper',
-            subjectId: claimId,
-            currentVersionId: null,
-            submittedBy: adminUserId,
-            status: 'approved',
-            currentStep: null,
-            decidedBy: adminUserId,
-            submittedAt: runAt,
-            decidedAt: runAt,
-            createdAt: runAt,
-            updatedAt: runAt,
-          },
-        })
-        const createdClaim = await prisma.paper_claims.create({
-          data: {
-            id: claimId,
-            paperId: paper.id,
-            institutionId,
-            labId: null,
-            submittedBy: adminUserId,
-            submissionId: null,
-            reviewCaseId: reviewCase.id,
-            createdAt: runAt,
-            updatedAt: runAt,
-          },
-        })
-        activeClaim = {
-          ...createdClaim,
-          review_status: 'approved',
-          review_notes: null,
-          reviewedBy: adminUserId,
-          reviewedAt: runAt,
-        }
-
-        const nextClaims = claimsByPaperId.get(paper.id) ?? []
-        nextClaims.push(activeClaim)
-        claimsByPaperId.set(paper.id, nextClaims)
-      } else {
-        activeClaim = {
-          id: `dry-run-claim:${paper.id}`,
+): Promise<void> => {
+  for (const paper of finalPaperMap.values()) {
+    if (isDryRun) {
+      const exists =
+        !paper.id.startsWith('dry-run-paper:') &&
+        (await prisma.paper_claims.count({ where: { paperId: paper.id, institutionId } })) > 0
+      if (exists) summary.publicClaims.preservedExisting += 1
+      else {
+        summary.publicClaims.created += 1
+        summary.submissions.created += 1
+      }
+      continue
+    }
+    const result = await prisma.$transaction(
+      (tx) =>
+        ensureBibliographyClaim(tx, {
           paperId: paper.id,
           institutionId,
-          labId: null,
-          submittedBy: adminUserId,
-          submissionId: null,
-          reviewCaseId: `dry-run-review-case:${paper.id}`,
-          review_status: 'approved',
-          review_notes: null,
-          reviewedBy: adminUserId,
-          reviewedAt: runAt,
-          createdAt: runAt,
-          updatedAt: runAt,
-        }
-      }
-
-      summary.publicClaims.created += 1
-      await ensureSubmissionForClaim(
-        activeClaim,
-        paper,
-        adminUserId,
-        institutionId,
-        submissionsByClaimId,
-      )
-      continue
-    }
-
-    const shouldUpdateClaim =
-      activeClaim.institutionId !== institutionId ||
-      activeClaim.labId !== null ||
-      activeClaim.submittedBy !== adminUserId ||
-      activeClaim.review_status !== 'approved' ||
-      activeClaim.review_notes !== null ||
-      activeClaim.reviewedBy !== adminUserId ||
-      activeClaim.reviewedAt === null
-
-    if (!shouldUpdateClaim) {
-      summary.publicClaims.approvedExisting += 1
-      await ensureSubmissionForClaim(
-        activeClaim,
-        paper,
-        adminUserId,
-        institutionId,
-        submissionsByClaimId,
-      )
-      continue
-    }
-
-    const runAt = new Date()
-    if (!isDryRun) {
-      const updatedClaim = await prisma.paper_claims.update({
-        where: { id: activeClaim.id },
-        data: {
-          institutionId,
-          labId: null,
-          submittedBy: adminUserId,
-          updatedAt: runAt,
-        },
-      })
-      await prisma.content_review_cases.update({
-        where: { id: updatedClaim.reviewCaseId },
-        data: {
-          status: 'approved',
-          currentStep: null,
-          decision_notes: null,
-          decidedBy: adminUserId,
-          submittedAt: runAt,
-          decidedAt: runAt,
-          updatedAt: runAt,
-        },
-      })
-      activeClaim = {
-        ...updatedClaim,
-        review_status: 'approved',
-        review_notes: null,
-        reviewedBy: adminUserId,
-        reviewedAt: runAt,
-      }
-
-      const nextClaims = (claimsByPaperId.get(paper.id) ?? []).map((claim) => {
-        return claim.id === activeClaim?.id ? activeClaim : claim
-      })
-      claimsByPaperId.set(paper.id, nextClaims)
-    } else {
-      activeClaim = {
-        ...activeClaim,
-        institutionId,
-        labId: null,
-        submittedBy: adminUserId,
-        review_status: 'approved',
-        review_notes: null,
-        reviewedBy: adminUserId,
-        reviewedAt: runAt,
-        updatedAt: runAt,
-      }
-    }
-
-    summary.publicClaims.updated += 1
-    await ensureSubmissionForClaim(
-      activeClaim,
-      paper,
-      adminUserId,
-      institutionId,
-      submissionsByClaimId,
+          userId: adminUserId,
+          scope: { institutionId, labId: null, reviewNodeId: null },
+          snapshot: { ...buildSubmissionSnapshot(paper), source: 'scholar_source_sync' },
+        }),
+      { timeout: 30000 },
     )
+    if (result.created) {
+      summary.publicClaims.created += 1
+      summary.submissions.created += 1
+    } else summary.publicClaims.preservedExisting += 1
   }
 }
 
@@ -1560,7 +1176,7 @@ const main = async () => {
   const adminUser = await selectAdminUser()
   logInfo(`Using platform admin ${adminUser.username} (${adminUser.id})`)
 
-  const { finalPaperMap } = await syncPapers()
+  const { finalPaperMap } = await syncPapers(importInstitution.id, adminUser.id)
   const { sourceProfiles } = await syncScholars()
   await syncAuthors(sourceProfiles)
   await syncPaperAuthors(sourceProfiles, finalPaperMap)

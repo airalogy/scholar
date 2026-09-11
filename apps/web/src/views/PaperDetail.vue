@@ -149,6 +149,8 @@
               </div>
             </div>
 
+            <PaperBibliography :paper-id="paper.id" />
+
             <!-- 阅读全文按钮 -->
             <div class="detail-read-section">
               <button
@@ -221,7 +223,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onBeforeUnmount, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Message } from '@arco-design/web-vue'
 import { useI18n } from 'vue-i18n'
@@ -238,6 +240,7 @@ import { getPaper, type PaperResponse, type PaperReviewStatus } from '@/api/pape
 import { getBookmarkStatus, addBookmark, removeBookmark } from '@/api/bookmarks'
 import AiChatPanel from '@/components/AiChatPanel.vue'
 import PdfViewer from '@/components/PdfViewer.vue'
+import PaperBibliography from '@/components/PaperBibliography.vue'
 import { usePublicConfig } from '@/composables/usePublicConfig'
 import { LANGUAGE_LABEL_KEYS, PAPER_STATUS_LABEL_KEYS, PAPER_TYPE_LABEL_KEYS } from '@/i18n/helpers'
 import { hasPublishYear } from '@/utils/papers'
@@ -327,36 +330,35 @@ const getLanguageLabel = (value: number): string => {
   return t(key)
 }
 
+let paperController: AbortController | undefined
 const loadPaper = async (): Promise<void> => {
+  paperController?.abort()
+  const current = new AbortController()
+  paperController = current
+  paper.value = null
+  showPdfViewer.value = false
+  bookmarked.value = false
   isLoading.value = true
   try {
     const id = route.params.id as string
     const [p, status] = await Promise.all([
-      getPaper(id),
+      getPaper(id, current.signal),
       isLoggedIn.value
         ? getBookmarkStatus(id, false).catch(() => ({ bookmarked: false }))
         : Promise.resolve({ bookmarked: false }),
     ])
-    paper.value = p
-    bookmarked.value = status.bookmarked
+    if (!current.signal.aborted) {
+      paper.value = p
+      bookmarked.value = status.bookmarked
+    }
+  } catch {
+    if (!current.signal.aborted) paper.value = null
   } finally {
-    isLoading.value = false
+    if (!current.signal.aborted) isLoading.value = false
   }
 }
 
-onMounted(loadPaper)
-
-watch(token, (nextToken, previousToken) => {
-  if (!nextToken) {
-    bookmarked.value = false
-    showPdfViewer.value = false
-    return
-  }
-
-  if (!previousToken) {
-    void loadPaper()
-  }
-})
+watch([() => route.params.id, token], loadPaper, { immediate: true, flush: 'sync' })
 
 async function toggleBookmark() {
   if (!paper.value) return
@@ -411,6 +413,7 @@ const onResizeEnd = () => {
 }
 
 onBeforeUnmount(() => {
+  paperController?.abort()
   document.removeEventListener('mousemove', onResizeMove)
   document.removeEventListener('mouseup', onResizeEnd)
 })

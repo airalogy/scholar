@@ -125,7 +125,10 @@
       </button>
 
       <div class="sidebar-copyright">
-        <p class="copyright-line">{{ $t('footer.copyright', { year: currentYear }) }}</p>
+        <router-link to="/about" class="version-link" :title="$t('about.title')" :aria-label="$t('about.entry', { version: webVersion })">
+          <span>{{ $t('footer.copyright', { year: currentYear }) }}</span>
+          <span class="version-number">v{{ webVersion }}</span>
+        </router-link>
         <p class="copyright-line">{{ $t('footer.companyName') }}</p>
       </div>
     </div>
@@ -149,6 +152,7 @@ import LibraryIcon from '@/assets/icons/library.svg?component'
 import LibraryActiveIcon from '@/assets/icons/library-active.svg?component'
 import LogoutIcon from '@/assets/icons/logout.svg?component'
 import { resolveSafeHttpUrl } from '@/utils/url'
+import { webVersion } from '@/utils/version'
 
 const props = withDefaults(defineProps<{
   isLoggedIn?: boolean
@@ -560,6 +564,28 @@ const isThesisRouteActive = (): boolean => {
 
 .copyright-line
   margin: 0
+
+.version-link
+  align-self: center
+  display: flex
+  flex-wrap: wrap
+  justify-content: center
+  column-gap: 4px
+  max-width: 100%
+  padding: 4px 0
+  color: var(--scholar-text-3)
+  text-decoration: none
+  border-radius: 4px
+
+.version-number
+  white-space: nowrap
+
+.version-link:hover
+  color: var(--scholar-primary)
+
+.version-link:focus-visible
+  outline: 2px solid var(--scholar-primary)
+  outline-offset: 2px
 
 @media (max-width: 760px)
   .support-link

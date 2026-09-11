@@ -30,7 +30,7 @@ export const AchievementGroupSchema = Type.Object({
 export const ScholarResearchSourcePaperSchema = Type.Object({
   year: Type.Integer(),
   title: Type.String(),
-  doi: Type.String(),
+  doi: Type.Union([Type.String(), Type.Null()]),
   has_abstract: Type.Boolean(),
   source_status: Type.String(),
 })

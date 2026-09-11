@@ -41,6 +41,7 @@ const run = async (): Promise<void> => {
     FROM (
       SELECT normalized_doi
       FROM normalized_papers
+      WHERE normalized_doi IS NOT NULL
       GROUP BY normalized_doi
       HAVING count(*) > 1
     ) duplicates

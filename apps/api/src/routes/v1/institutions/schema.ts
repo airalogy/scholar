@@ -102,7 +102,7 @@ export const ScholarResearchPeriodInputSchema = Type.Object({
       Type.Object({
         year: Type.Integer(),
         title: Type.String({ minLength: 1 }),
-        doi: Type.String(),
+        doi: Type.Union([Type.String(), Type.Null()]),
         has_abstract: Type.Boolean(),
         source_status: Type.String(),
       }),
@@ -173,6 +173,7 @@ export const ImportRecordSchema = Type.Object({
   kind: ImportKindSchema,
   status: ImportStatusSchema,
   actorType: Type.Union([Type.Literal('user'), Type.Literal('integration')]),
+  metadataReviewPending: Type.Boolean(),
   summary: ImportSummarySchema,
   reviewedBy: Type.Union([Type.String({ format: 'uuid' }), Type.Null()]),
   reviewNotes: Type.Union([Type.String(), Type.Null()]),

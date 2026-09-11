@@ -83,6 +83,13 @@ export const adminRoutes: RouteRecordRaw[] = [
     capabilities: ['manage_platform', 'manage_institutions'],
   }),
   createAdminRoute({
+    path: '/admin/journals',
+    name: 'AdminJournals',
+    component: () => import('../views/AdminJournals.vue'),
+    capabilities: ['manage_platform', 'manage_institutions'],
+    platformOnlyInPublic: true,
+  }),
+  createAdminRoute({
     path: '/admin/institutions/:slug',
     name: 'AdminInstitutionContent',
     component: () => import('../views/AdminInstitutionContent.vue'),
@@ -108,6 +115,12 @@ export const adminRoutes: RouteRecordRaw[] = [
 ]
 
 export const appRoutes: RouteRecordRaw[] = [
+  {
+    path: '/about',
+    name: 'About',
+    component: () => import('../views/About.vue'),
+    meta: { allowAnonymous: true },
+  },
   {
     path: '/',
     name: 'Home',

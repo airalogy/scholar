@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import type { papers as PaperRecord, Prisma } from '../../../prisma/generated/client'
+import type { papers as PaperRecord } from '../../../prisma/generated/client'
 import type { InstitutionPaperBoundMember } from '../../utils/institution-paper-bindings'
 import type { UpdatePaperBody } from './schema'
 import type { ClaimRecord, FormattedPaper, PaperScope, SubmissionRecord } from './service.shared'
@@ -11,9 +11,8 @@ import {
 } from '../../utils/permissions'
 import { getUserWorkflowReviewableClaimIds } from '../../utils/institution-org-structure'
 import { buildProtectedFileAccessUrls } from '../../utils/protected-files'
-import { requireNormalizedDoi } from '../../utils/doi'
 import { mergeWhere, normalizeReviewStatus, toClaimRecord } from './service.shared'
-import { refreshPaperSearchIndex } from './paper-index'
+import { updateLegacyPaperMetadata } from '../../bibliography/legacy'
 import { getConfiguredInstitution } from '../../utils/institution-scope'
 
 export const resolvePaperScope = async (
@@ -388,7 +387,7 @@ const buildFormattedPaper = (
   viewerUserId: string | null,
   resolvedSubmission: SubmissionRecord | null,
   boundMembers: InstitutionPaperBoundMember[],
-  paperAuthors: Array<{ authorId: string; order: number }>,
+  paperAuthors: Array<{ authorId: string; order: number; display_name?: string | null }>,
   authorMap: Map<string, { name: string; email: string | null }>,
   uploaderMap: Map<string, { name: string | null }>,
   institutionMap: Map<string, { name: string | null }>,
@@ -429,7 +428,7 @@ const buildFormattedPaper = (
       const author = authorMap.get(paperAuthor.authorId)
       return {
         id: paperAuthor.authorId,
-        name: author?.name ?? '',
+        name: paperAuthor.display_name ?? author?.name ?? '',
         email: viewerUserId ? (author?.email ?? null) : null,
         order: paperAuthor.order,
       }
@@ -548,12 +547,16 @@ export async function formatPapers(
         })
       : []
 
-  const paperAuthorsByPaperId = new Map<string, Array<{ authorId: string; order: number }>>()
+  const paperAuthorsByPaperId = new Map<
+    string,
+    Array<{ authorId: string; order: number; display_name?: string | null }>
+  >()
   for (const paperAuthor of paperAuthors) {
     const current = paperAuthorsByPaperId.get(paperAuthor.paperId) ?? []
     current.push({
       authorId: paperAuthor.authorId,
       order: paperAuthor.order,
+      display_name: paperAuthor.display_name,
     })
     paperAuthorsByPaperId.set(paperAuthor.paperId, current)
   }
@@ -635,7 +638,16 @@ export async function formatPaper(
   return formatted
 }
 
-export async function getPaper(fastify: FastifyInstance, id: string, userId: string | null) {
+export const resolvePaperAccess = async (
+  fastify: FastifyInstance,
+  id: string,
+  userId: string | null,
+): Promise<{
+  paper: PaperRecord
+  claim: ClaimRecord | null
+  submission: SubmissionRecord | null
+  institutionId: string
+}> => {
   const configuredInstitution = await getConfiguredInstitution(fastify)
   const paper = await fastify.prisma.papers.findUnique({ where: { id } })
   if (!paper) {
@@ -696,6 +708,11 @@ export async function getPaper(fastify: FastifyInstance, id: string, userId: str
 
   await assertCanAccessClaim(fastify, userId, claim, submission)
 
+  return { paper, claim, submission, institutionId: configuredInstitution.id }
+}
+
+export async function getPaper(fastify: FastifyInstance, id: string, userId: string | null) {
+  const { paper, claim, submission } = await resolvePaperAccess(fastify, id, userId)
   return formatPaper(fastify, paper, claim, userId, submission)
 }
 
@@ -729,45 +746,18 @@ export async function updatePaper(
       'This legacy paper is linked to another institution and cannot be edited in single-institution mode',
     )
   }
-  const data: Prisma.papersUpdateInput = { updatedAt: new Date() }
-  if (body.title !== undefined) data.title = body.title
-  if (body.abstract !== undefined) data.abstract = body.abstract
-  if (body.doi !== undefined) {
-    const normalizedDoi = requireNormalizedDoi(body.doi)
-    data.doi = normalizedDoi
-    data.normalized_doi = normalizedDoi
-  }
-  if (body.journal_name !== undefined) data.journal_name = body.journal_name
-  if (body.publish_year !== undefined) data.publish_year = body.publish_year
-  if (body.publish_date !== undefined) data.publish_date = new Date(body.publish_date)
-  if (body.paper_type !== undefined) data.paper_type = body.paper_type
-  if (body.language !== undefined) data.language = body.language
-  if (body.citation_count !== undefined) data.citation_count = body.citation_count
-  if (body.pages !== undefined) data.pages = body.pages
-  if (body.keywords !== undefined) data.keywords = body.keywords
-  if (body.link !== undefined) data.link = body.link
-
-  const updatedPaper = await fastify.prisma.papers.update({
-    where: { id },
-    data,
-  })
-
-  const hasApprovedClaim = claims.some(
-    (claim) => normalizeReviewStatus(claim.review_case.status) === 'approved',
+  await fastify.prisma.$transaction(
+    async (tx) => {
+      await updateLegacyPaperMetadata(tx, id, body, {
+        institutionId: configuredInstitution.id,
+        actorUserId: userId,
+        source: 'paper_editor',
+      })
+    },
+    { timeout: 30000 },
   )
-  if (
-    hasApprovedClaim &&
-    (paper.title !== updatedPaper.title || paper.abstract !== updatedPaper.abstract)
-  ) {
-    refreshPaperSearchIndex(fastify, updatedPaper.id).catch((error) => {
-      fastify.log.error(
-        { err: error, paperId: updatedPaper.id },
-        'Failed to update paper search index after canonical edit',
-      )
-    })
-  }
 
-  return getPaper(fastify, updatedPaper.id, userId)
+  return getPaper(fastify, id, userId)
 }
 
 export async function deletePaper(fastify: FastifyInstance, id: string, userId: string) {
@@ -801,6 +791,16 @@ export async function deletePaper(fastify: FastifyInstance, id: string, userId: 
 
   const claimIds = claims.map((claim) => claim.id)
   await fastify.prisma.$transaction(async (tx) => {
+    await tx.$queryRawUnsafe('SELECT id FROM papers WHERE id = $1::uuid FOR UPDATE', id)
+    const editions = await tx.$queryRawUnsafe<Array<{ status: string }>>(
+      'SELECT e.status FROM bibliometric_editions e JOIN paper_indicators i ON i."editionId" = e.id WHERE i."paperId" = $1::uuid FOR SHARE OF e',
+      id,
+    )
+    if (editions.some((edition) => edition.status === 'published')) {
+      throw fastify.httpErrors.conflict(
+        'This paper is referenced by a published bibliometric edition and cannot be deleted',
+      )
+    }
     if (postIds.length > 0) {
       await tx.forum_likes.deleteMany({
         where: { postId: { in: postIds } },
