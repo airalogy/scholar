@@ -1,6 +1,6 @@
 <template>
   <a-config-provider :locale="arcoLocale">
-    <div class="app">
+    <div class="app" :inert="showFeedbackModal || undefined">
       <NavBar
         :home-path="defaultHomePath"
         :app-name="branding.appName"
@@ -43,6 +43,7 @@
         :mobile-open="mobileSidebarOpen"
         @login="openLoginModal()"
         @logout="handleLogout"
+        @feedback="openFeedbackModal"
       />
       <button
         v-if="mobileSidebarOpen"
@@ -54,7 +55,7 @@
       <main class="app-main">
         <router-view />
       </main>
-      <FeedbackWidget />
+      <FeedbackModal v-model:visible="showFeedbackModal" :return-focus-to="feedbackReturnTarget" />
       <LoginModal
         v-model:visible="showLoginModal"
         :preferred-tab="loginModalPreferredTab"
@@ -67,12 +68,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, shallowRef, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useLocale } from '@/composables/useLocale'
 import NavBar from '@/components/layout/NavBar.vue'
 import SideBar from '@/components/layout/SideBar.vue'
-import FeedbackWidget from '@/components/FeedbackWidget.vue'
+import FeedbackModal from '@/components/FeedbackModal.vue'
 import LoginModal from '@/components/LoginModal.vue'
 import { getMyProfile } from '@/api/users'
 import { useAuth } from '@/composables/useAuth'
@@ -90,6 +91,12 @@ interface OpenLoginEventDetail {
 const router = useRouter()
 const showLoginModal = ref(false)
 const mobileSidebarOpen = ref(false)
+const showFeedbackModal = ref(false)
+const feedbackReturnTarget = shallowRef<HTMLElement | null>(null)
+const openFeedbackModal = (event: MouseEvent): void => {
+  feedbackReturnTarget.value = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
+  showFeedbackModal.value = true
+}
 const loginModalPreferredTab = ref<LoginPreferredTab | undefined>(undefined)
 const pendingLoginPath = ref('')
 const {

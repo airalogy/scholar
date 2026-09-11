@@ -4,6 +4,10 @@ Chinese version: [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)
 
 ## [Unreleased]
 
+### Changed
+
+- Moved feedback from a floating chat-style button to a quieter sidebar entry beside documentation, with automatically centered icon-and-label layouts, a writing icon and an accessible feedback dialog.
+
 ## [4.0.0] - 2026-09-10
 
 ### Added

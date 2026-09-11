@@ -97,10 +97,16 @@
     </div>
 
     <div class="sidebar-bottom">
-      <a class="documentation-link" :href="documentationUrl" target="_blank" rel="noopener">
-        <IconBook class="documentation-link-icon" />
-        <span>{{ $t('nav.documentation') }}</span>
-      </a>
+      <div class="sidebar-support">
+        <a class="support-link" :href="documentationUrl" target="_blank" rel="noopener">
+          <IconBook class="support-link-icon" aria-hidden="true" />
+          <span class="support-link-label">{{ $t('nav.documentation') }}</span>
+        </a>
+        <button class="support-link" type="button" aria-haspopup="dialog" @click="$emit('feedback', $event)">
+          <IconEdit class="support-link-icon" aria-hidden="true" />
+          <span class="support-link-label">{{ $t('feedback.panelTitle') }}</span>
+        </button>
+      </div>
 
       <div v-if="isLoggedIn" class="user-section">
         <router-link to="/settings" class="user-card">
@@ -130,7 +136,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
-import { IconBook, IconDown, IconFile, IconSettings, IconUser } from '@arco-design/web-vue/es/icon'
+import { IconBook, IconDown, IconEdit, IconFile, IconSettings, IconUser } from '@arco-design/web-vue/es/icon'
 import UploadIcon from '@/assets/icons/upload.svg?component'
 import UploadActiveIcon from '@/assets/icons/upload-active.svg?component'
 import AiChatIcon from '@/assets/icons/ai-chat-2.svg?component'
@@ -164,6 +170,7 @@ const props = withDefaults(defineProps<{
 defineEmits<{
   login: []
   logout: []
+  feedback: [event: MouseEvent]
 }>()
 
 const route = useRoute()
@@ -407,20 +414,48 @@ const isThesisRouteActive = (): boolean => {
   flex-direction: column
   gap: 16px
 
-.documentation-link
+.sidebar-support
+  display: flex
+  flex-direction: column
+  gap: 2px
+
+.support-link
   display: flex
   align-items: center
   justify-content: center
-  gap: 6px
+  gap: 8px
+  width: 100%
+  min-height: 36px
+  padding: 6px 16px
+  box-sizing: border-box
+  border: none
+  border-radius: var(--scholar-radius-md)
+  background: none
   color: var(--scholar-text-2)
-  font-size: 12px
+  font-family: inherit
+  font-size: 13px
+  line-height: 20px
+  text-align: center
   text-decoration: none
+  cursor: pointer
 
-.documentation-link:hover
+.support-link:hover
+  background: var(--scholar-primary-light)
   color: var(--scholar-primary)
 
-.documentation-link-icon
-  font-size: 14px
+.support-link:focus-visible
+  outline: 2px solid var(--scholar-primary)
+  outline-offset: 2px
+
+.support-link-icon
+  flex: 0 0 16px
+  width: 16px
+  height: 16px
+  font-size: 16px
+
+.support-link-label
+  min-width: 0
+  overflow-wrap: anywhere
 
 .user-section
   display: flex
@@ -527,6 +562,9 @@ const isThesisRouteActive = (): boolean => {
   margin: 0
 
 @media (max-width: 760px)
+  .support-link
+    min-height: 44px
+
   .sidebar
     width: min(300px, 84vw)
     transform: translateX(-100%)

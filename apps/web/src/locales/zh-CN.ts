@@ -588,9 +588,8 @@ const zhCN = {
     rejectedSuccess: '论文已退回',
   },
   feedback: {
-    open: '打开反馈',
-    close: '关闭反馈',
-    panelTitle: '反馈',
+    close: '关闭意见反馈',
+    panelTitle: '意见反馈',
     titleLabel: '标题',
     titlePlaceholder: '请简要概括你的反馈',
     typeLabel: '类型',
