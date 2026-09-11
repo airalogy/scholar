@@ -32,7 +32,7 @@
     "globals": "^17.9.0",
     "jsdom": "^30.0.1",
     "sass": "^1.102.0",
-    "typescript": "^5.9.3",
+    "typescript": "^7.0.2",
     "vite": "^8.2.0",
     "vite-svg-loader": "^5.1.0",
     "vitest": "^4.1.11",
