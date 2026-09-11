@@ -84,6 +84,7 @@ const buildImportPrismaMock = (state: ImportTestState) => {
   }> = []
 
   const prisma = {
+    $queryRawUnsafe: async () => [],
     institution_person_identifiers: {
       findUnique: async ({
         where,

@@ -20,6 +20,7 @@ Chinese version: [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)
 ### Fixed
 
 - PostgreSQL advisory-lock queries now return a driver-compatible type, avoiding mutation failures when the Prisma adapter cannot deserialize `void`.
+- Person updates, membership/provision changes, organization imports and deployment tools acquire the identity lock before person rows, preventing a deadlock with concurrent SSO sign-in.
 
 ### Database and Deployment
 

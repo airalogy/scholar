@@ -15,6 +15,7 @@ import { identityAdminRoutes } from '../src/routes/v1/institutions/routes.identi
 import { createInstitutionSsoAuthorization } from '../src/routes/auth/oauth/institution-sso'
 import { resolveInstitutionPerson, upsertInstitutionPerson } from '../src/utils/institution-people'
 import type { DeploymentRuntimeConfig } from '../src/utils/deployment'
+import { lockMutationScope } from '../src/utils/advisory-lock'
 
 const databaseUrl = process.env.IDENTITY_TEST_DATABASE_URL
 const schema = `scholar_identity_test_${randomBytes(8).toString('hex')}`
@@ -650,6 +651,67 @@ describe(
       )
       f.setProfile({ internalId: 'OLD-001' })
       assert.equal((await f.login()).statusCode, 409)
+    })
+
+    test('person writers wait for the identity lock before locking the same row as SSO', async (t) => {
+      const f = await fixture(t)
+      let loginHasLock: () => void = () => {}
+      const acquired = new Promise<void>((resolve) => {
+        loginHasLock = resolve
+      })
+      let writerStarted: (pid: number) => void = () => {}
+      const writerPid = new Promise<number>((resolve) => {
+        writerStarted = resolve
+      })
+      const login = prisma.$transaction(
+        async (tx) => {
+          await lockMutationScope(tx, 'institution-identity', f.institution.id)
+          loginHasLock()
+          const pid = await writerPid
+          let waiting = false
+          const deadline = Date.now() + 4000
+          while (Date.now() < deadline) {
+            const states = await prisma.$queryRawUnsafe<Array<{ wait_event: string | null }>>(
+              'SELECT wait_event FROM pg_stat_activity WHERE pid = $1',
+              pid,
+            )
+            if (states[0]?.wait_event === 'advisory') {
+              waiting = true
+              break
+            }
+            await new Promise((resolve) => setTimeout(resolve, 10))
+          }
+          assert.ok(waiting, 'Concurrent writer must wait on the advisory lock')
+          // This row update would deadlock if the other writer already held its row lock.
+          return upsertInstitutionPerson(tx, {
+            institutionId: f.institution.id,
+            internalId: 'OLD-001',
+            name: 'Same Name',
+            userId: f.original.id,
+            source: 'institution_sso',
+          })
+        },
+        { timeout: 10000 },
+      )
+      await acquired
+      const writer = prisma.$transaction(
+        async (tx) => {
+          const [{ pid }] = await tx.$queryRawUnsafe<Array<{ pid: number }>>(
+            'SELECT pg_backend_pid() AS pid',
+          )
+          writerStarted(pid)
+          return upsertInstitutionPerson(tx, {
+            institutionId: f.institution.id,
+            internalId: 'OLD-001',
+            name: 'Same Name',
+            userId: f.original.id,
+            source: 'membership_assignment',
+          })
+        },
+        { timeout: 10000 },
+      )
+      const results = await Promise.all([login, writer])
+      assert.ok(results.every((person) => person.id === f.person.id))
     })
 
     test('competing approval decisions cannot both win', async (t) => {

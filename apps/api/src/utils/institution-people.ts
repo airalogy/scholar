@@ -1,5 +1,6 @@
 import crypto from 'node:crypto'
 import type { Prisma } from '../../prisma/generated/client'
+import { lockMutationScope } from './advisory-lock'
 import {
   InstitutionPersonConflictError,
   InstitutionPersonInputError,
@@ -87,9 +88,11 @@ export const resolveInstitutionPerson = async (
 }
 
 export const upsertInstitutionPerson = async (
-  prisma: InstitutionPersonClient,
+  prisma: Prisma.TransactionClient,
   input: UpsertInstitutionPersonInput,
 ) => {
+  // Call with the surrounding transaction: acquire this before any person row lock.
+  await lockMutationScope(prisma, 'institution-identity', input.institutionId)
   const now = new Date()
   const identifier = await resolveInstitutionIdentifier(
     prisma,
@@ -233,7 +236,7 @@ export const upsertInstitutionPerson = async (
 }
 
 export const linkInstitutionPersonToUser = async (
-  prisma: InstitutionPersonClient,
+  prisma: Prisma.TransactionClient,
   input: {
     institutionId: string
     personId: string
@@ -242,6 +245,7 @@ export const linkInstitutionPersonToUser = async (
     actorUserId?: string | null
   },
 ) => {
+  await lockMutationScope(prisma, 'institution-identity', input.institutionId)
   const person = await prisma.institution_people.findFirst({
     where: {
       id: input.personId,

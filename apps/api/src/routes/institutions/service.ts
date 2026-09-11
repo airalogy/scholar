@@ -827,6 +827,7 @@ export const upsertInstitutionMembership = async (
 
   await fastify.prisma.$transaction(async (tx) => {
     await lockMutationScope(tx, 'institution', institution.id)
+    await lockMutationScope(tx, 'institution-identity', institution.id)
     const existingPerson = await tx.institution_people.findUnique({
       where: {
         institutionId_userId: {
@@ -930,6 +931,7 @@ export const upsertInstitutionProvision = async (
   }
   assertCanManageInstitutionRole(fastify, access, body.role, 'provision')
   await fastify.prisma.$transaction(async (tx) => {
+    await lockMutationScope(tx, 'institution-identity', institution.id)
     const provision = await tx.institution_user_provisions.upsert({
       where: {
         institutionId_email: {
