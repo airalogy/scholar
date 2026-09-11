@@ -44,8 +44,18 @@ const openFeedback = async (): Promise<HTMLButtonElement> => {
   const trigger = getElement<HTMLButtonElement>('.sidebar-bottom button[aria-haspopup="dialog"]')
   trigger.focus()
   trigger.click()
-  await settle()
+  await vi.waitFor(() => {
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+    expect(document.activeElement).toBe(getElement('.feedback-form input'))
+  }, { timeout: 2000 })
   return trigger
+}
+const expectFeedbackClosed = async (trigger?: HTMLElement): Promise<void> => {
+  // Vue/Arco finish closing after animation frames, not a fixed wall-clock delay.
+  await vi.waitFor(() => {
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    if (trigger) expect(document.activeElement).toBe(trigger)
+  }, { timeout: 2000 })
 }
 const input = async (selector: string, value: string): Promise<void> => {
   const element = getElement<HTMLInputElement | HTMLTextAreaElement>(selector)
@@ -84,7 +94,9 @@ afterEach(async () => {
   app?.unmount()
   app = undefined
   Message.clear()
-  await settle()
+  await vi.waitFor(() => {
+    expect(document.querySelector('.arco-overlay-message')).toBeNull()
+  }, { timeout: 2000 })
   document.body.replaceChildren()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
@@ -124,9 +136,7 @@ describe('sidebar feedback', () => {
     send.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
     expect(document.activeElement).toBe(close)
     close.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-    await settle()
-    expect(document.querySelector('[role="dialog"]')).toBeNull()
-    expect(document.activeElement).toBe(trigger)
+    await expectFeedbackClosed(trigger)
     expect(getElement('.app').hasAttribute('inert')).toBe(false)
   })
 
@@ -135,7 +145,7 @@ describe('sidebar feedback', () => {
     await openFeedback()
     await fillFeedback()
     getElement<HTMLButtonElement>('.feedback-close').click()
-    await settle()
+    await expectFeedbackClosed()
     await openFeedback()
     expect(getElement<HTMLInputElement>('.feedback-form input').value).toBe('  Page issue  ')
     expect(getElement<HTMLTextAreaElement>('.feedback-form textarea').value).toBe('  What happened  ')
@@ -165,11 +175,24 @@ describe('sidebar feedback', () => {
     await fillFeedback('  visitor@example.org  ')
     await submit()
     expect(submitFeedback).toHaveBeenCalledExactlyOnceWith({ title: 'Page issue', type: 'bug_report', content: 'What happened', email: 'visitor@example.org' })
-    expect(document.querySelector('[role="dialog"]')).toBeNull()
-    expect(document.activeElement).toBe(trigger)
+    await expectFeedbackClosed(trigger)
     await openFeedback()
     expect(getElement<HTMLInputElement>('.feedback-form input').value).toBe('')
     expect(getElement<HTMLTextAreaElement>('.feedback-form textarea').value).toBe('')
+  })
+
+  it('waits for slower animation frames before asserting successful dismissal', async () => {
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback): number =>
+      window.setTimeout(() => callback(performance.now()), 80))
+    vi.stubGlobal('cancelAnimationFrame', (id: number): void => window.clearTimeout(id))
+    await mountApp()
+    const trigger = await openFeedback()
+    await fillFeedback()
+    await submit()
+    await expectFeedbackClosed(trigger)
+    expect(submitFeedback).toHaveBeenCalledTimes(1)
+    await openFeedback()
+    expect(getElement<HTMLInputElement>('.feedback-form input').value).toBe('')
   })
 
   it('does not ask signed-in users to reenter an email', async () => {
@@ -208,7 +231,7 @@ describe('sidebar feedback', () => {
     expect(getElement<HTMLInputElement>('.feedback-form input').value).toBe('  Page issue  ')
     await submit()
     expect(submitFeedback).toHaveBeenCalledTimes(2)
-    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    await expectFeedbackClosed()
   })
 
   it('blocks duplicate submissions and premature dismissal while a request is pending', async () => {
@@ -225,8 +248,7 @@ describe('sidebar feedback', () => {
     expect(document.querySelector('[role="dialog"]')).not.toBeNull()
     expect(submitFeedback).toHaveBeenCalledTimes(1)
     resolveSubmission({} as FeedbackItem)
-    await settle()
-    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    await expectFeedbackClosed()
   })
 
   it('keeps the same feedback entry available from the expanded mobile menu', async () => {
@@ -236,7 +258,7 @@ describe('sidebar feedback', () => {
     expect(getElement('.sidebar').classList.contains('sidebar--mobile-open')).toBe(true)
     const trigger = await openFeedback()
     getElement<HTMLButtonElement>('.feedback-close').click()
-    await settle()
+    await expectFeedbackClosed(trigger)
     expect(getElement('.sidebar').classList.contains('sidebar--mobile-open')).toBe(true)
     expect(document.activeElement).toBe(trigger)
   })
