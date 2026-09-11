@@ -6,6 +6,48 @@ import { createBibliographyFixture } from './bibliography-preview-cases'
 import { getImport } from '../../src/routes/v1/institutions/service'
 
 export const registerBibliographyAccessCases = (getClient: () => PrismaClient): void => {
+  test('a missing original submitter blocks approval but the reviewer can still reject the import', async (t) => {
+    const prisma = getClient()
+    const f = await createBibliographyFixture(prisma, t, true)
+    const doi = `10.1234/${randomUUID()}`
+    const preview = await f.app.inject({
+      method: 'POST',
+      url: `${f.url}/papers`,
+      headers: f.headers,
+      payload: {
+        schema_version: 2,
+        source: 'fixture',
+        items: [{ paper: { title: 'Fixture', doi } }],
+      },
+    })
+    assert.equal(preview.statusCode, 200, preview.body)
+    const id = preview.json().data.id as string
+    const submitted = await f.app.inject({
+      method: 'POST',
+      url: `${f.url}/${id}/apply`,
+      headers: f.headers,
+      payload: {},
+    })
+    assert.equal(submitted.statusCode, 200, submitted.body)
+    await prisma.institution_data_imports.update({ where: { id }, data: { actorUserId: null } })
+    const approved = await f.app.inject({
+      method: 'POST',
+      url: `${f.url}/${id}/review`,
+      headers: f.adminHeaders,
+      payload: { decision: 'approve', notes: 'Cannot substitute the reviewer' },
+    })
+    assert.equal(approved.statusCode, 409, approved.body)
+    assert.equal(await prisma.papers.count({ where: { normalized_doi: doi } }), 0)
+    const rejected = await f.app.inject({
+      method: 'POST',
+      url: `${f.url}/${id}/review`,
+      headers: f.adminHeaders,
+      payload: { decision: 'reject', notes: 'Original submitter no longer exists' },
+    })
+    assert.equal(rejected.statusCode, 200, rejected.body)
+    assert.equal(rejected.json().data.summary.rejected, 1)
+  })
+
   test('field definitions are manager-only, institution-scoped and checked against existing data', async (t) => {
     const prisma = getClient()
     const f = await createBibliographyFixture(prisma, t)

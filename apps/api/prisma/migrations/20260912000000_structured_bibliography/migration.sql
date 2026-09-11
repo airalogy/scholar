@@ -48,7 +48,7 @@ ADD COLUMN     "source_key" VARCHAR(200);
 ALTER TABLE "papers" ADD COLUMN     "bibliography_revision" INTEGER NOT NULL DEFAULT 0,
 ADD COLUMN     "document_type" VARCHAR(64),
 ADD COLUMN     "journal_id" UUID,
-ADD COLUMN     "language_tags" TEXT[] DEFAULT ARRAY[]::TEXT[],
+ADD COLUMN     "language_tags" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
 ADD COLUMN     "publication_status" VARCHAR(32),
 ALTER COLUMN "doi" DROP NOT NULL,
 ALTER COLUMN "doi" SET DATA TYPE VARCHAR(200),

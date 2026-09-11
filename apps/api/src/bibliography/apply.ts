@@ -18,6 +18,7 @@ export interface BibliographyApplyOptions {
   source?: string
   expectedFingerprint?: string
   reviewRequired?: boolean
+  claimSubmittedBy?: string
 }
 
 export const syncDirectPaperImportItem = async (
@@ -56,7 +57,7 @@ export const applyPaperBibliography = async (
     {
       paperId: write.paperId,
       institutionId,
-      userId: actor.userId,
+      userId: options.claimSubmittedBy ?? actor.userId,
       scope,
       snapshot: { ...item, source: options.source ?? 'institution_json_import' },
       reviewRequired: options.reviewRequired,

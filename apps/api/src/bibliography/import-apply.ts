@@ -87,7 +87,18 @@ export const applyBibliographyImport = async (
   )
     throw fastify.httpErrors.conflict('Acknowledge the preview warnings before proceeding')
   if (!eligible.length) return formatBibliographyImport(fastify.prisma, record)
-  const scope = await resolvePaperImportScope(fastify, record.institutionId, context.actor)
+  if (!record.actorUserId && review?.decision !== 'reject')
+    throw fastify.httpErrors.conflict('The original import submitter no longer exists')
+  const scope =
+    record.actorUserId && review?.decision !== 'reject'
+      ? await resolvePaperImportScope(fastify, record.institutionId, {
+          type: record.actorType === 'integration' ? 'integration' : 'user',
+          userId: record.actorUserId,
+          credentialId: record.credentialId,
+          institutionId: record.institutionId,
+          scopes: [],
+        })
+      : { institutionId: record.institutionId, labId: null, reviewNodeId: null }
   const token = await acquireBibliographyLease(fastify, importId)
   if (!token) throw fastify.httpErrors.conflict('This import is already being processed')
   const managed = fastify.deployment.managementMode !== 'self_hosted'
@@ -138,6 +149,8 @@ export const applyBibliographyImport = async (
                 source: record.sourceName!,
                 expectedFingerprint: row.baseFingerprint,
                 reviewRequired: managed,
+                // Claim ownership stays with the submitter; write/review audit stays with the operator.
+                claimSubmittedBy: record.actorUserId!,
               },
             )
             await recordDecision(

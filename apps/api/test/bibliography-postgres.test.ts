@@ -106,6 +106,16 @@ describe(
         executeSql(`DROP SCHEMA IF EXISTS "${schema}" CASCADE;`)
     })
 
+    test('language tags default to an array and SQL cannot store a null array', async () => {
+      const { paperId } = await fixture()
+      const paper = await prisma.papers.findUniqueOrThrow({ where: { id: paperId } })
+      assert.deepEqual(paper.language_tags, [])
+      await assert.rejects(
+        prisma.$executeRaw`UPDATE papers SET language_tags = NULL WHERE id = ${paperId}::uuid`,
+        /23502|not-null|null value/u,
+      )
+    })
+
     test('false and JSON null remain distinct; numbers and strings cannot substitute for booleans', async () => {
       const scope = await fixture()
       await prisma.institution_paper_field_definitions.create({

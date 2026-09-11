@@ -299,6 +299,28 @@ export const registerBibliographyPreviewCases = (getClient: () => PrismaClient):
       include: { review_case: true },
     })
     assert.equal(claim.review_case.status, 'pending_review')
+    assert.equal(claim.submittedBy, f.memberId)
+    assert.equal(claim.review_case.submittedBy, f.memberId)
+    assert.equal(
+      (
+        await getClient().paper_submissions.findUniqueOrThrow({
+          where: { id: claim.submissionId! },
+        })
+      ).userId,
+      f.memberId,
+    )
+    assert.equal(
+      (
+        await getClient().paper_metadata_events.findFirstOrThrow({
+          where: { paperId: claim.paperId },
+        })
+      ).actorUserId,
+      f.adminId,
+    )
+    const bibliographyUrl = `/v2/papers/${claim.paperId}/bibliography`
+    const ownPaper = await f.app.inject({ method: 'GET', url: bibliographyUrl, headers: f.headers })
+    assert.equal(ownPaper.statusCode, 200, ownPaper.body)
+    assert.equal((await f.app.inject({ method: 'GET', url: bibliographyUrl })).statusCode, 403)
     const detail = await f.app.inject({
       method: 'GET',
       url: `${f.url}/${record.id}/items/${row.id}`,
