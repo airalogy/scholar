@@ -5,7 +5,11 @@
       <li v-for="event in events" :key="event.id">
         <strong>{{ $t(`identity.events.${event.action}`) }}</strong>
         <time>{{ new Date(event.createdAt).toLocaleString(locale) }}</time>
-        <span>{{ event.actorUserId ? `${$t('identity.operator')} ${event.actorUserId}` : $t('identity.applicant') }}</span>
+        <span>{{
+          event.actorUserId
+            ? `${$t('identity.operator')} ${event.actorUserId}`
+            : $t('identity.applicant')
+        }}</span>
         <p>{{ event.notes }}</p>
       </li>
     </ol>
@@ -21,9 +25,25 @@ const { locale } = useI18n()
 </script>
 
 <style scoped>
-.identity-audit { margin-top: 20px; text-align: left; }
-.identity-audit summary { cursor: pointer; }
-.identity-audit li { padding: 12px 0; overflow-wrap: anywhere; }
-.identity-audit time, .identity-audit span { display: block; color: var(--color-text-3); font-size: 12px; margin-top: 4px; }
-.identity-audit p { white-space: pre-wrap; }
+.identity-audit {
+  margin-top: 20px;
+  text-align: left;
+}
+.identity-audit summary {
+  cursor: pointer;
+}
+.identity-audit li {
+  padding: 12px 0;
+  overflow-wrap: anywhere;
+}
+.identity-audit time,
+.identity-audit span {
+  display: block;
+  color: var(--color-text-3);
+  font-size: 12px;
+  margin-top: 4px;
+}
+.identity-audit p {
+  white-space: pre-wrap;
+}
 </style>
