@@ -8,6 +8,7 @@ Chinese version: [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)
 
 - Local pre-push, CI and release validation now share the same repository checks, including production dependency licenses, with regression guards against omitted checks.
 - Added a read-only GitHub run monitor with bounded network retries and distinct results for workflow failure versus an unavailable status query.
+- Clarified bilingual identity-verification prompts: institution authentication has succeeded, account ownership still needs review, and other accounts’ identifiers remain private.
 
 ## [5.0.0] - 2026-09-11
 

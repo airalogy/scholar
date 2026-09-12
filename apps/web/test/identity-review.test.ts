@@ -110,7 +110,11 @@ describe('identity verification applicant', () => {
     expect(document.body.textContent).toContain('管理员正在核验')
     expect(useAuth().isLoggedIn.value).toBe(false)
   })
-  it('shows the callback heading once and does not disclose another account identifier', async () => {
+  it.each([
+    ['zh-CN', '学校统一身份认证已通过', '由管理员确认账号归属', '此处不展示其他账号的编号', '申请时请填写本人此前使用的学号或工号'],
+    ['en-US', 'Your institution has authenticated you', 'confirm account ownership', 'other accounts’ IDs are not displayed here', 'Enter your own previous student or staff ID'],
+  ] as const)('shows clear verification guidance once and protects other account IDs in %s', async (locale, authenticated, ownership, privacy, previousIdHint) => {
+    i18n.global.locale.value = locale
     vi.mocked(completeOauth).mockRejectedValue(new ApiError('conflict', 409, { data: { ...proof, conflictingInternalId: 'OTHER-PRIVATE-123' } }))
     await mountCallback('/institution_sso_callback?code=code&state=state')
     expect(document.querySelectorAll('h1')).toHaveLength(1)
@@ -118,7 +122,11 @@ describe('identity verification applicant', () => {
     expect(text.split(i18n.global.t('identity.conflictTitle'))).toHaveLength(2)
     expect(text.split(i18n.global.t('identity.conflictDescription'))).toHaveLength(2)
     expect(text).toContain('NEW-1')
-    expect(text).toContain('此处不展示其他账号的学号或工号')
+    expect(text).toContain(authenticated)
+    expect(text).toContain(ownership)
+    expect(text).toContain(privacy)
+    expect(text).toContain(previousIdHint)
+    expect(element<HTMLButtonElement>('.identity-request .arco-btn-primary').textContent).toContain(i18n.global.t('identity.apply'))
     expect(text).not.toContain('OTHER-PRIVATE-123')
     expect(text).not.toContain('OLD-1')
     expect(identity.restoreIdentityConflict()).not.toHaveProperty('conflictingInternalId')
