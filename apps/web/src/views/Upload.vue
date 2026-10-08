@@ -281,20 +281,18 @@ function onFileChange(e: Event) {
 function onDrop(e: DragEvent) {
   isDragOver.value = false
   const file = e.dataTransfer?.files[0]
-  if (file && file.type === 'application/pdf') {
-    setFile(file)
-  } else if (file) {
-    errorMsg.value = t('upload.pdfOnly')
-  }
+  if (file) setFile(file)
 }
 
 function setFile(file: File) {
   if (isUploading.value) return
-  if (file.type !== 'application/pdf') {
+  if (file.type !== 'application/pdf' && !(file.type === '' && /\.pdf$/iu.test(file.name))) {
+    removeFile()
     errorMsg.value = t('upload.pdfOnly')
     return
   }
   if (file.size > MAX_DOCUMENT_BYTES) {
+    removeFile()
     errorMsg.value = t('upload.fileTooLarge')
     return
   }

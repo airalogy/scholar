@@ -9,6 +9,7 @@ Chinese version: [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)
 ### Fixed
 
 - Fixed streamed uploads when metadata follows the file; shared file uploads now use a dedicated timeout, and paper submission supports cancellation and validates PDF size and DOI before transfer.
+- Accept PDF filenames when browsers omit MIME metadata while retaining server-side content checks; rejecting a replacement file clears the previous selection to prevent unintended uploads.
 - PDF previews refresh temporary links and send the login session to protected file endpoints without forwarding it to external storage. Reader errors no longer expose signed URLs; retry and cancellation clean up pending loads and rendering tasks.
 - Invalid or expired file-access tokens now return an authentication error instead of an internal server error.
 - Local pre-push, CI and release validation now share the same repository checks, including production dependency licenses, with regression guards against omitted checks.

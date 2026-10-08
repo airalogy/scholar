@@ -22,7 +22,11 @@ export const uploadFile = async (
   const formData = new FormData()
   formData.append('purpose', purpose)
   if (institutionId) formData.append('institution_id', institutionId)
-  formData.append('file', file)
+  // Some browsers omit PDF MIME metadata. The server still checks the content signature.
+  const upload = purpose !== 'avatar' && file.type === '' && /\.pdf$/iu.test(file.name)
+    ? new File([file], file.name, { type: 'application/pdf', lastModified: file.lastModified })
+    : file
+  formData.append('file', upload)
   const response = await apiClient.post<UploadedFile>('/files/upload', formData, {
     timeout: FILE_REQUEST_TIMEOUT_MS,
     signal,

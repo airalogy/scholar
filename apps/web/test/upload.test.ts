@@ -17,9 +17,9 @@ const setInput = (index: number, value: string): void => {
   input.value = value
   input.dispatchEvent(new Event('input', { bubbles: true }))
 }
-const selectFile = (size = 10): void => {
+const selectFile = (size = 10, type = 'application/pdf', name = 'example.pdf'): void => {
   const input = document.querySelector<HTMLInputElement>('input[type=file]')!
-  const file = new File(['%PDF-1.7'], 'example.pdf', { type: 'application/pdf' })
+  const file = new File(['%PDF-1.7'], name, { type })
   Object.defineProperty(file, 'size', { value: size })
   Object.defineProperty(input, 'files', { value: [file], configurable: true })
   input.dispatchEvent(new Event('change', { bubbles: true }))
@@ -58,6 +58,24 @@ describe('paper upload', () => {
     selectFile(25 * 1024 * 1024 + 1)
     await settle()
     expect(document.body.textContent).toContain(i18n.global.t('upload.fileTooLarge'))
+    await submit()
+    expect(document.querySelector('.file-name')).toBeNull()
+    expect(uploadPaper).not.toHaveBeenCalled()
+  })
+
+  it('accepts PDF filenames when browser MIME metadata is missing', async () => {
+    selectFile(10, '', 'replacement.PDF')
+    vi.mocked(uploadPaper).mockRejectedValue(new TypeError('Failed to fetch'))
+    await submit()
+    expect(vi.mocked(uploadPaper).mock.calls[0][0].name).toBe('replacement.PDF')
+  })
+
+  it.each([['text/plain', 'replacement.txt'], ['', 'replacement.txt']])('clears old files after an invalid replacement (%s)', async (type, name) => {
+    selectFile(10, type, name)
+    await submit()
+    expect(document.body.textContent).toContain(i18n.global.t('upload.pdfOnly'))
+    expect(document.querySelector('.file-name')).toBeNull()
+    expect(document.querySelector<HTMLInputElement>('input[type=file]')!.value).toBe('')
     expect(uploadPaper).not.toHaveBeenCalled()
   })
 

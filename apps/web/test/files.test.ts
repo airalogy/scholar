@@ -7,6 +7,18 @@ vi.mock('@/api/client', () => ({ API_BASE_URL: 'https://api.example.test/service
 beforeEach(() => vi.resetAllMocks())
 
 describe('file requests', () => {
+  it.each(['paper', 'thesis'] as const)('supplies PDF MIME metadata for %s files when browsers omit it', async purpose => {
+    vi.mocked(apiClient.post).mockResolvedValue({ data: { id: 'file' } } as never)
+    const file = new File(['%PDF-1.7'], 'example.PDF', { lastModified: 123 })
+    await uploadFile(file, purpose, 'institution')
+    const form = vi.mocked(apiClient.post).mock.calls[0][1] as FormData
+    const uploaded = form.get('file') as File
+    expect(uploaded.name).toBe(file.name)
+    expect(uploaded.type).toBe('application/pdf')
+    expect(uploaded.size).toBe(file.size)
+    expect(uploaded.lastModified).toBe(file.lastModified)
+  })
+
   it.each(['paper', 'thesis', 'avatar'] as const)('sends %s metadata before the file with a dedicated timeout and cancellation', async purpose => {
     vi.mocked(apiClient.post).mockResolvedValue({ data: { id: 'file' } } as never)
     const signal = new AbortController().signal
