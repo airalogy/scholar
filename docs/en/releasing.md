@@ -19,11 +19,12 @@ Run the standard repository checks before creating a tag:
 ```bash
 pnpm install --frozen-lockfile
 pnpm audit:prod
-pnpm license:check
 pnpm release:source:manifest
 pnpm check
 pnpm release:check
 ```
+
+Local pre-push, CI and Release all call `pnpm check`, including dependency-license validation. Pre-push also runs the production security audit. To include the isolated bibliography database tests locally, explicitly set `BIBLIOGRAPHY_TEST_DATABASE_URL` to a disposable test database; without it, the hook reports that these tests were skipped. CI and Release always run database checks, and cloud container builds and registry publishing remain separate gates. A passing local check does not guarantee a successful release.
 
 For a from-scratch verification, provide a disposable PostgreSQL schema. The verifier deletes and recreates the named schema, so it must never point to data that needs to be retained.
 
@@ -42,6 +43,15 @@ CI verifies both an empty database and an upgrade fixture containing existing in
 2. Run `pnpm release:check` on the clean release commit.
 3. Create an annotated `vX.Y.Z` tag that exactly matches `VERSION`.
 4. Push the tag and wait for the Release workflow to complete.
+
+To monitor an existing run with the authenticated GitHub CLI:
+
+```bash
+gh run list --workflow release.yml --limit 5
+pnpm ci:watch RUN_ID --repo airalogy/scholar
+```
+
+Replace `RUN_ID` with the run for the exact release tag. The monitor only reads status; it never restarts workflows or publishes anything. It polls every 15 seconds, waits up to one hour, and retries transient query errors at most three times consecutively with backoff. Authentication and permission errors are not retried. Set `--interval SECONDS` or `--timeout SECONDS` to adjust the wait. Exit codes distinguish confirmed success (`0`), confirmed non-success such as failure or cancellation (`1`), and an unconfirmed result caused by a query error or timeout (`2`). For `2`, query the same run again or open its GitHub page; do not assume the release failed or push another tag.
 
 The workflow:
 

@@ -61,11 +61,12 @@ export const verifyProtectedFileAccessToken = (
   fastify: FastifyInstance,
   token: string,
 ): ProtectedFileAccessTokenPayload => {
-  const payload = fastify.jwt.verify<
-    ProtectedFileAccessTokenPayload & {
-      token_type?: string
-    }
-  >(token)
+  let payload: ProtectedFileAccessTokenPayload & { token_type?: string }
+  try {
+    payload = fastify.jwt.verify(token)
+  } catch {
+    throw fastify.httpErrors.unauthorized('File access link is invalid or expired')
+  }
 
   if (payload.token_type !== FILE_ACCESS_TOKEN_TYPE) {
     throw fastify.httpErrors.unauthorized('Invalid file access token')

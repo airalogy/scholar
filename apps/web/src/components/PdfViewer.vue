@@ -6,6 +6,7 @@
     </div>
     <div v-else-if="loadError" class="pdf-status pdf-status--error">
       <span>{{ loadError }}</span>
+      <button type="button" class="pdf-retry" @click="loadPdf">{{ $t('pdfViewer.retry') }}</button>
     </div>
     <template v-else>
       <div class="pdf-toolbar">
@@ -42,19 +43,20 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist'
 import { TextLayer } from 'pdfjs-dist'
-import type { PDFDocumentProxy } from 'pdfjs-dist'
+import type { PDFDocumentProxy, PDFDocumentLoadingTask, RenderTask } from 'pdfjs-dist'
 import { IconLeft, IconMinus, IconPlus, IconRight } from '@arco-design/web-vue/es/icon'
 import { useI18n } from 'vue-i18n'
+import { FILE_REQUEST_TIMEOUT_MS, loadPdfSource } from '@/api/files'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
   import.meta.url,
 ).href
 
-const props = defineProps<{ fileUrl: string }>()
+const props = defineProps<{ fileUrl: string; fileId?: string | null }>()
 const { t } = useI18n()
 
 const pdfDoc = shallowRef<PDFDocumentProxy | null>(null)
@@ -85,7 +87,32 @@ const textLayers = new Map<number, TextLayer>()
 
 let observer: IntersectionObserver | null = null
 let scaleTimer: ReturnType<typeof setTimeout> | null = null
+let loadTimer: ReturnType<typeof setTimeout> | null = null
 let resizeObserver: ResizeObserver | null = null
+let loadingTask: PDFDocumentLoadingTask | null = null
+let controller: AbortController | null = null
+let loadVersion = 0
+let renderVersion = 0
+let disposed = false
+const renderTasks = new Map<number, RenderTask>()
+
+const resetDocument = (): void => {
+  renderVersion += 1
+  controller?.abort()
+  observer?.disconnect()
+  resizeObserver?.disconnect()
+  if (scaleTimer) clearTimeout(scaleTimer)
+  if (loadTimer) clearTimeout(loadTimer)
+  renderTasks.forEach((task) => task.cancel())
+  renderTasks.clear()
+  textLayers.forEach((layer) => layer.cancel())
+  textLayers.clear()
+  renderedPages.clear()
+  if (loadingTask) void loadingTask.destroy().catch(() => undefined)
+  loadingTask = null
+  pdfDoc.value = null
+  intrinsicPageWidth = 0
+}
 
 function setCanvasRef(page: number, el: HTMLCanvasElement | null) {
   if (el) canvasRefs.set(page, el)
@@ -100,23 +127,47 @@ function setTextLayerRef(page: number, el: HTMLDivElement | null) {
 function computeBaseScale() {
   if (!intrinsicPageWidth || !pagesRef.value) return
   const containerWidth = pagesRef.value.clientWidth - 32 // 16px padding each side
+  if (containerWidth <= 0) return
   baseScale = containerWidth / intrinsicPageWidth
 }
 
-onMounted(async () => {
+const loadPdf = async (): Promise<void> => {
+  const version = ++loadVersion
+  resetDocument()
+  const currentController = new AbortController()
+  controller = currentController
+  isLoading.value = true
+  loadError.value = null
+  totalPages.value = 0
+  currentPage.value = 1
+  zoom.value = 100
+  const timeout = setTimeout(() => {
+    if (version !== loadVersion || disposed) return
+    currentController.abort()
+    if (loadingTask) void loadingTask.destroy().catch(() => undefined)
+    loadError.value = t('pdfViewer.loadFailed')
+    isLoading.value = false
+  }, FILE_REQUEST_TIMEOUT_MS)
+  loadTimer = timeout
   try {
-    const doc = await pdfjsLib.getDocument({ url: props.fileUrl }).promise
+    const source = await loadPdfSource(props.fileUrl, props.fileId, currentController.signal)
+    if (version !== loadVersion || disposed || currentController.signal.aborted) return
+    loadingTask = pdfjsLib.getDocument(source)
+    const doc = await loadingTask.promise
+    if (version !== loadVersion || disposed || currentController.signal.aborted) return
     pdfDoc.value = doc
     totalPages.value = doc.numPages
 
     // Get intrinsic page size (scale=1)
     const firstPage = await doc.getPage(1)
+    if (version !== loadVersion || disposed || currentController.signal.aborted) return
     const baseVp = firstPage.getViewport({ scale: 1 })
     intrinsicPageWidth = baseVp.width
     const intrinsicRatio = baseVp.height / baseVp.width
 
     isLoading.value = false
     await nextTick()
+    if (version !== loadVersion || disposed) return
 
     // Compute fit-to-width scale
     computeBaseScale()
@@ -125,20 +176,26 @@ onMounted(async () => {
     pageHeight.value = intrinsicPageWidth * s * intrinsicRatio
 
     await nextTick()
-    renderPage(1)
+    if (version !== loadVersion || disposed) return
+    void renderPage(1)
     setupObserver()
     setupResizeObserver()
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : t('common.unknown')
-    loadError.value = t('pdfViewer.loadFailed', {
-      message,
-    })
+  } catch {
+    if (version !== loadVersion || disposed) return
+    // Library/network errors can include signed URLs. Never render their raw messages.
+    loadError.value = t('pdfViewer.loadFailed')
     isLoading.value = false
+  } finally {
+    clearTimeout(timeout)
   }
-})
+}
+
+watch(() => [props.fileUrl, props.fileId], () => { void loadPdf() }, { immediate: true })
 
 async function renderPage(pageNum: number) {
   const doc = pdfDoc.value
+  const version = loadVersion
+  const rendering = renderVersion
   const canvas = canvasRefs.get(pageNum)
   const textLayerDiv = textLayerRefs.get(pageNum)
   if (!doc || !canvas || !textLayerDiv || renderedPages.has(pageNum)) return
@@ -147,6 +204,7 @@ async function renderPage(pageNum: number) {
 
   try {
     const page = await doc.getPage(pageNum)
+    if (disposed || version !== loadVersion || rendering !== renderVersion || doc !== pdfDoc.value) return
     const scale = effectiveScale()
     const viewport = page.getViewport({ scale })
     const outputScale = window.devicePixelRatio || 1
@@ -158,12 +216,16 @@ async function renderPage(pageNum: number) {
 
     const ctx = canvas.getContext('2d')!
     const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined
-    await page.render({
+    const renderTask = page.render({
       canvas: null,
       canvasContext: ctx,
       viewport,
       transform,
-    }).promise
+    })
+    renderTasks.set(pageNum, renderTask)
+    await renderTask.promise
+    if (disposed || version !== loadVersion || rendering !== renderVersion || renderTasks.get(pageNum) !== renderTask) return
+    renderTasks.delete(pageNum)
 
     // Render text layer for text selection
     const prevTextLayer = textLayers.get(pageNum)
@@ -171,6 +233,7 @@ async function renderPage(pageNum: number) {
     textLayerDiv.innerHTML = ''
 
     const textContent = await page.getTextContent()
+    if (disposed || version !== loadVersion || rendering !== renderVersion || doc !== pdfDoc.value) return
     const textLayer = new TextLayer({
       textContentSource: textContent,
       container: textLayerDiv,
@@ -178,8 +241,11 @@ async function renderPage(pageNum: number) {
     })
     textLayers.set(pageNum, textLayer)
     await textLayer.render()
-  } catch {
+  } catch (error: unknown) {
+    if (disposed || version !== loadVersion || rendering !== renderVersion) return
+    if (error instanceof Error && error.name === 'RenderingCancelledException') return
     renderedPages.delete(pageNum)
+    loadError.value = t('pdfViewer.loadFailed')
   }
 }
 
@@ -212,8 +278,13 @@ function setupObserver() {
 function setupResizeObserver() {
   const container = pagesRef.value
   if (!container) return
+  let previousWidth = container.clientWidth
   resizeObserver = new ResizeObserver(() => {
-    rerender()
+    const width = container.clientWidth
+    // Rendering changes the container height. Only width changes affect fit-to-width.
+    if (width === previousWidth) return
+    previousWidth = width
+    scheduleRerender()
   })
   resizeObserver.observe(container)
 }
@@ -229,32 +300,38 @@ function changeZoom(delta: number) {
 
 async function rerender() {
   if (!pdfDoc.value || !intrinsicPageWidth) return
+  const version = loadVersion
+  const rendering = ++renderVersion
+  const doc = pdfDoc.value
   computeBaseScale()
   const s = effectiveScale()
-  const firstPage = await pdfDoc.value.getPage(1)
+  const firstPage = await doc.getPage(1)
+  if (disposed || version !== loadVersion || rendering !== renderVersion || doc !== pdfDoc.value) return
   const vp = firstPage.getViewport({ scale: s })
   pageWidth.value = vp.width
   pageHeight.value = vp.height
 
   renderedPages.clear()
+  renderTasks.forEach((task) => task.cancel())
+  renderTasks.clear()
   textLayers.forEach((tl) => tl.cancel())
   textLayers.clear()
   await nextTick()
+  if (disposed || version !== loadVersion || rendering !== renderVersion) return
   setupObserver()
 }
 
-watch(zoom, () => {
+function scheduleRerender(): void {
   if (scaleTimer) clearTimeout(scaleTimer)
-  scaleTimer = setTimeout(rerender, 200)
-})
+  scaleTimer = setTimeout(() => { void rerender().catch(() => undefined) }, 200)
+}
+
+watch(zoom, scheduleRerender)
 
 onBeforeUnmount(() => {
-  observer?.disconnect()
-  resizeObserver?.disconnect()
-  if (scaleTimer) clearTimeout(scaleTimer)
-  textLayers.forEach((tl) => tl.cancel())
-  textLayers.clear()
-  pdfDoc.value?.destroy()
+  disposed = true
+  loadVersion += 1
+  resetDocument()
 })
 </script>
 
@@ -276,6 +353,17 @@ onBeforeUnmount(() => {
 
 .pdf-status--error
   color: #e53e3e
+  flex-wrap: wrap
+  text-align: center
+  overflow-wrap: anywhere
+
+.pdf-retry
+  border: 1px solid currentColor
+  border-radius: 6px
+  padding: 6px 12px
+  color: inherit
+  background: transparent
+  cursor: pointer
 
 .pdf-toolbar
   display: flex

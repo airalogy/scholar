@@ -74,12 +74,12 @@ const zhCN = {
     trademark: 'Airalogy 是该公司的注册商标。',
   },
   identity: {
-    conflictTitle: '账号身份需要核验',
-    conflictDescription: '学校身份认证已通过，但账号信息存在冲突。如果你曾使用其他学号或工号注册，且认为该账号属于本人，可以申请管理员核验。',
+    conflictTitle: '需要核验账号身份',
+    conflictDescription: '学校统一身份认证已通过，但本次登录信息与平台已有账号不一致。请提交核验申请，由管理员确认账号归属。',
     currentId: '本次认证的学号或工号',
     previousId: '此前使用的学号或工号',
     previousIdPlaceholder: '填写你本人此前使用的编号',
-    otherIdPrivacy: '为保护账号隐私，此处不展示其他账号的学号或工号。你可以填写本人此前使用的编号，由管理员核验。',
+    otherIdPrivacy: '为保护隐私，此处不展示其他账号的编号。申请时请填写本人此前使用的学号或工号，帮助管理员核验。',
     explanation: '情况说明',
     explanationPlaceholder: '例如：硕士升博士后更换学号，希望继续使用原账号。',
     ownAccount: '我确认申请关联的是本人此前使用的账号。',
@@ -371,7 +371,8 @@ const zhCN = {
   },
   pdfViewer: {
     loading: '正在加载 PDF...',
-    loadFailed: 'PDF 加载失败：{message}',
+    loadFailed: '暂时无法打开 PDF。请重试；如仍无法打开，请联系管理员。',
+    retry: '重新加载',
   },
   aiChatPanel: {
     referenceLabel: '正在参考',
@@ -458,6 +459,12 @@ const zhCN = {
     submit: '上传论文',
     pdfOnly: '仅支持 PDF 格式',
     uploadFailed: '上传失败，请重试',
+    fileTooLarge: 'PDF 文件不能超过 25 MB。',
+    invalidDoi: '请填写有效 DOI，例如 10.1234/example。arXiv 编号不能直接作为 DOI。',
+    requestTimedOut: '请求超时。请检查网络和“我的上传”，确认结果后再重试。',
+    networkError: '网络连接失败。请检查校园网或 VPN 连接后重试，已填写的内容会保留。',
+    cancelled: '已停止等待上传，填写的内容已保留。若文件已发送，请先在“我的上传”确认结果。',
+    cancelUpload: '取消上传',
   },
   adminHome: {
     title: '管理控制台',

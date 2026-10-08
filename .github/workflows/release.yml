@@ -53,10 +53,9 @@ jobs:
       - run: pnpm db:verify:upgrade
       - run: pnpm db:verify:identity
       - run: pnpm db:verify:bibliography
-      - run: pnpm license:check
       - run: pnpm check
       - run: pnpm release:source:verify
-      - run: pnpm release:check -- "$RELEASE_TAG"
+      - run: pnpm release:check
 
   images:
     needs: verify

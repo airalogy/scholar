@@ -15,7 +15,7 @@
             >
               <IconClose />
             </button>
-            <PdfViewer :file-url="paperPreviewUrl" />
+            <PdfViewer :file-url="paperPreviewUrl" :file-id="paper.oss_file_id" />
           </div>
 
           <!-- 普通模式：论文详情 -->

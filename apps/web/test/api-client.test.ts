@@ -1,7 +1,43 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createApiClient } from '../src/api/client'
 
 describe('API client', () => {
+  it('loads authenticated binary files without parsing PDF bytes as text', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(new Uint8Array([37, 80, 68, 70, 255])))
+    const client = createApiClient({ baseUrl: '/api', fetcher, getToken: () => 'session-token', onUnauthorized: () => undefined })
+    const response = await client.getBinary('/files/access/file?token=file-ticket')
+    expect(response.data).toEqual(new Uint8Array([37, 80, 68, 70, 255]))
+    expect(fetcher.mock.calls[0][0]).toBe('/api/files/access/file?token=file-ticket')
+    expect(new Headers(fetcher.mock.calls[0][1]?.headers).get('Authorization')).toBe('Bearer session-token')
+  })
+
+  it('keeps the binary download timeout active while reading the response body', async () => {
+    vi.useFakeTimers()
+    try {
+      const fetcher: typeof fetch = async (_input, init) => new Response(new ReadableStream({
+        start(controller) {
+          init?.signal?.addEventListener('abort', () => controller.error(new DOMException('Aborted', 'AbortError')))
+        },
+      }))
+      const client = createApiClient({ baseUrl: '/api', fetcher, getToken: () => null, onUnauthorized: () => undefined })
+      const request = expect(client.getBinary('/files/access/file', { timeout: 20 })).rejects.toMatchObject({ message: 'Request timed out' })
+      await vi.advanceTimersByTimeAsync(20)
+      await request
+      expect(vi.getTimerCount()).toBe(0)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('propagates a signal that was already cancelled before the request', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const fetcher: typeof fetch = async (_input, init) => {
+      expect(init?.signal?.aborted).toBe(true)
+      throw new DOMException('Aborted', 'AbortError')
+    }
+    const client = createApiClient({ baseUrl: '/api', fetcher, getToken: () => null, onUnauthorized: () => undefined })
+    await expect(client.getBinary('/files/access/file', { signal: controller.signal })).rejects.toMatchObject({ message: 'Request cancelled' })
+  })
+
   it('adds query parameters and the access token', async () => {
     let requestUrl = ''
     let requestHeaders = new Headers()

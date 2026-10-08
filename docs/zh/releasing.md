@@ -19,11 +19,12 @@ Airalogy Scholar 作为一个完整产品发布，内部由独立运行的 Web�
 ```bash
 pnpm install --frozen-lockfile
 pnpm audit:prod
-pnpm license:check
 pnpm release:source:manifest
 pnpm check
 pnpm release:check
 ```
+
+本地 pre-push、CI 和 Release 共用 `pnpm check`，包含依赖许可证校验；pre-push 还会执行生产依赖安全审计。若要在本地同时执行隔离的书目数据库测试，须显式设置 `BIBLIOGRAPHY_TEST_DATABASE_URL`，指向可丢弃的测试数据库；未配置时会明确提示跳过。CI 与 Release 始终执行数据库校验，云端容器构建和镜像发布仍是独立检查环节。本地检查通过不等于正式发布一定成功。
 
 如需从零验证，提供一个可丢弃的 PostgreSQL schema。验证器会删除并重建指定 schema，因此绝不能指向需要保留的数据。
 
@@ -42,6 +43,15 @@ CI 同时验证空库和含已有机构身份、论文绑定的升级样例。�
 2. 在干净的发布提交上运行 `pnpm release:check`。
 3. 创建与 `VERSION` 完全一致的附注标签 `vX.Y.Z`。
 4. 推送标签并等待 Release 工作流完成。
+
+使用已登录的 GitHub CLI 查询已有运行：
+
+```bash
+gh run list --workflow release.yml --limit 5
+pnpm ci:watch RUN_ID --repo airalogy/scholar
+```
+
+将 `RUN_ID` 替换为准确对应此次发布标签的运行编号。查询工具只读取状态，不会重启工作流或执行发布；默认每 15 秒查询一次，最多等待一小时。临时网络错误最多连续重试三次，逐次延长间隔；认证或权限错误不重试。可通过 `--interval SECONDS` 和 `--timeout SECONDS` 调整等待时间。退出码分别表示确认成功（`0`）、确认未成功，例如失败或取消（`1`）、因查询错误或超时而无法确认结果（`2`）。遇到 `2` 应重新查询同一运行或查看 GitHub 页面，不要认定发布失败或重新推送标签。
 
 该工作流会：
 

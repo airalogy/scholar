@@ -74,12 +74,12 @@ const enUS = {
     trademark: 'Airalogy is a registered trademark of the company.',
   },
   identity: {
-    conflictTitle: 'Account identity verification needed',
-    conflictDescription: 'Your institution has authenticated you, but your Scholar account information conflicts. If you previously registered with another student or staff ID and believe the account is yours, you can request administrator verification.',
+    conflictTitle: 'Account identity verification required',
+    conflictDescription: 'Your institution has authenticated you, but your sign-in details do not match those on an existing Scholar account. Submit a verification request so an administrator can confirm account ownership.',
     currentId: 'ID verified for this sign-in',
     previousId: 'Previous student or staff ID',
     previousIdPlaceholder: 'Enter an ID you previously used',
-    otherIdPrivacy: 'To protect account privacy, other accounts’ student or staff IDs are not displayed here. Enter your own previous ID for an administrator to verify.',
+    otherIdPrivacy: 'To protect privacy, other accounts’ IDs are not displayed here. Enter your own previous student or staff ID in the request to help an administrator verify your identity.',
     explanation: 'Explanation',
     explanationPlaceholder: 'For example: my student ID changed when I started a doctoral programme, and I want to keep my existing account.',
     ownAccount: 'I confirm that I am requesting access to my own previous account.',
@@ -371,7 +371,8 @@ const enUS = {
   },
   pdfViewer: {
     loading: 'Loading PDF...',
-    loadFailed: 'Failed to load PDF: {message}',
+    loadFailed: 'The PDF could not be opened. Try again; if the problem persists, contact an administrator.',
+    retry: 'Reload',
   },
   aiChatPanel: {
     referenceLabel: 'Referencing',
@@ -458,6 +459,12 @@ const enUS = {
     submit: 'Upload Paper',
     pdfOnly: 'PDF files only',
     uploadFailed: 'Upload failed, please try again',
+    fileTooLarge: 'PDF files must not exceed 25 MB.',
+    invalidDoi: 'Enter a valid DOI, such as 10.1234/example. An arXiv ID cannot be used directly as a DOI.',
+    requestTimedOut: 'The request timed out. Check your connection and My uploads before trying again.',
+    networkError: 'The connection failed. Check your campus network or VPN and try again. Your input has been preserved.',
+    cancelled: 'Stopped waiting for the upload. Your input has been preserved. If the file was sent, check My uploads before retrying.',
+    cancelUpload: 'Cancel upload',
   },
   adminHome: {
     title: 'Admin Console',

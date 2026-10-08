@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import { uploadFile } from './files'
 import type { AdminAccess } from '@/utils/adminAccess'
 
 export interface ProjectExperienceItem {
@@ -168,13 +169,5 @@ export async function searchUsers(q: string, limit = 10): Promise<UserSearchItem
 }
 
 export async function uploadAvatar(file: File): Promise<UploadFileResponse> {
-  const formData = new FormData()
-  formData.append('file', file)
-  formData.append('purpose', 'avatar')
-  const res = await apiClient.post<UploadFileResponse>('/files/upload', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
-  })
-  return res.data
+  return uploadFile(file, 'avatar')
 }
