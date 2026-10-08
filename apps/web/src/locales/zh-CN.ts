@@ -371,7 +371,8 @@ const zhCN = {
   },
   pdfViewer: {
     loading: '正在加载 PDF...',
-    loadFailed: 'PDF 加载失败：{message}',
+    loadFailed: '暂时无法打开 PDF。请重试；如仍无法打开，请联系管理员。',
+    retry: '重新加载',
   },
   aiChatPanel: {
     referenceLabel: '正在参考',
@@ -458,6 +459,12 @@ const zhCN = {
     submit: '上传论文',
     pdfOnly: '仅支持 PDF 格式',
     uploadFailed: '上传失败，请重试',
+    fileTooLarge: 'PDF 文件不能超过 25 MB。',
+    invalidDoi: '请填写有效 DOI，例如 10.1234/example。arXiv 编号不能直接作为 DOI。',
+    requestTimedOut: '请求超时。请检查网络和“我的上传”，确认结果后再重试。',
+    networkError: '网络连接失败。请检查校园网或 VPN 连接后重试，已填写的内容会保留。',
+    cancelled: '已停止等待上传，填写的内容已保留。若文件已发送，请先在“我的上传”确认结果。',
+    cancelUpload: '取消上传',
   },
   adminHome: {
     title: '管理控制台',

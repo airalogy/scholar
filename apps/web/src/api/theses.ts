@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import { uploadFile } from './files'
 
 export type DegreeThesisStatus =
   | 'draft'
@@ -219,10 +220,6 @@ export const uploadDegreeThesisFile = async (
   file: File,
   institutionId: string,
 ): Promise<string> => {
-  const formData = new FormData()
-  formData.append('file', file)
-  formData.append('purpose', 'thesis')
-  formData.append('institution_id', institutionId)
-  const response = await apiClient.post<{ id: string }>('/files/upload', formData)
-  return response.data.id
+  const response = await uploadFile(file, 'thesis', institutionId)
+  return response.id
 }

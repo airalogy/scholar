@@ -4,11 +4,24 @@ Chinese version: [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)
 
 ## [Unreleased]
 
+## [5.0.1] - 2026-10-08
+
 ### Fixed
 
+- Fixed streamed uploads when metadata follows the file; shared file uploads now use a dedicated timeout, and paper submission supports cancellation and validates PDF size and DOI before transfer.
+- PDF previews refresh temporary links and send the login session to protected file endpoints without forwarding it to external storage. Reader errors no longer expose signed URLs; retry and cancellation clean up pending loads and rendering tasks.
+- Invalid or expired file-access tokens now return an authentication error instead of an internal server error.
 - Local pre-push, CI and release validation now share the same repository checks, including production dependency licenses, with regression guards against omitted checks.
 - Added a read-only GitHub run monitor with bounded network retries and distinct results for workflow failure versus an unavailable status query.
 - Clarified bilingual identity-verification prompts: institution authentication has succeeded, account ownership still needs review, and other accounts’ identifiers remain private.
+
+### Database and Deployment
+
+- No database schema changes. Upgrade Web and API together; retain the database, uploaded files and institution configuration, and back them up before deployment.
+
+### Security
+
+- Updated compatible Vue, multipart-parser, brace-expansion and source-map patches to address high-severity dependency advisories detected by release preflight.
 
 ## [5.0.0] - 2026-09-11
 

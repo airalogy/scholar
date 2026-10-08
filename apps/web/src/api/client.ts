@@ -42,6 +42,7 @@ interface ApiClientDependencies {
 }
 
 interface ApiClient {
+  getBinary(path: string, config?: ApiRequestConfig): Promise<ApiResponse<Uint8Array>>
   get<T>(path: string, config?: ApiRequestConfig): Promise<ApiResponse<T>>
   post<T>(path: string, body?: unknown, config?: ApiRequestConfig): Promise<ApiResponse<T>>
   put<T>(path: string, body?: unknown, config?: ApiRequestConfig): Promise<ApiResponse<T>>
@@ -148,12 +149,14 @@ export const createApiClient = (dependencies: ApiClientDependencies): ApiClient 
     path: string,
     body?: unknown,
     config: ApiRequestConfig = {},
+    binary = false,
   ): Promise<ApiResponse<T>> => {
     const headers = createHeaders(config.headers)
 
     const controller = new AbortController()
     const abortRequest = (): void => controller.abort()
     config.signal?.addEventListener('abort', abortRequest, { once: true })
+    if (config.signal?.aborted) abortRequest()
     const timeout = globalThis.setTimeout(
       () => controller.abort(),
       config.timeout ?? DEFAULT_TIMEOUT_MS,
@@ -170,7 +173,7 @@ export const createApiClient = (dependencies: ApiClientDependencies): ApiClient 
         },
       )
       await assertResponseOk(response, config.promptOnUnauthorized)
-      const data = await parseResponseBody(response)
+      const data = binary ? new Uint8Array(await response.arrayBuffer()) : await parseResponseBody(response)
 
       return {
         data: data as T,
@@ -205,6 +208,7 @@ export const createApiClient = (dependencies: ApiClientDependencies): ApiClient 
   }
 
   return {
+    getBinary: (path: string, config?: ApiRequestConfig) => request<Uint8Array>('GET', path, undefined, config, true),
     get: <T>(path: string, config?: ApiRequestConfig) => request<T>('GET', path, undefined, config),
     post: <T>(path: string, body?: unknown, config?: ApiRequestConfig) =>
       request<T>('POST', path, body, config),
@@ -218,8 +222,10 @@ export const createApiClient = (dependencies: ApiClientDependencies): ApiClient 
   }
 }
 
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim() || '/api'
+
 export const apiClient = createApiClient({
-  baseUrl: import.meta.env.VITE_API_BASE_URL?.trim() || '/api',
+  baseUrl: API_BASE_URL,
   fetcher: globalThis.fetch.bind(globalThis),
   getToken: () => localStorage.getItem('token'),
   onUnauthorized: () => {

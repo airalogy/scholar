@@ -1,6 +1,6 @@
 {
   "name": "@airalogy/scholar-web",
-  "version": "5.0.0",
+  "version": "5.0.1",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
@@ -18,7 +18,7 @@
     "dompurify": "^3.4.13",
     "marked": "^17.0.3",
     "pdfjs-dist": "^5.5.207",
-    "vue": "^3.5.41",
+    "vue": "^3.5.42",
     "vue-i18n": "^11.4.8",
     "vue-router": "^4.2.0"
   },

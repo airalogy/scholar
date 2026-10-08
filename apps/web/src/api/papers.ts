@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import { uploadFile } from './files'
 
 export interface PaperAuthor {
   id: string
@@ -166,27 +167,14 @@ export interface UploadPaperFields {
   lab_id?: string
 }
 
-interface UploadFileResponse {
-  id: string
-}
-
-export async function uploadPaper(file: File, fields: UploadPaperFields): Promise<PaperResponse> {
-  const formData = new FormData()
-  formData.append('file', file)
-  formData.append('purpose', 'paper')
-  formData.append('institution_id', fields.institution_id)
-
-  const uploadRes = await apiClient.post<UploadFileResponse>('/files/upload', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
-  })
+export async function uploadPaper(file: File, fields: UploadPaperFields, signal?: AbortSignal): Promise<PaperResponse> {
+  const uploadedFile = await uploadFile(file, 'paper', fields.institution_id, signal)
 
   const payload = {
     ...fields,
-    oss_file_id: uploadRes.data.id,
+    oss_file_id: uploadedFile.id,
   }
 
-  const paperRes = await apiClient.post<PaperResponse>('/papers/create', payload)
+  const paperRes = await apiClient.post<PaperResponse>('/papers/create', payload, { signal })
   return paperRes.data
 }

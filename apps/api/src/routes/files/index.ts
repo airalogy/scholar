@@ -35,6 +35,10 @@ const ossRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
         throw fastify.httpErrors.badRequest('No file uploaded')
       }
 
+      // Multipart fields after the file are only available once its stream is consumed.
+      // Keep accepting clients that send the file first; toBuffer enforces the size limit.
+      const fileBuffer = await data.toBuffer()
+
       const purposeField = data.fields.purpose
       const purpose =
         purposeField && typeof purposeField === 'object' && 'value' in purposeField
@@ -60,8 +64,6 @@ const ossRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
         'value' in institutionIdField
           ? String(institutionIdField.value).trim() || undefined
           : undefined
-
-      const fileBuffer = await data.toBuffer()
 
       return uploadOssFile(fastify, fileBuffer, data.filename, data.mimetype, request.user.userId, {
         purpose,

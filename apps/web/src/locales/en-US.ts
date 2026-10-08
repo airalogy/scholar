@@ -371,7 +371,8 @@ const enUS = {
   },
   pdfViewer: {
     loading: 'Loading PDF...',
-    loadFailed: 'Failed to load PDF: {message}',
+    loadFailed: 'The PDF could not be opened. Try again; if the problem persists, contact an administrator.',
+    retry: 'Reload',
   },
   aiChatPanel: {
     referenceLabel: 'Referencing',
@@ -458,6 +459,12 @@ const enUS = {
     submit: 'Upload Paper',
     pdfOnly: 'PDF files only',
     uploadFailed: 'Upload failed, please try again',
+    fileTooLarge: 'PDF files must not exceed 25 MB.',
+    invalidDoi: 'Enter a valid DOI, such as 10.1234/example. An arXiv ID cannot be used directly as a DOI.',
+    requestTimedOut: 'The request timed out. Check your connection and My uploads before trying again.',
+    networkError: 'The connection failed. Check your campus network or VPN and try again. Your input has been preserved.',
+    cancelled: 'Stopped waiting for the upload. Your input has been preserved. If the file was sent, check My uploads before retrying.',
+    cancelUpload: 'Cancel upload',
   },
   adminHome: {
     title: 'Admin Console',

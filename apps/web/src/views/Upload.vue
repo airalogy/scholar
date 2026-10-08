@@ -147,6 +147,7 @@
               >
                 {{ isUploading ? $t('upload.uploading') : $t('upload.submit') }}
               </button>
+              <button v-if="isUploading" type="button" class="cancel-upload-btn" @click="uploadController?.abort()">{{ $t('upload.cancelUpload') }}</button>
             </div>
           </form>
         </div>
@@ -156,10 +157,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { IconCheckCircle, IconFile, IconUpload } from '@arco-design/web-vue/es/icon'
 import { useI18n } from 'vue-i18n'
 import { uploadPaper, type PaperResponse } from '@/api/papers'
+import { MAX_DOCUMENT_BYTES } from '@/api/files'
 import {
   getInstitution,
   listInstitutionCatalog,
@@ -190,6 +192,12 @@ const isDragOver = ref(false)
 const isUploading = ref(false)
 const errorMsg = ref('')
 const uploadedPaper = ref<PaperResponse | null>(null)
+let uploadController: AbortController | undefined
+let disposed = false
+onBeforeUnmount(() => {
+  disposed = true
+  uploadController?.abort()
+})
 const keywordInput = ref('')
 const keywords = ref<string[]>([])
 const institutionMemberships = ref<UserInstitutionMembershipItem[]>([])
@@ -281,11 +289,21 @@ function onDrop(e: DragEvent) {
 }
 
 function setFile(file: File) {
+  if (isUploading.value) return
+  if (file.type !== 'application/pdf') {
+    errorMsg.value = t('upload.pdfOnly')
+    return
+  }
+  if (file.size > MAX_DOCUMENT_BYTES) {
+    errorMsg.value = t('upload.fileTooLarge')
+    return
+  }
   selectedFile.value = file
   errorMsg.value = ''
 }
 
 function removeFile() {
+  if (isUploading.value) return
   selectedFile.value = null
   if (fileInput.value) fileInput.value.value = ''
 }
@@ -371,6 +389,11 @@ async function loadSubmissionScopes() {
 
 async function handleSubmit() {
   if (!canSubmit.value || isUploading.value) return
+  const doi = form.value.doi.trim().replace(/^https?:\/\/(?:dx\.)?doi\.org\//iu, '').replace(/^doi:\s*/iu, '').trim().toLowerCase()
+  if (!/^10\.\d{4,9}\/\S+$/u.test(doi) || doi.length > 100) {
+    errorMsg.value = t('upload.invalidDoi')
+    return
+  }
   if (!form.value.institution_id) {
     errorMsg.value = t('upload.institutionRequired')
     return
@@ -378,12 +401,13 @@ async function handleSubmit() {
 
   errorMsg.value = ''
   isUploading.value = true
+  uploadController = new AbortController()
   try {
     const institutionId = form.value.institution_id
     const labId = form.value.lab_id
     const paper = await uploadPaper(selectedFile.value!, {
       title: form.value.title.trim(),
-      doi: form.value.doi.trim(),
+      doi,
       publish_year: form.value.publish_year,
       paper_type: form.value.paper_type,
       language: form.value.language,
@@ -394,7 +418,8 @@ async function handleSubmit() {
       pages: form.value.pages.trim() || undefined,
       keywords: keywords.value.length ? keywords.value : undefined,
       lab_id: labId || undefined,
-    })
+    }, uploadController.signal)
+    if (disposed) return
     uploadedPaper.value = paper
     // 重置表单
     selectedFile.value = null
@@ -413,7 +438,11 @@ async function handleSubmit() {
     keywords.value = []
     keywordInput.value = ''
   } catch (err: unknown) {
-    errorMsg.value = getErrorMessage(err, t('upload.uploadFailed'))
+    if (disposed) return
+    if (uploadController.signal.aborted) errorMsg.value = t('upload.cancelled')
+    else if (err instanceof Error && err.message === 'Request timed out') errorMsg.value = t('upload.requestTimedOut')
+    else if (err instanceof TypeError) errorMsg.value = t('upload.networkError')
+    else errorMsg.value = getErrorMessage(err, t('upload.uploadFailed'))
   } finally {
     isUploading.value = false
   }
@@ -444,6 +473,13 @@ onMounted(() => {
 </script>
 
 <style lang="sass" scoped>
+.cancel-upload-btn
+  border: 1px solid #d1d5db
+  border-radius: 8px
+  background: transparent
+  padding: 10px 16px
+  cursor: pointer
+
 .upload-page
   display: flex
   justify-content: center
