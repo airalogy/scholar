@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { assertUserExists, isPublicRoute, resolveAccessTokenUserId } from '../../utils/auth'
 import { INTEGRATION_TOKEN_TYPE, type IntegrationScope } from '../../utils/integration-auth'
 import { assertInstitutionIdentitySession } from '../../utils/institution-identifiers'
+import { userAdmitted } from '../../directory/policy'
 
 declare module '@fastify/jwt' {
   interface FastifyJWT {
@@ -122,6 +123,22 @@ export default fp(async (fastify: FastifyInstance) => {
     await assertUserExists(fastify, userId)
     if (!(await assertInstitutionIdentitySession(fastify.prisma, userId, request.user))) {
       throw fastify.httpErrors.unauthorized('Institution sign-in identity is no longer active')
+    }
+    if (fastify.deployment?.institution?.slug) {
+      const institution = await fastify.prisma.institutions.findUnique({
+        where: { slug: fastify.deployment.institution.slug },
+        select: { id: true },
+      })
+      if (institution && !(await userAdmitted(fastify.prisma, institution.id, userId))) {
+        const user = await fastify.prisma.users.findUnique({
+          where: { id: userId },
+          select: { platform_role: true },
+        })
+        if (user?.platform_role !== 'platform_admin')
+          throw fastify.httpErrors.forbidden(
+            'Institution personnel status does not currently permit access',
+          )
+      }
     }
   })
 

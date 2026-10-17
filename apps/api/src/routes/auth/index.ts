@@ -227,7 +227,9 @@ const authRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
       } catch (error) {
         if (!(error instanceof InstitutionIdentityLinkRequired)) throw error
         reply.header('Cache-Control', 'no-store')
-        return reply.code(409).send(await createIdentityChallenge(fastify, error.profile))
+        return reply
+          .code(409)
+          .send(await createIdentityChallenge(fastify, error.profile, error.purpose))
       }
     },
   )

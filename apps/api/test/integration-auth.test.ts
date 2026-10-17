@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { addDirectoryMocks } from './helpers/directory-mocks'
 import { test } from 'node:test'
 import bcrypt from 'bcrypt'
 import Fastify, { type FastifyInstance } from 'fastify'
@@ -52,6 +53,7 @@ const buildPrismaMock = (state: AuthState) => {
         }
       },
     },
+    institutions: { findUnique: async () => ({ id: INSTITUTION_ID, slug: 'test-institution' }) },
     institution_memberships: {
       findUnique: async ({
         where,
@@ -113,6 +115,7 @@ const buildAuthApp = async (state: AuthState): Promise<FastifyInstance> => {
     institution: { slug: 'test-institution' },
   } as never)
   app.decorate('prisma', buildPrismaMock(state) as never)
+  addDirectoryMocks(app)
   await app.register(jwtPlugin)
   await app.register(authRoutes, { prefix: '/auth' })
   await app.register(scholarRoutes, { prefix: '/scholars' })
@@ -407,6 +410,7 @@ test('only institution owners and platform admins can manage credentials', async
   await app.register(sensible)
   app.decorate('config', { JWT_SECRET } as never)
   app.decorate('prisma', prisma as never)
+  addDirectoryMocks(app)
   await app.register(jwtPlugin)
   await app.register(institutionRoutes, { prefix: '/institutions' })
   await app.ready()

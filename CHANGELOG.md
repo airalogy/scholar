@@ -4,6 +4,23 @@ Chinese version: [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)
 
 ## [Unreleased]
 
+### Added
+
+- Source-bound personnel synchronization with staged full/incremental snapshots, completeness and sequence checks, preview baselines, audited application, deactivation safeguards and an optional periodic standard-JSON client.
+- Optional directory-only admission with restricted SSO verification requests, just-in-time ordinary accounts, live personnel checks on existing sessions and files, and manual suspension. Personnel facts never grant review permissions.
+- Explicit, scoped and time-bounded reviewer grants; versioned shared paper/thesis review rounds, parallel author/unit tasks, CC-only notifications, exception reassignment, and bilingual administration and personal task pages.
+- Immutable correction, attribution, full-text restriction and institutional withdrawal proposals, atomic approved-effect execution, failed-execution recovery, and a signed, ordered, retryable external-inbox outbox. External systems cannot approve content.
+
+### Changed
+
+- Institutions opting into governed workflows submit imported updates for human review without replacing published metadata early; duplicate uploads cannot hide an approved claim or replace another submitter's pending material. Departures revoke permissions; later admission or reappointment does not restore old grants.
+- Added PostgreSQL governance/SSO regression and legacy-review migration verification to delivery checks. Existing institutions retain their admission policy and review configuration until administrators opt in.
+
+### Database and Deployment
+
+- Apply the additive directory/review migration before starting the matching Web/API build. It preserves old decisions as legacy rounds and retains personnel, accounts, papers and files. Back up persistent data first; application rollback does not undo schema changes.
+- External inbox delivery remains off unless `REVIEW_INBOX_URL`, `REVIEW_INBOX_SECRET` and `REVIEW_PUBLIC_ORIGIN` are configured. Institution-specific directory/inbox adapters and live campus credentials remain outside this repository.
+
 ## [5.0.1] - 2026-10-08
 
 ### Fixed

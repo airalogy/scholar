@@ -19,6 +19,7 @@ interface InstitutionRecord {
 }
 
 interface CredentialRecord {
+  directorySourceId?: string | null
   id: string
   name: string
   clientId: string
@@ -84,6 +85,7 @@ const formatCredential = (credential: CredentialRecord) => {
       : 'active'
 
   return {
+    directorySourceId: credential.directorySourceId ?? null,
     id: credential.id,
     name: credential.name,
     clientId: credential.clientId,
@@ -143,6 +145,18 @@ export const createInstitutionApiCredential = async (
   await assertCanManageCredentials(fastify, currentUserId, institution.id)
 
   const scopes = normalizeScopes(body.scopes)
+  if (scopes.includes('directory:sync')) {
+    if (scopes.length !== 1 || !body.directorySourceId)
+      throw fastify.httpErrors.badRequest(
+        'Directory credentials require exactly directory:sync and a bound source',
+      )
+    const source = await fastify.prisma.institution_directory_sources.findFirst({
+      where: { id: body.directorySourceId, institutionId: institution.id },
+    })
+    if (!source)
+      throw fastify.httpErrors.badRequest('Directory source does not belong to this institution')
+  } else if (body.directorySourceId)
+    throw fastify.httpErrors.badRequest('Only directory credentials may bind a source')
   if (scopes.length !== body.scopes.length) {
     throw fastify.httpErrors.badRequest(
       'Credential scopes contain unsupported or duplicated values',
@@ -174,6 +188,7 @@ export const createInstitutionApiCredential = async (
         clientId: `sch_inst_${crypto.randomBytes(12).toString('hex')}`,
         secretHash,
         scopes,
+        directorySourceId: body.directorySourceId ?? null,
         expiresAt: buildExpiry(body.expiresInDays),
         createdBy: currentUserId,
         createdAt: now,

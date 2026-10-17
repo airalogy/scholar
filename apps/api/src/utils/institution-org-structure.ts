@@ -496,7 +496,7 @@ const resolvePositionReviewers = (
 export const resolveWorkflowStepReviewers = (
   ctx: ReviewResolutionContext,
   reviewNodeId: string | null,
-  step: WorkflowStepRecord,
+  step: Pick<WorkflowStepRecord, 'resolver_type' | 'resolver_config'>,
 ): { eligibleUserIds: string[]; resolutionNotes: string | null } => {
   const resolverType = step.resolver_type as WorkflowResolverType
   const config = readRecord(step.resolver_config)
@@ -993,6 +993,18 @@ export const upsertInstitutionOrgStructure = async (
 
   await fastify.prisma.$transaction(async (tx) => {
     await lockMutationScope(tx, 'institution-identity', institutionId)
+    if (await tx.institution_directory_sources.count({ where: { institutionId } }))
+      throw fastify.httpErrors.conflict(
+        'Directory-managed institutions use source synchronization for personnel and organization changes',
+      )
+    if (
+      await tx.institution_review_workflows.count({
+        where: { institutionId, is_active: true, steps: { some: { resolver_type: 'governance' } } },
+      })
+    )
+      throw fastify.httpErrors.conflict(
+        "Use review governance to edit this institution's versioned workflow",
+      )
     for (const node of body.nodes) {
       await tx.institution_org_nodes.upsert({
         where: {
@@ -1335,10 +1347,9 @@ export const isUserEligibleForClaimReview = async (
     where: { id: claim.reviewCaseId },
     include: { steps: true },
   })
-  const currentStep = reviewCase?.steps.find(
-    (step) => step.step_order === reviewCase.currentStep && step.status === 'pending',
-  )
-  return currentStep?.eligible_reviewer_user_ids.includes(userId) === true
+  if (!reviewCase || reviewCase.status !== 'pending_review') return false
+  const { canReviewContentCase } = await import('../review/service')
+  return canReviewContentCase(fastify, userId, reviewCase)
 }
 
 export const getUserWorkflowReviewableClaimIds = async (

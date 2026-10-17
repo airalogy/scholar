@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { addDirectoryMocks } from './helpers/directory-mocks'
 import { test } from 'node:test'
 import Fastify, { type FastifyInstance } from 'fastify'
 import sensible from '@fastify/sensible'
@@ -387,6 +388,7 @@ const buildImportApp = async (state: ImportTestState): Promise<FastifyInstance> 
       fixedInstitutionSlug: 'test',
     },
   } as never)
+  addDirectoryMocks(app)
   await app.register(jwtPlugin)
   await app.register(institutionImportRoutes, {
     prefix: '/v1/institutions',

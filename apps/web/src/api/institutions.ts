@@ -311,9 +311,11 @@ export type InstitutionApiCredentialScope =
   | 'papers:import'
   | 'scholars:import'
   | 'imports:read'
+  | 'directory:sync'
 
 export interface InstitutionApiCredential {
   id: string
+  directorySourceId?: string | null
   name: string
   clientId: string
   scopes: InstitutionApiCredentialScope[]
@@ -498,6 +500,7 @@ export const createInstitutionApiCredential = async (
   payload: {
     name: string
     scopes: InstitutionApiCredentialScope[]
+    directorySourceId?: string
     expiresInDays?: number
   },
 ): Promise<{ credential: InstitutionApiCredential, clientSecret: string }> => {

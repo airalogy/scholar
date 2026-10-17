@@ -33,7 +33,7 @@ if (!packageManagerMatch) {
   fail(packageJsonPath, 1, 'packageManager must pin an exact pnpm version')
 }
 
-if (packageJson.scripts?.prepush !== 'pnpm audit:prod && pnpm check && node scripts/verify-bibliography.mjs --if-configured') {
+if (packageJson.scripts?.prepush !== 'pnpm audit:prod && pnpm check && node scripts/verify-bibliography.mjs --if-configured && node scripts/verify-review-governance.mjs --if-configured') {
   fail(
     packageJsonPath,
     1,
@@ -226,6 +226,7 @@ const requiredReleaseFragments = [
   'artifact-metadata: write',
   'pnpm release:source:verify',
   'pnpm db:verify:identity',
+  'pnpm db:verify:governance',
   'pnpm db:verify:bibliography',
   'README.zh-CN.md',
   'scholar-${{ matrix.component }}',

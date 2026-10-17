@@ -54,6 +54,8 @@ export const DegreeThesisRecordCodeParamsSchema = Type.Object({
 })
 
 export const DegreeThesisReviewBodySchema = Type.Object({
+  taskId: Type.Optional(Type.String({ format: 'uuid' })),
+  expectedVersionId: Type.Optional(Type.String({ format: 'uuid' })),
   decision: Type.Union([Type.Literal('approve'), Type.Literal('request_changes')]),
   notes: Type.Optional(Type.String({ maxLength: 5000 })),
 })

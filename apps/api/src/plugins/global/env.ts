@@ -21,6 +21,9 @@ declare module 'fastify' {
       ENABLE_INSTITUTION_LOGIN: boolean
       ENABLE_INSTITUTION_PROVISION_LOGIN: boolean
       INSTITUTION_SSO_ENABLED: boolean
+      REVIEW_INBOX_URL: string
+      REVIEW_INBOX_SECRET: string
+      REVIEW_PUBLIC_ORIGIN: string
       ENABLE_AI_CHAT: boolean
       ALLOW_APPROVED_PDF_MODEL_PROCESSING: boolean
       SCHOLAR_TIMELINE_GENERATION_MODE: 'disabled' | 'request_only' | 'preview' | 'admin'
@@ -80,6 +83,9 @@ const schema = Type.Object({
   LOG_LEVEL: Type.String({ default: 'info' }),
   TRUST_PROXY: Type.String({ default: '' }),
   HOST: Type.String({ default: 'localhost' }),
+  REVIEW_INBOX_URL: Type.String({ default: '' }),
+  REVIEW_INBOX_SECRET: Type.String({ default: '' }),
+  REVIEW_PUBLIC_ORIGIN: Type.String({ default: '' }),
   PORT: Type.Number({ default: 3000 }),
   MANAGEMENT_MODE: Type.Union([Type.Literal('airalogy_managed'), Type.Literal('self_hosted')], {
     default: 'self_hosted',

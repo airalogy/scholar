@@ -303,6 +303,7 @@ export const InstitutionApiCredentialScopeSchema = Type.Union([
   Type.Literal('papers:import'),
   Type.Literal('scholars:import'),
   Type.Literal('imports:read'),
+  Type.Literal('directory:sync'),
 ])
 
 export const InstitutionApiCredentialStatusSchema = Type.Union([
@@ -312,6 +313,7 @@ export const InstitutionApiCredentialStatusSchema = Type.Union([
 ])
 
 export const InstitutionApiCredentialSchema = Type.Object({
+  directorySourceId: Type.Union([Type.String({ format: 'uuid' }), Type.Null()]),
   id: Type.String({ format: 'uuid' }),
   name: Type.String(),
   clientId: Type.String(),
@@ -333,6 +335,7 @@ export const InstitutionApiCredentialListResponseSchema = Type.Object({
 })
 
 export const CreateInstitutionApiCredentialBodySchema = Type.Object({
+  directorySourceId: Type.Optional(Type.String({ format: 'uuid' })),
   name: Type.String({ minLength: 1, maxLength: 100 }),
   scopes: Type.Array(InstitutionApiCredentialScopeSchema, {
     minItems: 1,

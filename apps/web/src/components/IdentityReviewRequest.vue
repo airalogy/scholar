@@ -4,7 +4,7 @@
     <p v-if="errorKey" class="request-error" role="alert">{{ $t(errorKey) }}</p>
     <template v-if="!expired && data">
       <p class="verified-id">{{ $t('identity.currentId') }}：{{ data.internalId }}</p>
-      <p v-if="!data.request" class="privacy-note">{{ $t('identity.otherIdPrivacy') }}</p>
+      <p v-if="!data.request && !admission" class="privacy-note">{{ $t('identity.otherIdPrivacy') }}</p>
       <div v-if="data.request" class="request-status">
         <strong>{{ $t(`identity.status.${data.request.status}`) }}</strong>
         <p v-if="data.request.applicantMessage" class="applicant-message">
@@ -17,8 +17,9 @@
         $t('identity.apply')
       }}</a-button>
       <form v-if="showForm && canOpen" class="identity-request-form" @submit.prevent="submit">
-        <label for="identity-previous-id">{{ $t('identity.previousId') }}</label>
+        <label v-if="!admission" for="identity-previous-id">{{ $t('identity.previousId') }}</label>
         <a-input
+          v-if="!admission"
           v-model="previousId"
           :input-attrs="{ id: 'identity-previous-id', autocomplete: 'off' }"
           :max-length="100"
@@ -35,7 +36,7 @@
           :placeholder="$t('identity.explanationPlaceholder')"
         />
         <a-checkbox v-model="confirmed" :disabled="saving">{{
-          $t('identity.ownAccount')
+          $t(admission ? 'governance.admissionDeclaration' : 'identity.ownAccount')
         }}</a-checkbox>
         <p class="privacy-note">{{ $t('identity.noSensitiveDocuments') }}</p>
         <a-button html-type="submit" type="primary" :disabled="!canSubmit" :loading="saving">{{
@@ -65,7 +66,7 @@ import {
   type ApplicantIdentityData,
 } from '@/api/identity'
 
-const props = defineProps<{ proofToken: string; expiresAt: string }>()
+const props = defineProps<{ proofToken: string; expiresAt: string; admission?: boolean }>()
 defineEmits<{ reauthenticate: [] }>()
 const data = ref<ApplicantIdentityData | null>(null)
 const loading = ref(false)
@@ -88,7 +89,7 @@ const canSubmit = computed(
     !saving.value &&
     !expired.value &&
     confirmed.value &&
-    Boolean(previousId.value.trim()) &&
+    (props.admission || Boolean(previousId.value.trim())) &&
     Boolean(explanation.value.trim()),
 )
 

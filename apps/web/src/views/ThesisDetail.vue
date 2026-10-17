@@ -46,6 +46,7 @@
         <strong>{{ $t('degreeTheses.reviewNote') }}</strong>
         <span>{{ thesis.decision_notes }}</span>
       </div>
+      <ReviewChangeForm subject-type="degree_thesis" :subject-id="thesis.id" />
 
       <main class="detail-grid" :class="{ 'detail-grid--single': !hasReviewPanel }">
         <article class="content-card">
@@ -109,6 +110,7 @@ import { useRoute } from 'vue-router'
 import { getDegreeThesis, type DegreeThesis } from '@/api/theses'
 import { resolveSafeHttpUrl } from '@/utils/url'
 import { useAuth } from '@/composables/useAuth'
+import ReviewChangeForm from '@/components/ReviewChangeForm.vue'
 
 const route = useRoute()
 const { t, locale } = useI18n()

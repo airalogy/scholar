@@ -24,6 +24,7 @@
       <div v-if="isLoading" class="admin-state">{{ $t('common.loading') }}</div>
       <div v-else-if="loadError" class="admin-state">{{ loadError }}</div>
       <template v-else-if="institution">
+        <router-link v-if="canManageOwnerRole" :to="`/admin/institutions/${institution.slug}/governance`">{{ $t('governance.title') }}</router-link>
         <InstitutionIdentityRequestsPanel v-if="canManageOwnerRole" :slug="institution.slug" />
         <InstitutionIdentifiersPanel v-if="canManageOwnerRole" :slug="institution.slug" />
         <section class="admin-panel">

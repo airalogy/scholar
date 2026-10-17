@@ -11,7 +11,7 @@
         {{
           status === 'loading'
             ? $t('oauthCallback.processingDescription', { provider: providerLabel })
-            : status === 'review' ? $t('identity.conflictDescription') : errorMessage
+            : status === 'review' ? $t(isAdmission ? 'governance.admissionDescription' : 'identity.conflictDescription') : errorMessage
         }}
       </p>
 
@@ -19,6 +19,7 @@
         v-if="status === 'review' && conflict"
         :proof-token="conflict.proofToken"
         :expires-at="conflict.expiresAt"
+        :admission="isAdmission"
         @reauthenticate="retryOauth"
       />
 
@@ -56,6 +57,7 @@ const { auth: publicAuthConfig, features, defaultHomePath } = usePublicConfig()
 
 const status = ref<'loading' | 'error' | 'review'>('loading')
 const conflict = ref<IdentityConflict | null>(null)
+const isAdmission = computed(() => conflict.value?.reason === 'institution_directory_admission')
 const errorMessage = ref('')
 const provider = computed<OauthProvider>(() => {
   return route.meta.oauthProvider === 'institution-sso' ? 'institution-sso' : 'airalogy'
@@ -71,7 +73,7 @@ const providerLabel = computed(() => {
     : t('oauthCallback.providers.airalogy')
 })
 const pageTitle = computed(() => status.value === 'review'
-  ? t('identity.conflictTitle')
+  ? t(isAdmission.value ? 'governance.admissionTitle' : 'identity.conflictTitle')
   : t(status.value === 'loading' ? 'oauthCallback.processingTitle' : 'oauthCallback.failedTitle', { provider: providerLabel.value }))
 
 const getQueryValue = (value: unknown): string => {

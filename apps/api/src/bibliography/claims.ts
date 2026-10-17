@@ -4,6 +4,7 @@ import { Prisma, type paper_claims } from '../../prisma/generated/client'
 import type { PaperScope } from '../routes/papers/service.shared'
 import { submitReviewCase } from '../review/service'
 import { enqueuePaperIndex } from './index-queue'
+import { hasGovernedReview } from '../review/configuration'
 
 interface ClaimInput {
   paperId: string
@@ -21,7 +22,9 @@ export const ensureBibliographyClaim = async (
   input: ClaimInput,
   fastify?: FastifyInstance,
 ): Promise<{ claim: paper_claims; created: boolean; reviewPending: boolean }> => {
-  const { paperId, institutionId, userId, scope, reviewRequired } = input
+  const { paperId, institutionId, userId, scope } = input
+  const reviewRequired =
+    input.reviewRequired || (await hasGovernedReview(tx, institutionId, 'paper'))
   if (reviewRequired && !fastify) throw new Error('A review application context is required')
   await tx.$queryRaw(Prisma.sql`SELECT id FROM papers WHERE id = ${paperId}::uuid FOR UPDATE`)
   const existing = await tx.paper_claims.findFirst({

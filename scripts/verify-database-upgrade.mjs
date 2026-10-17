@@ -38,6 +38,9 @@ DECLARE
   position_id UUID := gen_random_uuid();
   paper_id UUID := gen_random_uuid();
   author_id UUID := gen_random_uuid();
+  claim_id UUID := gen_random_uuid();
+  review_id UUID := gen_random_uuid();
+  submission_id UUID := gen_random_uuid();
 BEGIN
   INSERT INTO institutions (id, name, slug)
     VALUES (institution_id, 'Example University', 'upgrade-example');
@@ -70,6 +73,18 @@ BEGIN
   INSERT INTO authors (id, name, "createdAt", "updatedAt")
     VALUES (author_id, 'Example Person', now(), now());
   INSERT INTO paper_authors ("paperId", "authorId", "order") VALUES (paper_id, author_id, 1);
+  INSERT INTO content_review_cases (id, "institutionId", content_type, "subjectId", "submittedBy", status)
+    VALUES (review_id, institution_id, 'paper', claim_id, account_id, 'approved');
+  INSERT INTO paper_claims (id, "paperId", "institutionId", "submittedBy", "reviewCaseId")
+    VALUES (claim_id, paper_id, institution_id, account_id, review_id);
+  INSERT INTO paper_submissions (id, "paperId", "claimId", "userId", "institutionId", metadata_snapshot)
+    VALUES (submission_id, paper_id, claim_id, account_id, institution_id, '{"title":"Frozen legacy material"}'::jsonb);
+  UPDATE content_review_cases SET "currentVersionId" = submission_id WHERE id = review_id;
+  UPDATE paper_claims SET "submissionId" = submission_id WHERE id = claim_id;
+  INSERT INTO content_review_step_instances ("caseId", "institutionId", step_order, step_name, status, resolver_type, resolver_config, "reviewedBy")
+    VALUES (review_id, institution_id, 1, 'Legacy final review', 'approved', 'institution_admin', '{}'::jsonb, account_id);
+  INSERT INTO content_review_actions ("caseId", "institutionId", "actorId", action, to_status, "versionId")
+    VALUES (review_id, institution_id, account_id, 'approved', 'approved', submission_id);
   INSERT INTO institution_paper_author_bindings
     ("institutionId", "paperId", "authorId", "userId", "boundBy")
     VALUES (institution_id, paper_id, author_id, account_id, account_id);
@@ -82,6 +97,13 @@ END $$;
 const assertions = `
 DO $$
 BEGIN
+  IF (SELECT count(*) FROM content_review_rounds) <> 1
+    OR NOT EXISTS (SELECT 1 FROM content_review_rounds WHERE number = 1 AND status = 'approved' AND "materialSnapshot" #>> '{metadata_snapshot,title}' = 'Frozen legacy material')
+    OR NOT EXISTS (SELECT 1 FROM content_review_cases WHERE "currentRound" = 1 AND status = 'approved')
+    OR NOT EXISTS (SELECT 1 FROM content_review_step_instances WHERE "roundNumber" = 1 AND status = 'approved')
+    OR NOT EXISTS (SELECT 1 FROM content_review_actions WHERE "roundNumber" = 1 AND action = 'approved') THEN
+    RAISE EXCEPTION 'Review migration lost the original material, decision or history';
+  END IF;
   IF (SELECT count(*) FROM users) <> 2
     OR (SELECT count(*) FROM scholars) <> 2
     OR (SELECT count(*) FROM papers) <> 1

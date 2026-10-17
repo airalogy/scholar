@@ -47,7 +47,9 @@
           />
         </a-form-item>
       </div>
-      <a-form-item field="scopes" :label="$t('adminInstitutionContent.credentialScopesLabel')">
+      <label>{{ $t('governance.credentialPurpose') }}<select v-model="credentialMode" @change="loadSources"><option value="imports">{{ $t('governance.contentImport') }}</option><option value="directory">{{ $t('governance.directorySync') }}</option></select></label>
+      <label v-if="credentialMode === 'directory'">{{ $t('governance.source') }}<select v-model="directorySourceId"><option v-for="source in directorySources" :key="source.id" :value="source.id">{{ source.name }}</option></select></label>
+      <a-form-item v-else field="scopes" :label="$t('adminInstitutionContent.credentialScopesLabel')">
         <a-checkbox-group v-model="form.scopes" class="scope-list">
           <a-checkbox v-for="scope in scopes" :key="scope" :value="scope">
             <code>{{ scope }}</code>
@@ -61,7 +63,7 @@
       <a-button
         type="primary"
         :loading="isCreating"
-        :disabled="!form.name.trim() || form.scopes.length === 0"
+        :disabled="!form.name.trim() || (credentialMode === 'directory' ? !directorySourceId : form.scopes.length === 0)"
         @click="createCredential"
       >
         {{ $t('adminInstitutionContent.createCredential') }}
@@ -139,6 +141,7 @@
 import { reactive, ref, watch } from 'vue'
 import { Message } from '@arco-design/web-vue'
 import { useI18n } from 'vue-i18n'
+import { loadDirectory, type DirectorySource } from '@/api/governance'
 import {
   createInstitutionApiCredential,
   listInstitutionApiCredentials,
@@ -154,6 +157,13 @@ const props = defineProps<{
 }>()
 
 const { t, locale } = useI18n()
+const credentialMode = ref<'imports' | 'directory'>('imports')
+const directorySourceId = ref('')
+const directorySources = ref<DirectorySource[]>([])
+const loadSources = async (): Promise<void> => {
+  if (credentialMode.value !== 'directory') return
+  try { directorySources.value = (await loadDirectory(props.institution.slug)).sources; directorySourceId.value = directorySources.value[0]?.id ?? '' } catch { Message.error(t('governance.failed')) }
+}
 const scopes: InstitutionApiCredentialScope[] = [
   'papers:import',
   'scholars:import',
@@ -199,7 +209,7 @@ const loadCredentials = async (): Promise<void> => {
 }
 
 const createCredential = async (): Promise<void> => {
-  if (!form.name.trim() || form.scopes.length === 0) {
+  if (!form.name.trim() || (credentialMode.value === 'directory' ? !directorySourceId.value : form.scopes.length === 0)) {
     return
   }
 
@@ -207,7 +217,8 @@ const createCredential = async (): Promise<void> => {
   try {
     const result = await createInstitutionApiCredential(props.institution.slug, {
       name: form.name.trim(),
-      scopes: form.scopes,
+      scopes: credentialMode.value === 'directory' ? ['directory:sync'] : form.scopes,
+      directorySourceId: credentialMode.value === 'directory' ? directorySourceId.value : undefined,
       expiresInDays: form.expiresInDays,
     })
     revealedSecret.value = {
@@ -293,6 +304,7 @@ const getStatusLabel = (status: InstitutionApiCredential['status']): string => {
 }
 
 const getScopeDescription = (scope: InstitutionApiCredentialScope): string => {
+  if (scope === 'directory:sync') return t('governance.directorySync')
   const key = {
     'papers:import': 'papersImport',
     'scholars:import': 'scholarsImport',

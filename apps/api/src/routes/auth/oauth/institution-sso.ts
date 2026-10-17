@@ -14,6 +14,7 @@ import {
 import {
   normalizeInstitutionInternalId,
   upsertInstitutionPerson,
+  linkInstitutionPersonToUser,
 } from '../../../utils/institution-people'
 import {
   assertInstitutionInternalId,
@@ -21,6 +22,7 @@ import {
 } from '../../../utils/institution-identifiers'
 import { lockMutationScope } from '../../../utils/advisory-lock'
 import { InstitutionIdentityLinkRequired } from '../../../identity/challenges'
+import { personAdmitted } from '../../../directory/policy'
 
 const INSTITUTION_SSO_CALLBACK_PATH = '/institution_sso_callback'
 
@@ -221,6 +223,22 @@ const syncInstitutionSsoUser = async (
     }
     if (person && !person.is_active)
       throw fastify.httpErrors.forbidden('Institution identity is inactive')
+    const admission = await tx.institution_directory_policies.findUnique({
+      where: { institutionId: institution.id },
+    })
+    if (
+      admission?.admissionMode === 'directory' &&
+      (!person ||
+        !identifier ||
+        !(await tx.institution_directory_people.findUnique({ where: { personId: person.id } })))
+    ) {
+      throw new InstitutionIdentityLinkRequired(profile, 'directory_admission')
+    }
+    if (person && !(await personAdmitted(tx, institution.id, person.id))) {
+      throw fastify.httpErrors.forbidden(
+        'Institution personnel status does not currently permit access',
+      )
+    }
 
     let linkedUser = identity?.user
     if (!linkedUser && person?.userId) {
@@ -239,7 +257,11 @@ const syncInstitutionSsoUser = async (
           status: { in: ['pending', 'needs_information'] },
         },
       })
-      if (pending) throw new InstitutionIdentityLinkRequired(profile)
+      if (pending)
+        throw new InstitutionIdentityLinkRequired(
+          profile,
+          pending.purpose === 'directory_admission' ? 'directory_admission' : 'account_link',
+        )
       linkedUser = await tx.users.create({
         data: {
           email: profile.email,
@@ -288,15 +310,23 @@ const syncInstitutionSsoUser = async (
         },
       })
     }
-    const linkedPerson = await upsertInstitutionPerson(tx, {
-      institutionId: institution.id,
-      internalId: profile.internalId,
-      name: person?.name || displayName,
-      email: person?.email ?? profile.email,
-      userId: linkedUser.id,
-      source: 'institution_sso',
-      actorUserId: linkedUser.id,
-    })
+    const linkedPerson = person
+      ? await linkInstitutionPersonToUser(tx, {
+          institutionId: institution.id,
+          personId: person.id,
+          userId: linkedUser.id,
+          source: 'institution_sso',
+          actorUserId: linkedUser.id,
+        })
+      : await upsertInstitutionPerson(tx, {
+          institutionId: institution.id,
+          internalId: profile.internalId,
+          name: displayName,
+          email: profile.email,
+          userId: linkedUser.id,
+          source: 'institution_sso',
+          actorUserId: linkedUser.id,
+        })
 
     await tx.institution_memberships.upsert({
       where: {

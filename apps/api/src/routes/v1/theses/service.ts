@@ -1,8 +1,10 @@
 import crypto from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
+import { markReviewApplied } from '../../../review/rounds'
 import { Prisma } from '../../../../prisma/generated/client'
 import {
   assertCanReviewContentCase,
+  canReviewContentCase,
   decideReviewCase,
   submitReviewCase,
   type ReviewCaseStatus,
@@ -161,13 +163,9 @@ const resolveAccess = async (
   ])
   const isPlatformAdmin = platformRole === 'platform_admin'
   const isSubmitter = thesis.submittedBy === userId
-  const currentStep = thesis.review_case.steps.find(
-    (step) => step.step_order === thesis.review_case.currentStep && step.status === 'pending',
-  )
-  const isResolvedReviewer = currentStep?.eligible_reviewer_user_ids.includes(userId) === true
   const canReview =
     thesis.review_case.status === 'pending_review' &&
-    (isPlatformAdmin || (currentStep ? isResolvedReviewer : institutionAccess.can_review_content))
+    (await canReviewContentCase(fastify, userId, thesis.review_case))
   const canEdit =
     (isSubmitter || isPlatformAdmin || institutionAccess.can_edit_content) &&
     thesis.review_case.status !== 'pending_review' &&
@@ -291,17 +289,19 @@ const formatThesis = async (
       ? thesis.versions.map((version) => formatVersion(fastify, version, userId, true))
       : [],
     review_steps: showPrivate
-      ? thesis.review_case.steps.map((step) => ({
-          id: step.id,
-          order: step.step_order,
-          name: step.step_name,
-          status: step.status,
-          eligible_reviewer_user_ids: step.eligible_reviewer_user_ids,
-          resolution_notes: step.resolution_notes,
-          review_notes: step.review_notes,
-          reviewed_by: step.reviewedBy,
-          reviewed_at: step.reviewedAt?.toISOString() ?? null,
-        }))
+      ? thesis.review_case.steps
+          .filter((step) => step.roundNumber === thesis.review_case.currentRound)
+          .map((step) => ({
+            id: step.id,
+            order: step.step_order,
+            name: step.step_name,
+            status: step.status,
+            eligible_reviewer_user_ids: step.eligible_reviewer_user_ids,
+            resolution_notes: step.resolution_notes,
+            review_notes: step.review_notes,
+            reviewed_by: step.reviewedBy,
+            reviewed_at: step.reviewedAt?.toISOString() ?? null,
+          }))
       : [],
     review_history: showPrivate
       ? thesis.review_case.actions.map((action) => ({
@@ -647,6 +647,8 @@ export const reviewDegreeThesis = async (
       actorId: userId,
       decision: body.decision,
       notes: body.notes,
+      taskId: body.taskId,
+      expectedVersionId: body.expectedVersionId,
       ...audit,
     })
     if (updatedCase.status === 'approved' && updatedCase.currentVersionId) {
@@ -658,6 +660,7 @@ export const reviewDegreeThesis = async (
           updatedAt: new Date(),
         },
       })
+      await markReviewApplied(tx, thesis.reviewCaseId)
     }
   })
 

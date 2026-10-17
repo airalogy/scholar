@@ -11,7 +11,7 @@ export const IdentityProofBody = Type.Object(
 export const SubmitIdentityRequestBody = Type.Object(
   {
     ...IdentityProofBody.properties,
-    previousInternalId: Text(100),
+    previousInternalId: Type.String({ maxLength: 100 }),
     explanation: Text(2000),
     confirmsOwnAccount: Type.Literal(true),
   },
@@ -22,7 +22,10 @@ export const IdentityConflictResponse = Type.Object({
   message: Type.String(),
   data: Type.Optional(
     Type.Object({
-      reason: Type.Literal('institution_identity_conflict'),
+      reason: Type.Union([
+        Type.Literal('institution_identity_conflict'),
+        Type.Literal('institution_directory_admission'),
+      ]),
       proofToken: Type.String(),
       expiresAt: Type.String(),
     }),
@@ -36,6 +39,7 @@ export const RequestStatus = Type.Union([
 ])
 export const ApplicantRequestSchema = Type.Object({
   id: Uuid,
+  purpose: Type.String(),
   status: RequestStatus,
   previousInternalId: Type.String(),
   explanation: Type.String(),

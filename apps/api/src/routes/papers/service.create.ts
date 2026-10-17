@@ -9,6 +9,7 @@ import { buildClaimScopeWhere, buildSubmissionSnapshot, toClaimRecord } from './
 import { formatPaper, resolvePaperScope } from './service.paper'
 import { ensureSubmittedPaper, legacyPaperMetadata } from '../../bibliography/legacy'
 import { enqueuePaperIndex } from '../../bibliography/index-queue'
+import { hasGovernedReview } from '../../review/configuration'
 
 const assertCanUseUploadedFile = async (
   fastify: FastifyInstance,
@@ -84,7 +85,18 @@ export async function createPaper(fastify: FastifyInstance, body: CreatePaperBod
 
     const existingClaim = await tx.paper_claims.findFirst({
       where: buildClaimScopeWhere(paper.id, scope),
+      include: { review_case: true },
     })
+    if (existingClaim && (await hasGovernedReview(tx, institutionId, 'paper'))) {
+      if (['approved', 'archived'].includes(existingClaim.review_case.status))
+        throw fastify.httpErrors.conflict(
+          'Published or archived papers must be updated through a change request',
+        )
+      if (existingClaim.submittedBy !== userId)
+        throw fastify.httpErrors.forbidden(
+          'Only the original submitter can replace a pending submission',
+        )
+    }
     const submission = await tx.paper_submissions.create({
       data: {
         paperId: paper.id,

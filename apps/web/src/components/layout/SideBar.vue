@@ -75,6 +75,7 @@
           <div v-if="libraryExpanded" class="nav-sub-items">
             <router-link to="/my-library/favorites" class="nav-sub-item">{{ $t('nav.favorites') }}</router-link>
             <router-link to="/my-library/uploads" class="nav-sub-item">{{ $t('nav.uploads') }}</router-link>
+            <router-link v-if="isLoggedIn" to="/reviews" class="nav-sub-item">{{ $t('governance.myReviews') }}</router-link>
           </div>
         </div>
 

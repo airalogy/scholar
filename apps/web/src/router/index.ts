@@ -45,6 +45,7 @@ const createAdminRoute = ({
 })
 
 export const adminRoutes: RouteRecordRaw[] = [
+  createAdminRoute({ path: '/admin/institutions/:slug/governance', name: 'AdminGovernance', component: () => import('../views/AdminGovernance.vue'), capabilities: ['manage_platform', 'manage_institutions'] }),
   createAdminRoute({
     path: '/admin',
     name: 'AdminHome',
@@ -288,6 +289,8 @@ export const appRoutes: RouteRecordRaw[] = [
     component: () => import('../views/Settings.vue')
   },
   ...adminRoutes,
+  { path: '/reviews', name: 'MyReviewTasks', component: () => import('../views/MyReviewTasks.vue') },
+  { path: '/reviews/tasks/:taskId', name: 'ReviewTaskDetail', component: () => import('../views/ReviewTaskDetail.vue') },
   {
     path: '/admin/forbidden',
     name: 'AdminAccessDenied',

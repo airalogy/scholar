@@ -1,4 +1,7 @@
 import crypto from 'node:crypto'
+import { canReadTaskFile } from '../../review/queries'
+import { userAdmitted } from '../../directory/policy'
+import { canReviewContentCase } from '../../review/service'
 import path from 'node:path'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { Prisma } from '../../../prisma/generated/client'
@@ -200,9 +203,17 @@ const assertCanAccessProtectedOssFile = async (
   }
   if (ossFile.institutionId) {
     await assertConfiguredInstitutionId(fastify, ossFile.institutionId)
+    if (!(await userAdmitted(fastify.prisma, ossFile.institutionId, userId)))
+      throw fastify.httpErrors.forbidden('Institution personnel status does not permit file access')
   }
 
   const { submission, claim, thesisVersions } = await resolveProtectedFileContext(fastify, fileId)
+  if (
+    ossFile.institutionId &&
+    (await canReadTaskFile(fastify.prisma, ossFile.institutionId, userId, fileId))
+  ) {
+    return { ossFile, submission, claim, thesisVersion: thesisVersions[0] ?? null }
+  }
 
   if (ossFile.prefix === 'scholar/theses' && thesisVersions.length > 0) {
     const platformRole = await fastify.prisma.users.findUnique({
@@ -218,14 +229,9 @@ const assertCanAccessProtectedOssFile = async (
         userId,
         thesis.institutionId,
       )
-      const currentStep = reviewCase.steps.find(
-        (step) => step.step_order === reviewCase.currentStep && step.status === 'pending',
-      )
       const reviewerPrivileged =
         reviewCase.status === 'pending_review' &&
-        (currentStep
-          ? currentStep.eligible_reviewer_user_ids.includes(userId)
-          : institutionAccess.can_review_content)
+        (await canReviewContentCase(fastify, userId, reviewCase))
       const privileged =
         thesis.submittedBy === userId ||
         platformRole?.platform_role === 'platform_admin' ||
@@ -284,7 +290,7 @@ const assertCanAccessProtectedOssFile = async (
     throw fastify.httpErrors.forbidden('This file is not publicly available yet')
   }
 
-  if (claim.review_case.status === 'approved') {
+  if (claim.review_case.status === 'approved' && !claim.fullTextRestricted) {
     return {
       ossFile,
       submission,

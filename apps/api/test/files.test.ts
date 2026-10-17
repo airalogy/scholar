@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { addDirectoryMocks } from './helpers/directory-mocks'
 import test from 'node:test'
 import Fastify, { type FastifyInstance } from 'fastify'
 import sensible from '@fastify/sensible'
@@ -80,6 +81,7 @@ const buildApp = async (
     $transaction: async (operation: (client: unknown) => Promise<unknown>) => operation(prisma),
   }
   app.decorate('prisma', prisma as never)
+  addDirectoryMocks(app)
   await app.register(jwtPlugin)
   await app.register(fileRoutes, { prefix: '/files' })
   await app.ready()

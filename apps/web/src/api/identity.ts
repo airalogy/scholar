@@ -2,12 +2,13 @@ import { apiClient, ApiError } from './client'
 
 export type IdentityStatus = 'pending' | 'needs_information' | 'approved' | 'rejected'
 export interface IdentityConflict {
-  reason: 'institution_identity_conflict'
+  reason: 'institution_identity_conflict' | 'institution_directory_admission'
   proofToken: string
   expiresAt: string
 }
 export interface IdentityRequest {
   id: string
+  purpose?: string
   status: IdentityStatus
   previousInternalId: string
   explanation: string
@@ -72,7 +73,7 @@ export const getIdentityConflict = (error: unknown): IdentityConflict | null => 
   if (!(error instanceof ApiError) || error.response.status !== 409) return null
   const data = (error.response.data as { data?: Partial<IdentityConflict> } | null)?.data
   if (
-    data?.reason !== 'institution_identity_conflict' ||
+    (data?.reason !== 'institution_identity_conflict' && data?.reason !== 'institution_directory_admission') ||
     typeof data.proofToken !== 'string' ||
     data.proofToken.length !== 43 ||
     typeof data.expiresAt !== 'string' ||
