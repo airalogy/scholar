@@ -420,6 +420,7 @@ test('papers use the shared multi-stage review state machine and audit trail', a
     institution_org_positions: { findMany: async () => [] },
     institution_org_appointments: { findMany: async () => [] },
     institution_review_workflows: {
+      count: async () => 0,
       findMany: async () => [{ id: WORKFLOW_ID, key: 'paper-review', name: 'Paper Review' }],
     },
     institution_review_workflow_bindings: {

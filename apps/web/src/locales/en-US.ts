@@ -1,4 +1,7 @@
+import personnel from './personnel-en-US'
+
 const enUS = {
+  ...personnel,
   governance: {
     searchUnit: 'Find unit (up to 1,000 matching units)',
     previousPage: 'Previous page',
@@ -145,6 +148,8 @@ const enUS = {
     defaultWorkflow: 'Institution content review',
     parallelStage: 'Author and department confirmation',
     roles: {
+      supervisor: 'Supervisor reviewer',
+      responsible: 'Responsible-person reviewer',
       library_intake: 'Library intake',
       department: 'Department review',
       library_final: 'Library final review',

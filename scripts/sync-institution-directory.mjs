@@ -23,7 +23,7 @@ export const synchronizeDirectory = async ({ baseUrl, slug, sourceId, clientId, 
   if (typeof token !== 'string') throw new Error('Token exchange returned no access token')
   const endpoint = `/v1/institutions/${encodeURIComponent(slug)}/directory/sources/${encodeURIComponent(sourceId)}/runs`
   const pages = Math.max(1, Math.ceil(manifest.rows.length / 500))
-  const { data: run } = await request(endpoint, 'POST', { sequence: manifest.sequence, mode: manifest.mode, expectedPages: pages, expectedRows: manifest.rows.length }, token, { 'Idempotency-Key': `directory-sync:${manifest.sequence}` })
+  const { data: run } = await request(endpoint, 'POST', { schemaVersion: manifest.schemaVersion ?? 1, sequence: manifest.sequence, mode: manifest.mode, expectedPages: pages, expectedRows: manifest.rows.length }, token, { 'Idempotency-Key': `directory-sync:${manifest.sequence}` })
   if (run.status === 'applied') return run
   if (run.status === 'staging') for (let page = 1; page <= pages; page++) await request(`${endpoint}/${run.id}/pages/${page}`, 'PUT', { rows: manifest.rows.slice((page - 1) * 500, page * 500) }, token)
   const { data: validated } = await request(`${endpoint}/${run.id}/validate`, 'POST', {}, token)

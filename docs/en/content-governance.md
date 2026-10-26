@@ -6,6 +6,14 @@ This document explains the design of laboratory-page maintenance, paper review, 
 
 See the [paper review workflow](./paper-review-workflow.md) for the detailed state machine and public-display rules.
 
+## Governed workflows
+
+The default review powers described below apply to the compatible legacy workflow. Once an institution enables governed workflows, explicit reviewer grants and frozen material/routing versions control decisions; owner, admin, and platform administrator status does not replace final-review authority. Governed workflows take precedence over legacy department workflows, and direct edits, deletion, or legacy import approval cannot bypass them.
+
+Institution-designated sources own personnel facts; SSO authenticates and connects first-time accounts. The v2 synchronization contract supports concurrent identities, effective-dated supervisor/responsible-person relationships and history. Conditional routes use verified material authors and publication units, not the upload operator. Relationship changes do not rewrite previous rounds; decisions still require live authority.
+
+See the [personnel and review handbook](../../apps/docs/en/administration/personnel-review.md) for library operations and the [personnel synchronization contract](../../apps/docs/en/integration/personnel-sync.md) for integration. Institution-specific mappings and real personnel data remain private.
+
 ## Motivation
 
 Scholarly metadata is error-prone: author names may be misspelled, affiliations misassigned, DOI or publication details incorrect, and representative papers linked to the wrong laboratory. Unconfirmed data must not flow directly into public search, recommendations, and profile pages.

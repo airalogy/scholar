@@ -28,6 +28,7 @@ export const personalTaskWhere = async (
       { completedBy: userId },
       ...(person ? [{ personId: person.id }, { assignedPersonId: person.id }] : []),
       ...grants.map((grant) => ({
+        kind: 'role',
         role: grant.role,
         nodeId: grant.nodeId,
         assignedPersonId: null,

@@ -20,13 +20,24 @@ export const personAdmitted = async (
     tx.institution_people.findFirst({ where: { id: personId, institutionId } }),
     tx.institution_directory_policies.findUnique({ where: { institutionId } }),
   ])
-  if (
-    !person ||
-    !person.is_active ||
-    person.manually_suspended ||
-    person.lifecycle_status !== 'active'
-  )
-    return false
+  if (!person || person.manually_suspended) return false
+  if (!person.is_active || person.lifecycle_status !== 'active') {
+    // Time-limited login exceptions do not change source facts or reinstate
+    // grants: reviewer eligibility still requires active source personnel.
+    const exception = await tx.institution_directory_corrections.count({
+      where: {
+        institutionId,
+        personId,
+        field: 'admission',
+        value: 'allow',
+        status: 'active',
+        sourceValue: person.lifecycle_status,
+        expiresAt: { gt: new Date() },
+        approvedBy: { not: null },
+      },
+    })
+    if (!exception) return false
+  }
   if (
     policy?.admissionMode === 'directory' &&
     !(await tx.institution_directory_people.findUnique({ where: { personId } }))

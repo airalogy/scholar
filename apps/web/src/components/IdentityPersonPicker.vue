@@ -17,7 +17,7 @@
       <li v-for="person in people" :key="person.id">
         <button
           type="button"
-          :disabled="disabled || !person.is_active || (requireAccount && !person.userId)"
+          :disabled="disabled || (!allowInactive && !person.is_active) || (requireAccount && !person.userId)"
           :aria-pressed="selectedId === person.id"
           @click="$emit('select', person)"
         >
@@ -51,6 +51,7 @@ const props = defineProps<{
   selectedId?: string
   requireAccount?: boolean
   disabled?: boolean
+  allowInactive?: boolean
 }>()
 defineEmits<{ select: [person: IdentityPerson] }>()
 const query = ref('')

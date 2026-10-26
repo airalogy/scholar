@@ -75,6 +75,27 @@ export const canActOnTask = async (
   if (!person || !(await personAdmitted(tx, institutionId, person.id))) return false
   if (task.assignedPersonId && task.assignedPersonId !== person.id) return false
   if (task.kind === 'author') return task.personId === person.id
+  if (task.kind === 'relationship') {
+    if (task.personId !== person.id || !task.subjectPersonId) return false
+    const now = new Date()
+    if (
+      !(await tx.institution_person_relations.count({
+        where: {
+          institutionId,
+          personId: task.subjectPersonId,
+          relatedPersonId: person.id,
+          kind: task.role ?? '',
+          status: 'active',
+          supersededAt: null,
+          AND: [
+            { OR: [{ startsAt: null }, { startsAt: { lte: now } }] },
+            { OR: [{ endsAt: null }, { endsAt: { gt: now } }] },
+          ],
+        },
+      }))
+    )
+      return false
+  }
   if (!task.role) return false
   const step = await tx.content_review_step_instances.findUnique({
     where: { id: task.stepId },

@@ -97,6 +97,17 @@ END $$;
 const assertions = `
 DO $$
 BEGIN
+  IF (SELECT count(*) FROM institution_appointment_history) <> 1
+    OR NOT EXISTS (
+      SELECT 1 FROM institution_appointment_history history
+      JOIN institution_org_appointments appointment ON appointment.id = history."appointmentId"
+      WHERE history."personId" = appointment."personId"
+        AND history."positionId" = appointment."positionId"
+        AND history.status = appointment.status AND history."supersededAt" IS NULL
+    ) OR (SELECT count(*) FROM institution_person_roles) <> 0
+    OR (SELECT count(*) FROM institution_person_relations) <> 0 THEN
+    RAISE EXCEPTION 'Personnel upgrade lost appointments or fabricated identity and supervisor facts';
+  END IF;
   IF (SELECT count(*) FROM content_review_rounds) <> 1
     OR NOT EXISTS (SELECT 1 FROM content_review_rounds WHERE number = 1 AND status = 'approved' AND "materialSnapshot" #>> '{metadata_snapshot,title}' = 'Frozen legacy material')
     OR NOT EXISTS (SELECT 1 FROM content_review_cases WHERE "currentRound" = 1 AND status = 'approved')

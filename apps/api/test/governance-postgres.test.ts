@@ -24,6 +24,12 @@ import { eligibleGrantPeople } from '../src/review/authorization'
 import { executeNextReviewChange } from '../src/review/execution'
 import { applyPaperBibliography } from '../src/bibliography/apply'
 import { createPaper } from '../src/routes/papers/service.create'
+import { personAdmitted } from '../src/directory/policy'
+import { canActOnTask } from '../src/review/authorization'
+import { assertInstitutionIdentitySession } from '../src/utils/institution-identifiers'
+import intakeRoutes from '../src/routes/v1/papers'
+import { updatePaper, deletePaper } from '../src/routes/papers/service.paper'
+import { reviewLegacyPaperImport } from '../src/routes/v1/institutions/service.paper-import-review'
 
 const databaseUrl = process.env.GOVERNANCE_TEST_DATABASE_URL
 const schemaName = `scholar_governance_test_${randomBytes(8).toString('hex')}`
@@ -101,6 +107,7 @@ const fixture = async (t: TestContext) => {
     REVIEW_PUBLIC_ORIGIN: 'https://scholar.example.invalid',
   } as never)
   app.decorate('deployment', {
+    features: { paperUpload: true },
     institution: { slug: institution.slug },
     contentAccess: 'public',
     managementMode: 'self_hosted',
@@ -109,6 +116,7 @@ const fixture = async (t: TestContext) => {
   await app.register(directoryRoutes, { prefix: '/v1/institutions' })
   await app.register(reviewGovernanceRoutes, { prefix: '/v1/institutions' })
   await app.register(reviewRoutes, { prefix: '/v1/reviews' })
+  await app.register(intakeRoutes, { prefix: '/v1/papers' })
   await app.ready()
   t.after(async () => app.close())
   const token = (id: string): string => app.jwt.sign({ userId: id })
@@ -138,10 +146,10 @@ const fixture = async (t: TestContext) => {
   assert.equal(created.statusCode, 200, created.body)
   const source = created.json().data as { id: string }
   let sequence = 0
-  const stage = async (rows: object[], mode = 'incremental') => {
+  const stage = async (rows: object[], mode = 'incremental', schemaVersion = 1) => {
     const result = await post(
       `${base}/directory/sources/${source.id}/runs`,
-      { sequence: ++sequence, mode, expectedPages: 1, expectedRows: rows.length },
+      { schemaVersion, sequence: ++sequence, mode, expectedPages: 1, expectedRows: rows.length },
       owner.id,
       { 'idempotency-key': `run-${sequence}` },
     )
@@ -157,8 +165,8 @@ const fixture = async (t: TestContext) => {
     assert.equal(page.statusCode, 200, page.body)
     return { run, url }
   }
-  const sync = async (rows: object[], mode = 'incremental') => {
-    const { run, url } = await stage(rows, mode)
+  const sync = async (rows: object[], mode = 'incremental', schemaVersion = 1) => {
+    const { run, url } = await stage(rows, mode, schemaVersion)
     const preview = await post(`${url}/validate`, {})
     assert.equal(preview.statusCode, 200, preview.body)
     const applied = await post(`${url}/apply`, {
@@ -223,6 +231,616 @@ describe(
       await prisma?.$disconnect()
       if (databaseUrl && /^scholar_governance_test_[0-9a-f]{16}$/.test(schemaName))
         sql(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`)
+    })
+
+    test('v2 preserves multiple identities, relationship revisions and organization/appointment history', async (t) => {
+      const f = await fixture(t)
+      const base = [
+        personRow('A'),
+        personRow('B'),
+        { kind: 'unit', externalId: 'u1', name: 'First unit', active: true },
+        { kind: 'unit', externalId: 'u2', name: 'Second unit', active: true },
+        { kind: 'unit', externalId: 'lab', name: 'Lab', active: true, parentExternalId: 'u1' },
+        {
+          kind: 'position',
+          externalId: 'position',
+          unitExternalId: 'lab',
+          name: 'Researcher',
+          active: true,
+        },
+      ]
+      const appointment = {
+        kind: 'appointment',
+        externalId: 'appointment',
+        personExternalId: 'A',
+        positionExternalId: 'position',
+        status: 'active',
+        startsAt: null,
+        endsAt: null,
+      }
+      const identity = {
+        kind: 'identity',
+        externalId: 'doctoral',
+        personExternalId: 'A',
+        code: 'doctoral_student',
+        status: 'active',
+        startsAt: null,
+        endsAt: null,
+      }
+      const relationship = {
+        kind: 'relationship',
+        externalId: 'supervisor',
+        personExternalId: 'A',
+        relatedPersonExternalId: 'B',
+        relationship: 'supervisor',
+        status: 'active',
+        startsAt: null,
+        endsAt: null,
+      }
+      await f.sync(
+        [
+          ...base,
+          appointment,
+          identity,
+          { ...identity, externalId: 'assistant', code: 'research_assistant' },
+          relationship,
+        ],
+        'full',
+        2,
+      )
+      assert.equal(
+        await prisma.institution_person_roles.count({
+          where: { institutionId: f.institution.id, supersededAt: null },
+        }),
+        2,
+      )
+      assert.equal(
+        await prisma.institution_reviewer_grants.count({
+          where: { institutionId: f.institution.id },
+        }),
+        0,
+      )
+      await f.sync(
+        [
+          { ...identity, status: 'ended' },
+          { ...relationship, status: 'ended' },
+          { ...appointment, status: 'ended' },
+          {
+            kind: 'unit',
+            externalId: 'lab',
+            name: 'Lab renamed',
+            active: true,
+            parentExternalId: 'u2',
+          },
+        ],
+        'incremental',
+        2,
+      )
+      assert.equal(
+        await prisma.institution_person_roles.count({ where: { institutionId: f.institution.id } }),
+        3,
+      )
+      assert.equal(
+        await prisma.institution_person_relations.count({
+          where: { institutionId: f.institution.id },
+        }),
+        2,
+      )
+      assert.equal(
+        await prisma.institution_appointment_history.count({
+          where: { institutionId: f.institution.id },
+        }),
+        2,
+      )
+      assert.equal(
+        await prisma.institution_org_edge_history.count({
+          where: { institutionId: f.institution.id },
+        }),
+        2,
+      )
+      await prisma.institution_directory_sources.update({
+        where: { id: f.source.id },
+        data: { deactivateMissing: true },
+      })
+      await f.sync(base, 'full', 1)
+      assert.equal(
+        await prisma.institution_person_roles.count({
+          where: { institutionId: f.institution.id, status: 'active', supersededAt: null },
+        }),
+        1,
+        'v1 cannot retire v2 relationships',
+      )
+      await f.sync(base, 'full', 2)
+      assert.equal(
+        await prisma.institution_person_roles.count({
+          where: { institutionId: f.institution.id, status: 'active', supersededAt: null },
+        }),
+        0,
+      )
+      const person = await prisma.institution_people.findFirstOrThrow({
+        where: { institutionId: f.institution.id, internalId: 'A' },
+      })
+      const history = await f.app.inject({
+        url: `${f.base}/directory/people/${person.id}/history`,
+        headers: { authorization: `Bearer ${f.token(f.owner.id)}` },
+      })
+      assert.equal(history.statusCode, 200, history.body)
+      assert.equal(history.json().data.identities.length, 4)
+    })
+
+    test('missing v2 facts require mass-change confirmation and preserve future-dated immutable history', async (t) => {
+      const f = await fixture(t)
+      const people = [personRow('A'), personRow('B')]
+      const dates = {
+        startsAt: new Date(Date.now() + 86400000).toISOString(),
+        endsAt: null,
+        status: 'active',
+      }
+      await f.sync(
+        [
+          ...people,
+          {
+            kind: 'identity',
+            externalId: 'role',
+            personExternalId: 'A',
+            code: 'doctoral_student',
+            ...dates,
+          },
+          {
+            kind: 'relationship',
+            externalId: 'relation',
+            personExternalId: 'A',
+            relatedPersonExternalId: 'B',
+            relationship: 'supervisor',
+            ...dates,
+          },
+        ],
+        'full',
+        2,
+      )
+      const original = await prisma.institution_person_roles.findFirstOrThrow({
+        where: { institutionId: f.institution.id },
+      })
+      await assert.rejects(
+        prisma.institution_person_roles.update({
+          where: { id: original.id },
+          data: { code: 'pi' },
+        }),
+        /immutable/,
+      )
+      await prisma.institution_directory_sources.update({
+        where: { id: f.source.id },
+        data: { deactivateMissing: true },
+      })
+      const staged = await f.stage(people, 'full', 2)
+      const preview = await f.post(`${staged.url}/validate`, {})
+      assert.equal(preview.statusCode, 200, preview.body)
+      assert.equal(preview.json().data.status, 'needs_confirmation')
+      assert.equal(preview.json().data.deactivatedCount, 0)
+      assert.equal(preview.json().data.endedIdentityCount, 1)
+      assert.equal(preview.json().data.endedRelationshipCount, 1)
+      assert.equal((await f.post(`${staged.url}/apply`, {})).statusCode, 409)
+      const applied = await f.post(`${staged.url}/apply`, {
+        confirmDeactivation: true,
+        notes: 'Verified future appointment cancellation',
+      })
+      assert.equal(applied.statusCode, 200, applied.body)
+      const revisions = await prisma.institution_person_roles.findMany({
+        where: { institutionId: f.institution.id },
+        orderBy: { revision: 'asc' },
+      })
+      assert.deepEqual(
+        revisions.map((row) => row.status),
+        ['active', 'ended'],
+      )
+      assert.equal(revisions[1]!.startsAt?.toISOString(), dates.startsAt)
+      assert.equal(revisions[1]!.endsAt, null)
+    })
+
+    test('corrections require independent approval, reconcile source changes and never restore reviewer rights', async (t) => {
+      const f = await fixture(t)
+      await f.sync([personRow('A')])
+      const person = await prisma.institution_people.findFirstOrThrow({
+        where: { institutionId: f.institution.id },
+      })
+      const input = {
+        personId: person.id,
+        field: 'name',
+        value: 'Corrected Name',
+        expiresAt: new Date(Date.now() + 86400000).toISOString(),
+        reason: 'Verified against authoritative record; upstream ticket EXAMPLE',
+      }
+      const created = await f.post(`${f.base}/directory/corrections`, input)
+      assert.equal(created.statusCode, 200, created.body)
+      const id = created.json().data.id
+      const url = `${f.base}/directory/corrections/${id}/decision`
+      assert.equal(
+        (await f.post(url, { decision: 'approve', notes: 'Self approval is forbidden' }))
+          .statusCode,
+        403,
+      )
+      assert.equal(
+        (
+          await f.post(
+            url,
+            { decision: 'approve', notes: 'Independent verification' },
+            f.platform.id,
+          )
+        ).statusCode,
+        200,
+      )
+      assert.equal(
+        (await prisma.institution_people.findUniqueOrThrow({ where: { id: person.id } })).name,
+        'Corrected Name',
+      )
+      await f.sync([personRow('A')])
+      assert.equal(
+        (await prisma.institution_people.findUniqueOrThrow({ where: { id: person.id } })).name,
+        'Corrected Name',
+      )
+      await f.sync([{ ...personRow('A'), name: 'Corrected Name' }])
+      assert.equal(
+        (await prisma.institution_directory_corrections.findUniqueOrThrow({ where: { id } }))
+          .status,
+        'resolved',
+      )
+      await prisma.institution_people.update({
+        where: { id: person.id },
+        data: { userId: f.member.id },
+      })
+      await f.sync([personRow('A', 'departed')])
+      assert.equal(await personAdmitted(prisma, f.institution.id, person.id), false)
+      const admission = await f.post(`${f.base}/directory/corrections`, {
+        ...input,
+        field: 'admission',
+        value: 'allow',
+      })
+      assert.equal(admission.statusCode, 200, admission.body)
+      assert.equal(
+        (
+          await f.post(
+            `${f.base}/directory/corrections/${admission.json().data.id}/decision`,
+            {
+              decision: 'approve',
+              notes: 'Source status verified incorrect; temporary login only',
+            },
+            f.platform.id,
+          )
+        ).statusCode,
+        200,
+      )
+      assert.equal(await personAdmitted(prisma, f.institution.id, person.id), true)
+      assert.deepEqual(
+        await eligibleGrantPeople(prisma, f.institution.id, 'library_final', null),
+        [],
+      )
+      assert.equal(
+        (
+          await f.post(`${f.base}/review-governance/grants`, {
+            personId: person.id,
+            role: 'library_final',
+            startsAt: new Date().toISOString(),
+            endsAt: null,
+            notes: 'Exception must not grant review rights',
+          })
+        ).statusCode,
+        409,
+      )
+      const identifier = await prisma.institution_person_identifiers.findFirstOrThrow({
+        where: { personId: person.id },
+      })
+      assert.equal(
+        await assertInstitutionIdentitySession(prisma, f.member.id, {
+          institutionIdentifierId: identifier.id,
+          institutionIdentifierVersion: identifier.version,
+        }),
+        true,
+      )
+      await f.post(`${f.base}/directory/people/${person.id}/suspension`, {
+        suspended: true,
+        notes: 'Independent security hold',
+      })
+      assert.equal(await personAdmitted(prisma, f.institution.id, person.id), false)
+      assert.equal(
+        await assertInstitutionIdentitySession(prisma, f.member.id, {
+          institutionIdentifierId: identifier.id,
+          institutionIdentifierVersion: identifier.version,
+        }),
+        false,
+      )
+      await f.sync([personRow('A')])
+      assert.equal(
+        (await prisma.institution_people.findUniqueOrThrow({ where: { id: person.id } }))
+          .manually_suspended,
+        true,
+      )
+    })
+
+    test('expired or conflicted corrections stop applying and foreign institutions cannot inspect personnel', async (t) => {
+      const f = await fixture(t)
+      await f.sync([personRow('A')])
+      const person = await prisma.institution_people.findFirstOrThrow({
+        where: { institutionId: f.institution.id },
+      })
+      const create = async (): Promise<string> => {
+        const requested = await f.post(`${f.base}/directory/corrections`, {
+          personId: person.id,
+          field: 'name',
+          value: 'Temporary name',
+          expiresAt: new Date(Date.now() + 86400000).toISOString(),
+          reason: 'Verified temporary typo correction',
+        })
+        assert.equal(requested.statusCode, 200, requested.body)
+        const id = requested.json().data.id as string
+        assert.equal(
+          (
+            await f.post(
+              `${f.base}/directory/corrections/${id}/decision`,
+              { decision: 'approve', notes: 'Independent verification' },
+              f.platform.id,
+            )
+          ).statusCode,
+          200,
+        )
+        return id
+      }
+      const expiredId = await create()
+      await prisma.institution_directory_corrections.update({
+        where: { id: expiredId },
+        data: {
+          createdAt: new Date(Date.now() - 86400000),
+          expiresAt: new Date(Date.now() - 1000),
+        },
+      })
+      const headers = { authorization: `Bearer ${f.token(f.owner.id)}` }
+      const history = await f.app.inject({
+        url: `${f.base}/directory/people/${person.id}/history`,
+        headers,
+      })
+      assert.equal(history.statusCode, 200, history.body)
+      assert.equal(history.json().data.person.name, 'Same Name')
+      assert.equal(
+        (
+          await prisma.institution_directory_corrections.findUniqueOrThrow({
+            where: { id: expiredId },
+          })
+        ).status,
+        'expired',
+      )
+      const conflictedId = await create()
+      await f.sync([{ ...personRow('A'), name: 'Another authoritative name' }])
+      assert.equal(
+        (
+          await prisma.institution_directory_corrections.findUniqueOrThrow({
+            where: { id: conflictedId },
+          })
+        ).status,
+        'conflicted',
+      )
+      assert.equal(
+        (await prisma.institution_people.findUniqueOrThrow({ where: { id: person.id } })).name,
+        'Another authoritative name',
+      )
+      const foreign = await f.app.inject({
+        url: `/v1/institutions/not-this-institution/directory/people/${person.id}/history`,
+        headers,
+      })
+      assert.equal(foreign.statusCode, 404)
+      assert.equal(
+        (
+          await f.post(`${f.base}/review-governance/simulate`, {
+            contentType: 'paper',
+            requestKind: 'submission',
+            personIds: [randomUUID()],
+            nodeIds: [],
+          })
+        ).statusCode,
+        400,
+      )
+    })
+
+    test('routing simulation, immutable rule revisions, supervisor grants and conflict rounds are enforced', async (t) => {
+      const f = await fixture(t)
+      await f.sync(
+        [
+          personRow('STUDENT'),
+          personRow('SUPERVISOR'),
+          personRow('FINAL'),
+          {
+            kind: 'identity',
+            externalId: 'doctoral',
+            personExternalId: 'STUDENT',
+            code: 'doctoral_student',
+            status: 'active',
+            startsAt: null,
+            endsAt: null,
+          },
+          {
+            kind: 'relationship',
+            externalId: 'supervisor',
+            personExternalId: 'STUDENT',
+            relatedPersonExternalId: 'SUPERVISOR',
+            relationship: 'supervisor',
+            status: 'active',
+            startsAt: null,
+            endsAt: null,
+          },
+        ],
+        'full',
+        2,
+      )
+      const student = await prisma.institution_people.findFirstOrThrow({
+        where: { institutionId: f.institution.id, internalId: 'STUDENT' },
+      })
+      const supervisor = await prisma.institution_people.findFirstOrThrow({
+        where: { institutionId: f.institution.id, internalId: 'SUPERVISOR' },
+      })
+      const final = await prisma.institution_people.findFirstOrThrow({
+        where: { institutionId: f.institution.id, internalId: 'FINAL' },
+      })
+      const supervisorUser = await f.user('supervisor')
+      await prisma.institution_people.update({
+        where: { id: supervisor.id },
+        data: { userId: supervisorUser.id },
+      })
+      for (const [personId, role] of [
+        [supervisor.id, 'supervisor'],
+        [final.id, 'library_final'],
+      ]) {
+        const grant = await f.post(`${f.base}/review-governance/grants`, {
+          personId,
+          role,
+          startsAt: new Date(Date.now() - 1000).toISOString(),
+          endsAt: null,
+          notes: 'Explicit reviewer appointment',
+        })
+        assert.equal(grant.statusCode, 200, grant.body)
+      }
+      const finalStage = {
+        name: 'Library final',
+        groups: [{ kind: 'role', role: 'library_final' }],
+        deadlineHours: 24,
+      }
+      const enabled = await f.app.inject({
+        method: 'PUT',
+        url: `${f.base}/review-governance/workflows/paper`,
+        headers: { authorization: `Bearer ${f.token(f.owner.id)}` },
+        payload: { name: 'Default', steps: [finalStage] },
+      })
+      assert.equal(enabled.statusCode, 200, enabled.body)
+      const rule = {
+        key: 'doctoral',
+        name: 'Doctoral submissions',
+        contentType: 'paper',
+        priority: 100,
+        identityCodes: ['doctoral_student'],
+        nodeIds: [],
+        requestKinds: ['submission'],
+        enabled: true,
+        expectedRevision: 0,
+        notes: 'Published after validation',
+        steps: [
+          { name: 'Supervisor', groups: [{ kind: 'supervisors' }], deadlineHours: 24 },
+          finalStage,
+        ],
+      }
+      assert.equal(
+        (await f.post(`${f.base}/review-governance/routes`, rule, f.member.id)).statusCode,
+        403,
+      )
+      const created = await f.post(`${f.base}/review-governance/routes`, rule)
+      assert.equal(created.statusCode, 200, created.body)
+      const preview = await f.post(`${f.base}/review-governance/simulate`, {
+        contentType: 'paper',
+        requestKind: 'submission',
+        personIds: [student.id],
+        nodeIds: [],
+      })
+      assert.equal(preview.statusCode, 200, preview.body)
+      assert.equal(preview.json().data.routing.selected.key, 'doctoral')
+      assert.equal(preview.json().data.stages[0].reviewers[0].personId, supervisor.id)
+      assert.equal((await f.post(`${f.base}/review-governance/routes`, rule)).statusCode, 409)
+      const other = await f.post(`${f.base}/review-governance/routes`, {
+        ...rule,
+        key: 'conflicting',
+      })
+      assert.equal(other.statusCode, 200, other.body)
+      const conflict = await f.post(`${f.base}/review-governance/simulate`, {
+        contentType: 'paper',
+        requestKind: 'submission',
+        personIds: [student.id],
+        nodeIds: [],
+      })
+      assert.match(conflict.json().data.routing.error, /highest priority/)
+      const paper = await prisma.papers.create({
+        data: {
+          title: 'Synthetic routing case',
+          doi: `10.5555/${randomUUID()}`,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      })
+      const submission = await prisma.paper_submissions.create({
+        data: { paperId: paper.id, userId: f.member.id, institutionId: f.institution.id },
+      })
+      const review = await prisma.content_review_cases.create({
+        data: {
+          institutionId: f.institution.id,
+          content_type: 'paper',
+          subjectId: randomUUID(),
+          currentVersionId: submission.id,
+          submittedBy: f.member.id,
+        },
+      })
+      await prisma.content_review_participant_scopes.create({
+        data: {
+          caseId: review.id,
+          versionId: submission.id,
+          personIds: [student.id],
+          nodeIds: [],
+          verifiedBy: f.owner.id,
+          notes: 'Verified authors',
+        },
+      })
+      await prisma.$transaction((tx) =>
+        submitReviewCase(f.app, tx, {
+          caseId: review.id,
+          actorId: f.member.id,
+          versionId: submission.id,
+        }),
+      )
+      const blocked = await prisma.content_review_tasks.findFirstOrThrow({
+        where: { step: { caseId: review.id }, kind: 'routing' },
+      })
+      assert.ok(blocked.exception)
+      const reassign = await f.post(`${f.base}/review-governance/tasks/${blocked.id}/reassign`, {
+        personId: final.id,
+        notes: 'Cannot bypass conflict',
+        expectedVersionId: submission.id,
+      })
+      assert.equal(reassign.statusCode, 409)
+      assert.equal(
+        (
+          await f.post(`${f.base}/review-governance/routes`, {
+            ...rule,
+            key: 'conflicting',
+            expectedRevision: 1,
+            enabled: false,
+          })
+        ).statusCode,
+        200,
+      )
+      const rerouted = await f.post(`${f.base}/review-governance/cases/${review.id}/reroute`, {
+        versionId: submission.id,
+        notes: 'Conflict resolved; repeat review with current rules',
+      })
+      assert.equal(rerouted.statusCode, 200, rerouted.body)
+      assert.equal(await prisma.content_review_rounds.count({ where: { caseId: review.id } }), 2)
+      const task = await prisma.content_review_tasks.findFirstOrThrow({
+        where: { step: { caseId: review.id, roundNumber: 2 }, kind: 'relationship' },
+      })
+      assert.equal(await canActOnTask(prisma, f.institution.id, supervisorUser.id, task), true)
+      await f.sync(
+        [
+          {
+            kind: 'relationship',
+            externalId: 'supervisor',
+            personExternalId: 'STUDENT',
+            relatedPersonExternalId: 'SUPERVISOR',
+            relationship: 'supervisor',
+            status: 'ended',
+            startsAt: null,
+            endsAt: null,
+          },
+        ],
+        'incremental',
+        2,
+      )
+      assert.equal(await canActOnTask(prisma, f.institution.id, supervisorUser.id, task), false)
+      const first = await prisma.content_review_rounds.findFirstOrThrow({
+        where: { caseId: review.id, number: 1 },
+      })
+      assert.ok(JSON.stringify(first.workflowSnapshot).includes('highest priority'))
     })
 
     test('directory staging, preview, stable identities and partial snapshots never grant review rights', async (t) => {
@@ -434,6 +1052,8 @@ describe(
       })
       const headers = { authorization: `Bearer ${token}` }
       assert.equal((await f.app.inject({ url: '/v1/reviews/tasks', headers })).statusCode, 403)
+      for (const path of ['/directory/corrections', '/review-governance/routes'])
+        assert.equal((await f.app.inject({ url: `${f.base}${path}`, headers })).statusCode, 403)
       assert.equal(
         (
           await f.app.inject({
@@ -905,7 +1525,29 @@ describe(
         paper_type: 1,
         language: 2,
       }
-      const first = await createPaper(f.app, input, f.owner.id)
+      const first = await createPaper(f.app, input, f.owner.id, 'same-paper-attempt')
+      const retries = await Promise.all([
+        createPaper(f.app, input, f.owner.id, 'same-paper-attempt'),
+        createPaper(f.app, input, f.owner.id, 'same-paper-attempt'),
+      ])
+      assert.ok(retries.every((result) => result.submissionId === first.submissionId))
+      assert.equal(await prisma.paper_submissions.count({ where: { paperId: first.id } }), 1)
+      await assert.rejects(
+        createPaper(
+          f.app,
+          { ...input, title: 'Different payload' },
+          f.owner.id,
+          'same-paper-attempt',
+        ),
+        /Idempotency/,
+      )
+      const preflight = await f.post(
+        '/v1/papers/submission-check',
+        { doi: input.doi, institutionId: f.institution.id },
+        f.member.id,
+      )
+      assert.equal(preflight.statusCode, 200, preflight.body)
+      assert.deepEqual(preflight.json().data, { action: 'pending', paperId: null })
       await assert.rejects(
         createPaper(f.app, { ...input, title: 'Unrelated replacement' }, f.member.id),
         /original submitter/,
@@ -920,6 +1562,23 @@ describe(
         f.member.id,
       )
       assert.equal(approved.statusCode, 200, approved.body)
+      const publishedPreflight = await f.post('/v1/papers/submission-check', {
+        doi: `https://doi.org/${input.doi}`,
+        institutionId: f.institution.id,
+      })
+      assert.equal(publishedPreflight.json().data.action, 'change_request')
+      await assert.rejects(
+        updatePaper(f.app, first.id, { title: 'Bypass attempt' }, f.platform.id),
+        /versioned change request/,
+      )
+      await assert.rejects(deletePaper(f.app, first.id, f.platform.id), /cannot be deleted/)
+      await assert.rejects(
+        reviewLegacyPaperImport(f.app, f.institution.id, randomUUID(), f.platform.id, {
+          decision: 'approve',
+          notes: 'Legacy bypass attempt',
+        }),
+        /Governed imports require/,
+      )
       await assert.rejects(
         createPaper(f.app, { ...input, title: 'Premature replacement' }, f.owner.id),
         /change request/,

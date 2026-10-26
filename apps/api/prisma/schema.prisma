@@ -425,6 +425,9 @@ model lab_memberships {
 }
 
 model institutions {
+  review_routes           institution_review_routes[]
+  org_edge_history        institution_org_edge_history[]
+  appointment_history     institution_appointment_history[]
   directory_policy        institution_directory_policies?
   directory_sources       institution_directory_sources[]
   reviewer_grants         institution_reviewer_grants[]
@@ -480,20 +483,23 @@ model institution_directory_policies {
 }
 
 model institution_directory_sources {
-  id                     String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  institutionId          String                         @db.Uuid
-  key                    String                         @db.VarChar(64)
-  name                   String                         @db.VarChar(100)
-  enabled                Boolean                        @default(true)
-  authoritative          Boolean                        @default(false)
-  deactivateMissing      Boolean                        @default(false)
-  maxDeactivationPercent Int                            @default(10)
-  expectedIntervalHours  Int                            @default(24)
-  lastSequence           Int                            @default(0)
-  lastAppliedAt          DateTime?                      @db.Timestamp(6)
-  createdAt              DateTime                       @default(now()) @db.Timestamp(6)
-  updatedAt              DateTime                       @default(now()) @db.Timestamp(6)
-  institution            institutions                   @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  identities             institution_person_roles[]
+  relationships          institution_person_relations[]
+  corrections            institution_directory_corrections[]
+  id                     String                              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  institutionId          String                              @db.Uuid
+  key                    String                              @db.VarChar(64)
+  name                   String                              @db.VarChar(100)
+  enabled                Boolean                             @default(true)
+  authoritative          Boolean                             @default(false)
+  deactivateMissing      Boolean                             @default(false)
+  maxDeactivationPercent Int                                 @default(10)
+  expectedIntervalHours  Int                                 @default(24)
+  lastSequence           Int                                 @default(0)
+  lastAppliedAt          DateTime?                           @db.Timestamp(6)
+  createdAt              DateTime                            @default(now()) @db.Timestamp(6)
+  updatedAt              DateTime                            @default(now()) @db.Timestamp(6)
+  institution            institutions                        @relation(fields: [institutionId], references: [id], onDelete: Cascade)
   people                 institution_directory_people[]
   nodes                  institution_org_nodes[]
   positions              institution_org_positions[]
@@ -506,6 +512,7 @@ model institution_directory_sources {
 }
 
 model institution_directory_people {
+  sourceName       String?                       @db.VarChar(100)
   id               String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   institutionId    String                        @db.Uuid
   sourceId         String                        @db.Uuid
@@ -521,28 +528,31 @@ model institution_directory_people {
 }
 
 model institution_directory_runs {
-  id               String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  institutionId    String                        @db.Uuid
-  sourceId         String                        @db.Uuid
-  idempotencyKey   String                        @db.VarChar(128)
-  sequence         Int
-  mode             String                        @db.VarChar(16)
-  status           String                        @default("staging") @db.VarChar(32)
-  expectedPages    Int
-  expectedRows     Int
-  actorUserId      String?                       @db.Uuid
-  credentialId     String?                       @db.Uuid
-  appliedBy        String?                       @db.Uuid
-  createdCount     Int                           @default(0)
-  updatedCount     Int                           @default(0)
-  deactivatedCount Int                           @default(0)
-  error            String?                       @db.VarChar(2000)
-  createdAt        DateTime                      @default(now()) @db.Timestamp(6)
-  validatedAt      DateTime?                     @db.Timestamp(6)
-  appliedAt        DateTime?                     @db.Timestamp(6)
-  source           institution_directory_sources @relation(fields: [sourceId, institutionId], references: [id, institutionId], onDelete: Restrict)
-  pages            institution_directory_pages[]
-  rows             institution_directory_rows[]
+  schemaVersion          Int                           @default(1)
+  id                     String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  institutionId          String                        @db.Uuid
+  sourceId               String                        @db.Uuid
+  idempotencyKey         String                        @db.VarChar(128)
+  sequence               Int
+  mode                   String                        @db.VarChar(16)
+  status                 String                        @default("staging") @db.VarChar(32)
+  expectedPages          Int
+  expectedRows           Int
+  actorUserId            String?                       @db.Uuid
+  credentialId           String?                       @db.Uuid
+  appliedBy              String?                       @db.Uuid
+  createdCount           Int                           @default(0)
+  updatedCount           Int                           @default(0)
+  deactivatedCount       Int                           @default(0)
+  endedIdentityCount     Int                           @default(0)
+  endedRelationshipCount Int                           @default(0)
+  error                  String?                       @db.VarChar(2000)
+  createdAt              DateTime                      @default(now()) @db.Timestamp(6)
+  validatedAt            DateTime?                     @db.Timestamp(6)
+  appliedAt              DateTime?                     @db.Timestamp(6)
+  source                 institution_directory_sources @relation(fields: [sourceId, institutionId], references: [id, institutionId], onDelete: Restrict)
+  pages                  institution_directory_pages[]
+  rows                   institution_directory_rows[]
 
   @@unique([sourceId, idempotencyKey])
   @@unique([sourceId, sequence])
@@ -789,7 +799,7 @@ model paper_identifiers {
   paper            papers   @relation(fields: [paperId], references: [id], onDelete: Cascade)
 
   @@unique([scheme, normalized_value])
-  @@unique([paperId], map: "paper_identifiers_one_doi", where: raw("scheme = 'doi'"))
+  @@unique([paperId], map: "paper_identifiers_one_doi", where: raw("((scheme)::text = 'doi'::text)"))
   @@index([paperId])
 }
 
@@ -1095,28 +1105,30 @@ model institution_paper_author_bindings {
 }
 
 model institution_org_nodes {
-  directorySequence Int                                    @default(0)
-  directorySourceId String?                                @db.Uuid
-  directory_source  institution_directory_sources?         @relation(fields: [directorySourceId, institutionId], references: [id, institutionId], onDelete: NoAction)
-  id                String                                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  institutionId     String                                 @db.Uuid
-  key               String                                 @db.VarChar(100)
-  name              String                                 @db.VarChar(200)
-  code              String?                                @db.VarChar(100)
-  node_type         String                                 @default("unit") @db.VarChar(64)
-  is_active         Boolean                                @default(true)
-  metadata          Json?
-  createdBy         String?                                @db.Uuid
-  createdAt         DateTime                               @default(now()) @db.Timestamp(6)
-  updatedAt         DateTime                               @default(now()) @db.Timestamp(6)
-  institution       institutions                           @relation(fields: [institutionId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_org_nodes_institutionId_fkey")
-  created_by        users?                                 @relation(fields: [createdBy], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "institution_org_nodes_createdBy_fkey")
-  outgoing_edges    institution_org_edges[]                @relation("OrgEdgeFromNode")
-  incoming_edges    institution_org_edges[]                @relation("OrgEdgeToNode")
-  positions         institution_org_positions[]
-  review_bindings   institution_review_workflow_bindings[]
-  paper_claims      paper_claims[]
-  content_reviews   content_review_cases[]
+  historical_parent_edges institution_org_edge_history[]         @relation("HistoricalParent")
+  historical_child_edges  institution_org_edge_history[]         @relation("HistoricalChild")
+  directorySequence       Int                                    @default(0)
+  directorySourceId       String?                                @db.Uuid
+  directory_source        institution_directory_sources?         @relation(fields: [directorySourceId, institutionId], references: [id, institutionId], onDelete: NoAction)
+  id                      String                                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  institutionId           String                                 @db.Uuid
+  key                     String                                 @db.VarChar(100)
+  name                    String                                 @db.VarChar(200)
+  code                    String?                                @db.VarChar(100)
+  node_type               String                                 @default("unit") @db.VarChar(64)
+  is_active               Boolean                                @default(true)
+  metadata                Json?
+  createdBy               String?                                @db.Uuid
+  createdAt               DateTime                               @default(now()) @db.Timestamp(6)
+  updatedAt               DateTime                               @default(now()) @db.Timestamp(6)
+  institution             institutions                           @relation(fields: [institutionId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_org_nodes_institutionId_fkey")
+  created_by              users?                                 @relation(fields: [createdBy], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "institution_org_nodes_createdBy_fkey")
+  outgoing_edges          institution_org_edges[]                @relation("OrgEdgeFromNode")
+  incoming_edges          institution_org_edges[]                @relation("OrgEdgeToNode")
+  positions               institution_org_positions[]
+  review_bindings         institution_review_workflow_bindings[]
+  paper_claims            paper_claims[]
+  content_reviews         content_review_cases[]
 
   @@unique([institutionId, key], map: "institution_org_nodes_institutionId_key_idx")
   @@index([institutionId])
@@ -1145,6 +1157,11 @@ model institution_org_edges {
 }
 
 model institution_people {
+  appointment_history     institution_appointment_history[]
+  identity_roles          institution_person_roles[]
+  relationships           institution_person_relations[]      @relation("RelationshipSubject")
+  related_people          institution_person_relations[]      @relation("RelationshipResponsible")
+  directory_corrections   institution_directory_corrections[]
   personnel_category      String                              @default("unknown") @db.VarChar(32)
   lifecycle_status        String                              @default("active") @db.VarChar(32)
   manually_suspended      Boolean                             @default(false)
@@ -1250,7 +1267,7 @@ model institution_identity_requests {
   person             institution_people?           @relation(fields: [personId, institutionId], references: [id, institutionId], onDelete: NoAction)
   events             institution_identity_events[]
 
-  @@unique([institutionId, provider, normalizedId], map: "institution_identity_requests_open_idx", where: raw("status IN ('pending', 'needs_information')"))
+  @@unique([institutionId, provider, normalizedId], map: "institution_identity_requests_open_idx", where: raw("((status)::text = ANY ((ARRAY['pending'::character varying, 'needs_information'::character varying])::text[]))"))
   @@index([institutionId, status, createdAt])
   @@index([institutionId, provider, normalizedId, createdAt])
   @@index([personId, institutionId])
@@ -1304,22 +1321,23 @@ model institution_person_events {
 }
 
 model institution_org_positions {
-  directorySequence  Int                            @default(0)
-  directorySourceId  String?                        @db.Uuid
-  directory_source   institution_directory_sources? @relation(fields: [directorySourceId, institutionId], references: [id, institutionId], onDelete: NoAction)
-  id                 String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  institutionId      String                         @db.Uuid
-  nodeId             String                         @db.Uuid
-  key                String                         @db.VarChar(100)
-  name               String                         @db.VarChar(100)
-  code               String?                        @db.VarChar(64)
-  can_review_content Boolean                        @default(false)
-  is_active          Boolean                        @default(true)
+  history            institution_appointment_history[]
+  directorySequence  Int                               @default(0)
+  directorySourceId  String?                           @db.Uuid
+  directory_source   institution_directory_sources?    @relation(fields: [directorySourceId, institutionId], references: [id, institutionId], onDelete: NoAction)
+  id                 String                            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  institutionId      String                            @db.Uuid
+  nodeId             String                            @db.Uuid
+  key                String                            @db.VarChar(100)
+  name               String                            @db.VarChar(100)
+  code               String?                           @db.VarChar(64)
+  can_review_content Boolean                           @default(false)
+  is_active          Boolean                           @default(true)
   metadata           Json?
-  createdAt          DateTime                       @default(now()) @db.Timestamp(6)
-  updatedAt          DateTime                       @default(now()) @db.Timestamp(6)
-  institution        institutions                   @relation(fields: [institutionId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_org_positions_institutionId_fkey")
-  node               institution_org_nodes          @relation(fields: [nodeId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_org_positions_nodeId_fkey")
+  createdAt          DateTime                          @default(now()) @db.Timestamp(6)
+  updatedAt          DateTime                          @default(now()) @db.Timestamp(6)
+  institution        institutions                      @relation(fields: [institutionId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_org_positions_institutionId_fkey")
+  node               institution_org_nodes             @relation(fields: [nodeId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "institution_org_positions_nodeId_fkey")
   appointments       institution_org_appointments[]
 
   @@unique([institutionId, key], map: "institution_org_positions_institutionId_key_idx")
@@ -1357,6 +1375,7 @@ model institution_org_appointments {
 }
 
 model institution_review_workflows {
+  routing_version      institution_review_routes?
   id                   String                                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   institutionId        String                                 @db.Uuid
   key                  String                                 @db.VarChar(100)
@@ -1466,6 +1485,7 @@ model content_review_rounds {
 }
 
 model content_review_tasks {
+  subjectPersonId  String?                       @db.Uuid
   id               String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   stepId           String                        @db.Uuid
   kind             String                        @db.VarChar(32)
@@ -1704,6 +1724,8 @@ model degree_thesis_versions {
 }
 
 model paper_submissions {
+  idempotencyKey     String?        @db.VarChar(128)
+  requestDigest      String?        @db.VarChar(64)
   id                 String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   paperId            String         @db.Uuid
   claimId            String?        @db.Uuid
@@ -1723,6 +1745,7 @@ model paper_submissions {
   lab                labs?          @relation(fields: [labId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "paper_submissions_labId_fkey")
   oss_file           oss_files?     @relation(fields: [oss_file_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "paper_submissions_oss_file_id_fkey")
 
+  @@unique([userId, idempotencyKey], map: "paper_submissions_userid_idempotencykey_key")
   @@index([paperId])
   @@index([claimId])
   @@index([userId])
@@ -1918,6 +1941,136 @@ model scholar_research_timeline_requests {
   @@unique([user_id, idempotency_key], map: "scholar_timeline_requests_user_idempotency_key")
   @@index([generation_id], map: "scholar_timeline_requests_generation_idx")
   @@index([generation_id, user_id], map: "scholar_timeline_requests_generation_user_idx")
+}
+
+// Source revisions retain both business validity and recording time.
+model institution_person_roles {
+  id            String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  institutionId String                        @db.Uuid
+  sourceId      String                        @db.Uuid
+  externalId    String                        @db.VarChar(100)
+  revision      Int
+  sequence      Int
+  personId      String                        @db.Uuid
+  code          String                        @db.VarChar(32)
+  status        String                        @db.VarChar(16)
+  startsAt      DateTime?                     @db.Timestamp(6)
+  endsAt        DateTime?                     @db.Timestamp(6)
+  recordedAt    DateTime                      @default(now()) @db.Timestamp(6)
+  supersededAt  DateTime?                     @db.Timestamp(6)
+  source        institution_directory_sources @relation(fields: [sourceId, institutionId], references: [id, institutionId], onDelete: Restrict)
+  person        institution_people            @relation(fields: [personId, institutionId], references: [id, institutionId], onDelete: Restrict)
+
+  @@unique([sourceId, externalId, revision])
+  @@unique([sourceId, externalId], map: "personnel_role_current", where: raw("(\"supersededAt\" IS NULL)"))
+  @@index([institutionId, personId, supersededAt])
+}
+
+model institution_person_relations {
+  id              String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  institutionId   String                        @db.Uuid
+  sourceId        String                        @db.Uuid
+  externalId      String                        @db.VarChar(100)
+  revision        Int
+  sequence        Int
+  personId        String                        @db.Uuid
+  relatedPersonId String                        @db.Uuid
+  kind            String                        @db.VarChar(32)
+  status          String                        @db.VarChar(16)
+  startsAt        DateTime?                     @db.Timestamp(6)
+  endsAt          DateTime?                     @db.Timestamp(6)
+  recordedAt      DateTime                      @default(now()) @db.Timestamp(6)
+  supersededAt    DateTime?                     @db.Timestamp(6)
+  source          institution_directory_sources @relation(fields: [sourceId, institutionId], references: [id, institutionId], onDelete: Restrict)
+  person          institution_people            @relation("RelationshipSubject", fields: [personId, institutionId], references: [id, institutionId], onDelete: Restrict)
+  relatedPerson   institution_people            @relation("RelationshipResponsible", fields: [relatedPersonId, institutionId], references: [id, institutionId], onDelete: Restrict)
+
+  @@unique([sourceId, externalId, revision])
+  @@unique([sourceId, externalId], map: "personnel_relation_current", where: raw("(\"supersededAt\" IS NULL)"))
+  @@index([institutionId, personId, supersededAt])
+}
+
+model institution_org_edge_history {
+  id            String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  institutionId String                @db.Uuid
+  fromNodeId    String                @db.Uuid
+  toNodeId      String                @db.Uuid
+  edgeType      String                @db.VarChar(64)
+  recordedAt    DateTime              @default(now()) @db.Timestamp(6)
+  endedAt       DateTime?             @db.Timestamp(6)
+  institution   institutions          @relation(fields: [institutionId], references: [id], onDelete: Restrict)
+  parent        institution_org_nodes @relation("HistoricalParent", fields: [fromNodeId], references: [id], onDelete: Restrict)
+  child         institution_org_nodes @relation("HistoricalChild", fields: [toNodeId], references: [id], onDelete: Restrict)
+
+  @@index([institutionId, toNodeId, endedAt])
+}
+
+model institution_appointment_history {
+  id            String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  institutionId String                    @db.Uuid
+  appointmentId String                    @db.Uuid
+  personId      String                    @db.Uuid
+  positionId    String                    @db.Uuid
+  status        String                    @db.VarChar(32)
+  startsAt      DateTime?                 @db.Timestamp(6)
+  endsAt        DateTime?                 @db.Timestamp(6)
+  recordedAt    DateTime                  @default(now()) @db.Timestamp(6)
+  supersededAt  DateTime?                 @db.Timestamp(6)
+  institution   institutions              @relation(fields: [institutionId], references: [id], onDelete: Restrict)
+  person        institution_people        @relation(fields: [personId], references: [id], onDelete: Restrict)
+  position      institution_org_positions @relation(fields: [positionId], references: [id], onDelete: Restrict)
+
+  @@index([institutionId, personId, recordedAt])
+}
+
+model institution_directory_corrections {
+  id               String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  institutionId    String                        @db.Uuid
+  sourceId         String                        @db.Uuid
+  personId         String                        @db.Uuid
+  field            String                        @db.VarChar(32)
+  sourceValue      String                        @db.VarChar(100)
+  value            String                        @db.VarChar(100)
+  baselineSequence Int
+  status           String                        @default("requested") @db.VarChar(32)
+  reason           String                        @db.VarChar(2000)
+  requestedBy      String                        @db.Uuid
+  approvedBy       String?                       @db.Uuid
+  createdAt        DateTime                      @default(now()) @db.Timestamp(6)
+  approvedAt       DateTime?                     @db.Timestamp(6)
+  expiresAt        DateTime                      @db.Timestamp(6)
+  closedAt         DateTime?                     @db.Timestamp(6)
+  source           institution_directory_sources @relation(fields: [sourceId, institutionId], references: [id, institutionId], onDelete: Restrict)
+  person           institution_people            @relation(fields: [personId, institutionId], references: [id, institutionId], onDelete: Restrict)
+
+  @@unique([personId, field], map: "directory_correction_open", where: raw("((status)::text = ANY ((ARRAY['requested'::character varying, 'active'::character varying])::text[]))"))
+  @@index([institutionId, status, expiresAt])
+  @@index([personId, field, status])
+}
+
+model institution_review_routes {
+  id            String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  institutionId String                       @db.Uuid
+  key           String                       @db.VarChar(64)
+  revision      Int
+  name          String                       @db.VarChar(100)
+  contentType   String                       @db.VarChar(32)
+  priority      Int
+  identityCodes String[]                     @default([])
+  nodeIds       String[]                     @default([]) @db.Uuid
+  requestKinds  String[]                     @default([])
+  enabled       Boolean                      @default(true)
+  workflowId    String                       @unique @db.Uuid
+  createdBy     String                       @db.Uuid
+  notes         String                       @db.VarChar(2000)
+  createdAt     DateTime                     @default(now()) @db.Timestamp(6)
+  supersededAt  DateTime?                    @db.Timestamp(6)
+  institution   institutions                 @relation(fields: [institutionId], references: [id], onDelete: Restrict)
+  workflow      institution_review_workflows @relation(fields: [workflowId], references: [id], onDelete: Restrict)
+
+  @@unique([institutionId, key, revision])
+  @@unique([institutionId, key], map: "review_route_current", where: raw("(\"supersededAt\" IS NULL)"))
+  @@index([institutionId, contentType, supersededAt])
 }
 
 model scholar_research_timeline_issues {

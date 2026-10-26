@@ -2,7 +2,6 @@ import type { FastifyInstance } from 'fastify'
 import { Prisma } from '../../prisma/generated/client'
 import {
   loadReviewResolutionContext,
-  resolveApplicableWorkflow,
   resolveWorkflowStepReviewers,
 } from '../utils/institution-org-structure'
 import { getInstitutionAccessById, getUserPlatformRole } from '../utils/permissions'
@@ -11,6 +10,7 @@ import { userAdmitted } from '../directory/policy'
 import { createReviewRound } from './rounds'
 import { createStepTasks, activateStepTasks, enqueueInboxEvent } from './tasks'
 import { canActOnTask } from './authorization'
+import { resolveSubmissionWorkflow } from './routing'
 
 export type ReviewContentType = 'paper' | 'degree_thesis'
 export type ReviewCaseStatus =
@@ -220,11 +220,14 @@ export const submitReviewCase = async (
       ? await client.content_review_changes.findUniqueOrThrow({ where: { id: existing.subjectId } })
       : null
   const contentType = (change?.subjectType ?? existing.content_type) as ReviewContentType
-  const resolvedWorkflow = await resolveApplicableWorkflow(
-    client,
+  const resolvedWorkflow = await resolveSubmissionWorkflow(
+    client as Prisma.TransactionClient,
     existing.institutionId,
-    input.reviewNodeId ?? existing.reviewNodeId,
     contentType,
+    input.reviewNodeId ?? existing.reviewNodeId,
+    existing.id,
+    input.versionId,
+    change?.kind ?? 'submission',
   )
   if (resolvedWorkflow && resolvedWorkflow.steps.length > 10) {
     throw fastify.httpErrors.badRequest('A review workflow cannot exceed ten stages')

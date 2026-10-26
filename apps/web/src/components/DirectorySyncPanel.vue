@@ -40,6 +40,7 @@
       <details><summary>{{ $t('governance.suspension') }}</summary><IdentityPersonPicker :slug="slug" :disabled="busy" :selected-id="suspendPerson?.id" @select="suspendPerson = $event" /><form class="settings-form" @submit.prevent="suspend"><label>{{ $t('governance.reason') }}<input v-model="suspendNotes" required maxlength="2000"></label><label><input v-model="suspended" type="checkbox">{{ $t('governance.suspended') }}</label><p>{{ $t('governance.unsuspended') }}</p><button :disabled="busy || !suspendPerson">{{ $t('governance.apply') }}</button></form></details>
       <form v-if="applying" class="confirmation" @submit.prevent="apply">
         <p>{{ $t('governance.applyWarning', { count: applying.deactivatedCount }) }}</p>
+        <p>{{ $t('personnel.endedFacts', { identities: applying.endedIdentityCount ?? 0, relationships: applying.endedRelationshipCount ?? 0 }) }}</p>
         <label>{{ $t('governance.reason') }}<input v-model="applyNotes" required maxlength="2000"></label>
         <label><input v-model="confirmed" type="checkbox" required>{{ $t('governance.confirmApply') }}</label>
         <button :disabled="busy || !confirmed">{{ $t('governance.apply') }}</button><button type="button" @click="applying = null">{{ $t('governance.cancel') }}</button>

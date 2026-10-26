@@ -19,8 +19,25 @@ export const grantReviewer = async (
     await lockMutationScope(tx, 'institution-identity', admin.institutionId)
     if (!(await personAdmitted(tx, admin.institutionId, input.personId)))
       throw fastify.httpErrors.conflict('Reviewer must be an active admitted person')
+    const sourcePerson = await tx.institution_people.findFirst({
+      where: {
+        id: input.personId,
+        institutionId: admin.institutionId,
+        is_active: true,
+        lifecycle_status: 'active',
+        manually_suspended: false,
+      },
+    })
+    if (!sourcePerson)
+      throw fastify.httpErrors.conflict(
+        'A temporary login exception cannot receive reviewer authority',
+      )
     if (input.role === 'department' && !input.nodeId)
       throw fastify.httpErrors.badRequest('Department grants require a unit scope')
+    if (['supervisor', 'responsible'].includes(input.role) && input.nodeId)
+      throw fastify.httpErrors.badRequest(
+        'Responsible-person grants use institution scope; the relationship limits each task',
+      )
     const startsAt = new Date(input.startsAt)
     const endsAt = input.endsAt ? new Date(input.endsAt) : null
     if (endsAt && endsAt <= startsAt)
@@ -183,6 +200,10 @@ export const reassignReviewTask = async (
       throw fastify.httpErrors.conflict('Task or material version is no longer current')
     if (!(await personAdmitted(tx, admin.institutionId, input.personId)))
       throw fastify.httpErrors.conflict('Assignee is not currently admitted')
+    if (task.kind === 'routing' || task.kind === 'relationship')
+      throw fastify.httpErrors.conflict(
+        'Correct the rule or responsible-person relationship and start a new round',
+      )
     if (task.kind === 'author' && !task.personId)
       throw fastify.httpErrors.conflict(
         'Verify all participants and start a new review round; an unmatched author cannot be bypassed by reassignment',

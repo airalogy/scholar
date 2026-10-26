@@ -5,6 +5,8 @@ import {
   assertInstitutionInternalId,
 } from '../utils/institution-identifiers'
 import type { DirectoryRow } from './schema'
+import { writePersonnelRelationship } from './relationships'
+import { reconcilePersonCorrections } from './corrections'
 
 type Source = institution_directory_sources
 const ownedKey = (source: Source, id: string): string =>
@@ -146,10 +148,12 @@ const writePerson = async (
       personId: person.id,
       externalId: row.externalId,
       lastSeenSequence: sequence,
+      sourceName: row.name.trim(),
     },
-    update: { lastSeenSequence: sequence },
+    update: { lastSeenSequence: sequence, sourceName: row.name.trim() },
   })
   if (row.status !== 'active') await suspendPersonPrivileges(tx, source.institutionId, person.id)
+  await reconcilePersonCorrections(tx, source.institutionId, person.id)
   return existing ? 'updated' : 'created'
 }
 
@@ -160,6 +164,8 @@ export const writeDirectoryRecord = async (
   row: DirectoryRow,
 ): Promise<'created' | 'updated'> => {
   if (row.kind === 'person') return writePerson(tx, source, sequence, row)
+  if (row.kind === 'identity' || row.kind === 'relationship')
+    return writePersonnelRelationship(tx, source, sequence, row)
   // Hash the source-specific key to stay within the existing 100-character limit.
   const key = ownedKey(source, row.externalId)
   const institutionId = source.institutionId
@@ -337,6 +343,14 @@ export const writeDirectoryHierarchy = async (
   })
   if (foreignParent || manualParent)
     throw new Error('Source cannot replace a manually managed organization relationship')
+  const current = await tx.institution_org_edges.findMany({
+    where: { institutionId: source.institutionId, toNodeId: child.id, edge_type: 'hierarchy' },
+  })
+  if (
+    (!parent && !current.length) ||
+    (parent && current.length === 1 && current[0]!.fromNodeId === parent.id)
+  )
+    return
   await tx.institution_org_edges.deleteMany({
     where: { institutionId: source.institutionId, toNodeId: child.id, edge_type: 'hierarchy' },
   })

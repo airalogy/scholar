@@ -4,6 +4,8 @@ export const ReviewerRoleSchema = Type.Union([
   Type.Literal('library_intake'),
   Type.Literal('department'),
   Type.Literal('library_final'),
+  Type.Literal('supervisor'),
+  Type.Literal('responsible'),
 ])
 export const ReviewGroupSchema = Type.Union([
   Type.Object(
@@ -16,6 +18,8 @@ export const ReviewGroupSchema = Type.Union([
   ),
   Type.Object({ kind: Type.Literal('authors') }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('departments') }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal('supervisors') }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal('responsible') }, { additionalProperties: false }),
 ])
 export const GovernedStepSchema = Type.Object(
   {

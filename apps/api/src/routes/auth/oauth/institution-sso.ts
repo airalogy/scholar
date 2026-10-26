@@ -199,7 +199,12 @@ const syncInstitutionSsoUser = async (
   }
   return fastify.prisma.$transaction(async (tx) => {
     await lockMutationScope(tx, 'institution-identity', institution.id)
-    const identifier = await resolveInstitutionIdentifier(tx, institution.id, profile.internalId)
+    const identifier = await resolveInstitutionIdentifier(
+      tx,
+      institution.id,
+      profile.internalId,
+      true,
+    )
     let person = identifier?.person ?? null
     const identity = await tx.user_external_identities.findUnique({
       where: {
@@ -221,8 +226,6 @@ const syncInstitutionSsoUser = async (
         },
       })
     }
-    if (person && !person.is_active)
-      throw fastify.httpErrors.forbidden('Institution identity is inactive')
     const admission = await tx.institution_directory_policies.findUnique({
       where: { institutionId: institution.id },
     })

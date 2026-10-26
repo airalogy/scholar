@@ -2,7 +2,46 @@ import { Type, type Static } from 'typebox'
 
 const key = Type.String({ minLength: 1, maxLength: 100, pattern: '\\S' })
 const nullableDate = Type.Union([Type.String({ format: 'date-time' }), Type.Null()])
+export const PersonnelRoleSchema = Type.Union([
+  Type.Literal('undergraduate'),
+  Type.Literal('masters_student'),
+  Type.Literal('doctoral_student'),
+  Type.Literal('postgraduate'),
+  Type.Literal('postdoc'),
+  Type.Literal('faculty'),
+  Type.Literal('staff'),
+  Type.Literal('pi'),
+  Type.Literal('research_assistant'),
+  Type.Literal('visitor'),
+  Type.Literal('other'),
+])
+const relationshipDates = {
+  status: Type.Union([Type.Literal('active'), Type.Literal('ended')]),
+  startsAt: nullableDate,
+  endsAt: nullableDate,
+}
 export const DirectoryRowSchema = Type.Union([
+  Type.Object(
+    {
+      kind: Type.Literal('identity'),
+      externalId: key,
+      personExternalId: key,
+      code: PersonnelRoleSchema,
+      ...relationshipDates,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal('relationship'),
+      externalId: key,
+      personExternalId: key,
+      relatedPersonExternalId: key,
+      relationship: Type.Union([Type.Literal('supervisor'), Type.Literal('responsible')]),
+      ...relationshipDates,
+    },
+    { additionalProperties: false },
+  ),
   Type.Object(
     {
       kind: Type.Literal('person'),
@@ -71,6 +110,7 @@ export const DirectoryPageSchema = Type.Object(
 )
 export const DirectoryRunSchema = Type.Object(
   {
+    schemaVersion: Type.Optional(Type.Union([Type.Literal(1), Type.Literal(2)])),
     sequence: Type.Integer({ minimum: 1, maximum: 2147483647 }),
     mode: Type.Union([Type.Literal('full'), Type.Literal('incremental')]),
     expectedPages: Type.Integer({ minimum: 1, maximum: 1000 }),

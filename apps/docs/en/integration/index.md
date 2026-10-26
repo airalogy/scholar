@@ -25,6 +25,8 @@ Continue with [Authentication and Access](/en/integration/authentication) or ope
 
 ## Personnel directory synchronization
 
+Use the [personnel synchronization contract](/en/integration/personnel-sync) and [field reference](/en/integration/personnel-fields) for all six record types, a downloadable example, recovery and acceptance checks. The basic example below uses the compatible v1 contract; v2 also supports identities and supervisor/responsible-person relationships.
+
 Keep institution-specific extraction/mapping in a private adapter. Scholar accepts typed facts, not account roles. A person has a stable source `externalId` and one or more institution identifiers. Names/email never merge people; new verified identifiers do not replace the primary identifier. People can exist without user accounts.
 
 Standard client manifest:

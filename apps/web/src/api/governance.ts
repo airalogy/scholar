@@ -9,6 +9,7 @@ export interface DirectorySource {
 export interface DirectoryRun {
   id: string; sourceId: string; sequence: number; mode: string; status: string
   expectedRows: number; createdCount: number; updatedCount: number; deactivatedCount: number
+  endedIdentityCount?: number; endedRelationshipCount?: number
   error: string | null; createdAt: string
 }
 export interface DirectoryState {
@@ -32,7 +33,7 @@ export interface ReviewGrant {
   id: string; personId: string; role: string; nodeId: string | null; endsAt: string | null; revokedAt: string | null
   person: { name: string; userId: string | null; is_active: boolean }
 }
-export interface ReviewGroup { kind: 'role' | 'authors' | 'departments'; role?: string; nodeId?: string }
+export interface ReviewGroup { kind: 'role' | 'authors' | 'departments' | 'supervisors' | 'responsible'; role?: string; nodeId?: string }
 export interface ReviewStage { name: string; groups: ReviewGroup[]; deadlineHours: number; ccPersonIds?: string[] }
 export interface ReviewAdminState {
   nextOffset: number | null
@@ -56,7 +57,7 @@ export const loadReviewTask = async (id: string, signal?: AbortSignal): Promise<
 export const stageDirectorySnapshot = async (slug: string, source: DirectorySource, rows: unknown[], mode: 'full' | 'incremental', signal?: AbortSignal): Promise<DirectoryRun> => {
   const base = `${governanceBase(slug)}/directory/sources/${source.id}/runs`
   const pageCount = Math.max(1, Math.ceil(rows.length / 500))
-  const run = (await apiClient.post<Result<DirectoryRun>>(base, { sequence: source.lastSequence + 1, mode, expectedPages: pageCount, expectedRows: rows.length }, { headers: { 'Idempotency-Key': crypto.randomUUID() }, signal })).data.data
+  const run = (await apiClient.post<Result<DirectoryRun>>(base, { schemaVersion: rows.some(row => row && typeof row === 'object' && 'kind' in row && ['identity', 'relationship'].includes(String(row.kind))) ? 2 : 1, sequence: source.lastSequence + 1, mode, expectedPages: pageCount, expectedRows: rows.length }, { headers: { 'Idempotency-Key': crypto.randomUUID() }, signal })).data.data
   for (let page = 1; page <= pageCount; page++) await apiClient.put(`${base}/${run.id}/pages/${page}`, { rows: rows.slice((page - 1) * 500, page * 500) }, { signal })
   return governancePost<DirectoryRun>(`${base}/${run.id}/validate`, {}, signal)
 }

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 2,
+  "sequence": 1,
+  "mode": "incremental",
+  "rows": [
+    { "kind": "person", "externalId": "person-student-1", "name": "Example Student", "identifiers": ["STU-0001"], "category": "postgraduate", "status": "active" },
+    { "kind": "person", "externalId": "person-supervisor-1", "name": "Example Supervisor", "identifiers": ["EMP-0001"], "category": "staff", "status": "active" },
+    { "kind": "unit", "externalId": "unit-science", "name": "Example School", "active": true, "parentExternalId": null },
+    { "kind": "unit", "externalId": "unit-group", "name": "Example Research Group", "active": true, "parentExternalId": "unit-science" },
+    { "kind": "position", "externalId": "post-student", "unitExternalId": "unit-group", "name": "Doctoral Researcher", "active": true },
+    { "kind": "position", "externalId": "post-supervisor", "unitExternalId": "unit-group", "name": "Group Leader", "active": true },
+    { "kind": "appointment", "externalId": "appointment-student-1", "personExternalId": "person-student-1", "positionExternalId": "post-student", "status": "active", "startsAt": "2026-09-01T00:00:00Z", "endsAt": null },
+    { "kind": "appointment", "externalId": "appointment-supervisor-1", "personExternalId": "person-supervisor-1", "positionExternalId": "post-supervisor", "status": "active", "startsAt": null, "endsAt": null },
+    { "kind": "identity", "externalId": "identity-student-1", "personExternalId": "person-student-1", "code": "doctoral_student", "status": "active", "startsAt": "2026-09-01T00:00:00Z", "endsAt": null },
+    { "kind": "identity", "externalId": "identity-supervisor-1", "personExternalId": "person-supervisor-1", "code": "pi", "status": "active", "startsAt": null, "endsAt": null },
+    { "kind": "relationship", "externalId": "supervision-1", "personExternalId": "person-student-1", "relatedPersonExternalId": "person-supervisor-1", "relationship": "supervisor", "status": "active", "startsAt": "2026-09-01T00:00:00Z", "endsAt": null }
+  ]
+}

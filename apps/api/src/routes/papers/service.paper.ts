@@ -3,6 +3,8 @@ import type { papers as PaperRecord } from '../../../prisma/generated/client'
 import type { InstitutionPaperBoundMember } from '../../utils/institution-paper-bindings'
 import type { UpdatePaperBody } from './schema'
 import type { ClaimRecord, FormattedPaper, PaperScope, SubmissionRecord } from './service.shared'
+import { hasGovernedReview } from '../../review/configuration'
+import { lockMutationScope } from '../../utils/advisory-lock'
 import {
   assertCanReviewPaperClaim,
   getInstitutionAccessById,
@@ -672,7 +674,7 @@ export const resolvePaperAccess = async (
       })
     : null
   let claim = ownClaim ? toClaimRecord(ownClaim) : null
-  let submission = ownSubmission
+  let submission: SubmissionRecord | null = ownSubmission
 
   if (!claim) {
     const approvedClaim = await fastify.prisma.paper_claims.findFirst({
@@ -748,6 +750,11 @@ export async function updatePaper(
   }
   await fastify.prisma.$transaction(
     async (tx) => {
+      await lockMutationScope(tx, 'institution-identity', configuredInstitution.id)
+      if (await hasGovernedReview(tx, configuredInstitution.id, 'paper'))
+        throw fastify.httpErrors.conflict(
+          'Use a versioned change request for governed paper metadata',
+        )
       await updateLegacyPaperMetadata(tx, id, body, {
         institutionId: configuredInstitution.id,
         actorUserId: userId,
@@ -791,6 +798,11 @@ export async function deletePaper(fastify: FastifyInstance, id: string, userId: 
 
   const claimIds = claims.map((claim) => claim.id)
   await fastify.prisma.$transaction(async (tx) => {
+    await lockMutationScope(tx, 'institution-identity', configuredInstitution.id)
+    if (await hasGovernedReview(tx, configuredInstitution.id, 'paper'))
+      throw fastify.httpErrors.conflict(
+        'Use institutional withdrawal; governed papers cannot be deleted directly',
+      )
     await tx.$queryRawUnsafe('SELECT id FROM papers WHERE id = $1::uuid FOR UPDATE', id)
     const editions = await tx.$queryRawUnsafe<Array<{ status: string }>>(
       'SELECT e.status FROM bibliometric_editions e JOIN paper_indicators i ON i."editionId" = e.id WHERE i."paperId" = $1::uuid FOR SHARE OF e',

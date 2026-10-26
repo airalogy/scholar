@@ -10,6 +10,14 @@ export const directoryRecordBefore = async (
   source: institution_directory_sources,
   row: DirectoryRow,
 ): Promise<Prisma.InputJsonValue | undefined> => {
+  if (row.kind === 'identity' || row.kind === 'relationship') {
+    const where = { sourceId: source.id, externalId: row.externalId, supersededAt: null }
+    const previous =
+      row.kind === 'identity'
+        ? await tx.institution_person_roles.findFirst({ where })
+        : await tx.institution_person_relations.findFirst({ where })
+    return previous ? (JSON.parse(JSON.stringify(previous)) as Prisma.InputJsonValue) : undefined
+  }
   if (row.kind === 'person') {
     const owned = await tx.institution_directory_people.findUnique({
       where: { sourceId_externalId: { sourceId: source.id, externalId: row.externalId } },

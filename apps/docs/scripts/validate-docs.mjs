@@ -25,8 +25,11 @@ const requiredPairs = [
   'integration/index.md',
   'integration/authentication.md',
   'integration/bulk-import.md',
+  'integration/personnel-sync.md',
+  'integration/personnel-fields.md',
   'administration/index.md',
   'administration/data-import.md',
+  'administration/personnel-review.md',
   'reference/openapi.md',
 ]
 

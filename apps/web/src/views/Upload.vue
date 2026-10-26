@@ -138,6 +138,7 @@
             </div>
 
             <div v-if="errorMsg" class="form-error">{{ errorMsg }}</div>
+            <router-link v-if="existingPaperId" :to="`/papers/${existingPaperId}`">{{ $t('routing.viewExisting') }}</router-link>
 
             <div class="form-footer">
               <button
@@ -191,6 +192,7 @@ const selectedFile = ref<File | null>(null)
 const isDragOver = ref(false)
 const isUploading = ref(false)
 const errorMsg = ref('')
+const existingPaperId = ref<string | null>(null)
 const uploadedPaper = ref<PaperResponse | null>(null)
 let uploadController: AbortController | undefined
 let disposed = false
@@ -386,6 +388,7 @@ async function loadSubmissionScopes() {
 }
 
 async function handleSubmit() {
+  existingPaperId.value = null
   if (!canSubmit.value || isUploading.value) return
   const doi = form.value.doi.trim().replace(/^https?:\/\/(?:dx\.)?doi\.org\//iu, '').replace(/^doi:\s*/iu, '').trim().toLowerCase()
   if (!/^10\.\d{4,9}\/\S+$/u.test(doi) || doi.length > 100) {
@@ -437,7 +440,10 @@ async function handleSubmit() {
     keywordInput.value = ''
   } catch (err: unknown) {
     if (disposed) return
-    if (uploadController.signal.aborted) errorMsg.value = t('upload.cancelled')
+    if (err instanceof Error && 'action' in err && 'paperId' in err && typeof err.action === 'string') {
+      errorMsg.value = t(`routing.duplicates.${err.action}`)
+      existingPaperId.value = typeof err.paperId === 'string' ? err.paperId : null
+    } else if (uploadController.signal.aborted) errorMsg.value = t('upload.cancelled')
     else if (err instanceof Error && err.message === 'Request timed out') errorMsg.value = t('upload.requestTimedOut')
     else if (err instanceof TypeError) errorMsg.value = t('upload.networkError')
     else errorMsg.value = getErrorMessage(err, t('upload.uploadFailed'))

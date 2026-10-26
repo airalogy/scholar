@@ -39,9 +39,11 @@
       <h3>{{ $t('governance.pendingTasks') }}</h3>
       <article v-for="task in state.tasks" :key="task.id" class="task-card">
         <h4>{{ task.material.title }}</h4><p>{{ task.stage }} · {{ task.exception || $t('governance.awaitingReviewer') }}</p>
-        <button :disabled="busy" @click="selectTask(task)">{{ $t('governance.reassign') }}</button>
+        <button v-if="task.kind !== 'routing' && task.kind !== 'relationship'" :disabled="busy" @click="selectTask(task)">{{ $t('governance.reassign') }}</button>
+        <button :disabled="busy" @click="restartTask = task; restartNotes = ''">{{ $t('routing.restart') }}</button>
         <button :disabled="busy" @click="selectParticipants(task)">{{ $t('governance.verifyParticipants') }}</button>
       </article>
+      <form v-if="restartTask" class="settings-form" @submit.prevent="restartRound"><p>{{ $t('routing.restartNotice') }}</p><label>{{ $t('governance.reason') }}<input v-model="restartNotes" required maxlength="2000"></label><button :disabled="busy || !restartNotes.trim()">{{ $t('routing.restart') }}</button><button type="button" @click="restartTask = null">{{ $t('governance.cancel') }}</button></form>
       <form v-if="participantTask" class="settings-form" @submit.prevent="saveParticipants">
         <p>{{ $t('governance.participantNotice') }}</p>
         <ul><li v-for="person in participantPeople" :key="person.id">{{ person.name }}</li></ul>
@@ -80,7 +82,7 @@ const search = ref('')
 const busy = ref(false)
 const error = ref('')
 const controller = new AbortController()
-const roles = ['library_intake', 'department', 'library_final'] as const
+const roles = ['library_intake', 'department', 'library_final', 'supervisor', 'responsible'] as const
 const choices = ['library_intake', 'authors', 'departments', 'library_final'] as const
 type Choice = typeof choices[number]
 const grantForm = reactive({ personId: '', role: 'library_intake', nodeId: '', endsAt: '', notes: '' })
@@ -96,6 +98,8 @@ const participantTask = ref<ReviewAdminState['tasks'][number] | null>(null)
 const participantPeople = ref<Array<{ id: string; name: string }>>([])
 const participantNodes = ref<string[]>([])
 const participantNotes = ref('')
+const restartTask = ref<ReviewAdminState['tasks'][number] | null>(null)
+const restartNotes = ref('')
 const base = (): string => `${governanceBase(props.slug)}/review-governance`
 const refresh = async (): Promise<void> => { state.value = await loadReviewAdmin(props.slug, controller.signal, offset.value, nodeSearch.value) }
 const page = async (next: number): Promise<void> => perform(async () => { offset.value = next })
@@ -127,6 +131,11 @@ const selectTask = (task: ReviewAdminState['tasks'][number]): void => { selected
 const reassign = async (): Promise<void> => perform(async () => { if (!selectedTask.value) return; await governancePost(`${base()}/tasks/${selectedTask.value.id}/reassign`, { ...assignment, nodeId: assignment.nodeId || undefined, expectedVersionId: selectedTask.value.versionId }, controller.signal); selectedTask.value = null })
 const retryNotifications = async (): Promise<void> => perform(() => governancePost(`${base()}/notifications/retry`, { notes: retryNotes.value }, controller.signal))
 const retryExecution = async (id: string): Promise<void> => perform(() => governancePost(`${base()}/changes/${id}/retry`, { notes: retryNotes.value }, controller.signal))
+const restartRound = async (): Promise<void> => perform(async () => {
+  if (!restartTask.value || !restartNotes.value.trim()) return
+  await governancePost(`${base()}/cases/${restartTask.value.caseId}/reroute`, { versionId: restartTask.value.versionId, notes: restartNotes.value }, controller.signal)
+  restartTask.value = null
+})
 const reconcileNotifications = async (): Promise<void> => perform(async () => { let offset: number | null = 0; while (offset !== null && !controller.signal.aborted) { const result: { nextOffset: number | null } = await governancePost(`${base()}/notifications/reconcile`, { notes: retryNotes.value, offset }, controller.signal); offset = result.nextOffset } })
 onMounted(async () => { await perform(async () => { await refresh(); people.value = (await listIdentityPeople(props.slug, '', 0, controller.signal)).items; selectWorkflow() }) })
 onUnmounted(() => controller.abort())

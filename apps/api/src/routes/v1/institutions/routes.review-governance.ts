@@ -14,12 +14,14 @@ import { ReviewerGrantSchema, GovernedWorkflowSchema } from '../../../review/gov
 import { publicReviewMaterial } from '../../../review/queries'
 import { participantCandidates, verifyReviewParticipants } from '../../../review/participants'
 import { enqueueInboxEvent } from '../../../review/tasks'
+import { personnelGovernanceRoutes } from './routes.personnel-governance'
 
 const params = Type.Object({ slug: Type.String() })
 const response = { 200: Type.Object({ code: Type.Literal(0), data: Type.Unknown() }) }
 const note = Type.String({ minLength: 1, maxLength: 2000 })
 
 export const reviewGovernanceRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
+  await fastify.register(personnelGovernanceRoutes)
   fastify.setValidatorCompiler(TypeBoxValidatorCompiler)
   fastify.post(
     '/:slug/review-governance/changes/:changeId/retry',

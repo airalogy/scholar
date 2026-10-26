@@ -1,4 +1,7 @@
+import personnel from './personnel-zh-CN'
+
 const zhCN = {
+  ...personnel,
   governance: {
     searchUnit: '查找单位（最多显示 1,000 个匹配项）',
     previousPage: '上一页',
@@ -145,6 +148,8 @@ const zhCN = {
     defaultWorkflow: '机构内容审核',
     parallelStage: '作者与部门确认',
     roles: {
+      supervisor: '导师审核',
+      responsible: '负责人审核',
       library_intake: '图书馆初审',
       department: '部门审核',
       library_final: '图书馆终审',

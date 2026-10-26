@@ -21,12 +21,14 @@ export const assertInstitutionInternalId = (value: string): string => {
   return internalId
 }
 
-export type IdentifierClient = Pick<Prisma.TransactionClient, 'institution_person_identifiers'>
+export type IdentifierClient = Pick<Prisma.TransactionClient, 'institution_person_identifiers'> &
+  Partial<Pick<Prisma.TransactionClient, 'institution_directory_corrections'>>
 
 export const resolveInstitutionIdentifier = async (
   prisma: IdentifierClient,
   institutionId: string,
   value: string,
+  checkAdmissionSeparately = false,
 ): Promise<Prisma.institution_person_identifiersGetPayload<{
   include: { person: true }
 }> | null> => {
@@ -39,7 +41,10 @@ export const resolveInstitutionIdentifier = async (
     },
     include: { person: true },
   })
-  if (identifier?.revokedAt || identifier?.person.is_active === false) {
+  if (
+    identifier?.revokedAt ||
+    (!checkAdmissionSeparately && identifier?.person.is_active === false)
+  ) {
     throw new InstitutionPersonConflictError('Institution identifier is no longer active')
   }
   return identifier
@@ -65,13 +70,35 @@ export const assertInstitutionIdentitySession = async (
     return false
   const identifier = await prisma.institution_person_identifiers.findUnique({
     where: { id: claims.institutionIdentifierId },
-    include: { person: { select: { userId: true, is_active: true } } },
+    include: {
+      person: {
+        select: { userId: true, is_active: true, lifecycle_status: true, manually_suspended: true },
+      },
+    },
   })
+  const exception =
+    identifier &&
+    !identifier.person.is_active &&
+    !identifier.person.manually_suspended &&
+    prisma.institution_directory_corrections
+      ? await prisma.institution_directory_corrections.count({
+          where: {
+            institutionId: identifier.institutionId,
+            personId: identifier.personId,
+            field: 'admission',
+            status: 'active',
+            value: 'allow',
+            sourceValue: identifier.person.lifecycle_status,
+            expiresAt: { gt: new Date() },
+            approvedBy: { not: null },
+          },
+        })
+      : 0
   return Boolean(
     identifier &&
     !identifier.revokedAt &&
     identifier.version === claims.institutionIdentifierVersion &&
-    identifier.person.is_active &&
+    (identifier.person.is_active || exception > 0) &&
     identifier.person.userId === userId,
   )
 }

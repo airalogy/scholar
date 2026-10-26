@@ -16,6 +16,8 @@ import {
 } from './records'
 import { exceedsDeactivationLimit } from './policy'
 import { directoryRecordBefore } from './preview'
+import { retireMissingRelationships } from './relationships'
+import { reconcilePersonCorrections } from './corrections'
 
 export interface DirectoryActor {
   userId: string
@@ -48,6 +50,7 @@ export const beginDirectoryRun = async (
     if (existing) {
       if (
         existing.sequence !== input.sequence ||
+        existing.schemaVersion !== (input.schemaVersion ?? 1) ||
         existing.mode !== input.mode ||
         existing.expectedPages !== input.expectedPages ||
         existing.expectedRows !== input.expectedRows
@@ -102,6 +105,13 @@ export const stageDirectoryPage = async (
       }
       if (rows.some((row) => !Check(DirectoryRowSchema, row)))
         throw fastify.httpErrors.badRequest('Invalid directory row')
+      if (
+        run.schemaVersion < 2 &&
+        rows.some((row) => row.kind === 'identity' || row.kind === 'relationship')
+      )
+        throw fastify.httpErrors.badRequest(
+          'Identity and relationship records require schemaVersion 2',
+        )
       const count = await tx.institution_directory_rows.count({ where: { runId } })
       if (count + rows.length > run.expectedRows)
         throw fastify.httpErrors.badRequest('Snapshot exceeds declared row count')
@@ -138,6 +148,8 @@ interface Changes {
   created: number
   updated: number
   deactivated: number
+  endedIdentities: number
+  endedRelationships: number
   confirmationRequired: boolean
 }
 class DirectoryRowError extends Error {
@@ -153,14 +165,24 @@ const applyRows = async (
   source: institution_directory_sources,
   run: institution_directory_runs,
 ): Promise<Changes> => {
-  const changes: Changes = { created: 0, updated: 0, deactivated: 0, confirmationRequired: false }
+  const changes: Changes = {
+    created: 0,
+    updated: 0,
+    deactivated: 0,
+    endedIdentities: 0,
+    endedRelationships: 0,
+    confirmationRequired: false,
+  }
+  const currentFacts = { sourceId: source.id, status: 'active', supersededAt: null }
+  const identitiesBefore = await tx.institution_person_roles.count({ where: currentFacts })
+  const relationshipsBefore = await tx.institution_person_relations.count({ where: currentFacts })
   const activeBefore = await tx.institution_directory_people.count({
     where: { sourceId: source.id, person: { is_active: true } },
   })
   const grantsBefore = await tx.institution_reviewer_grants.count({
     where: { institutionId: source.institutionId, revokedAt: null },
   })
-  for (const kind of ['unit', 'person', 'position', 'appointment']) {
+  for (const kind of ['unit', 'person', 'position', 'appointment', 'identity', 'relationship']) {
     let cursor: string | undefined
     while (true) {
       const rows = await tx.institution_directory_rows.findMany({
@@ -172,6 +194,12 @@ const applyRows = async (
       for (const row of rows) {
         if (!Check(DirectoryRowSchema, row.payload)) throw new Error('Invalid staged row')
         const data = row.payload as DirectoryRow
+        if ((data.kind === 'identity' || data.kind === 'relationship') && data.status === 'ended') {
+          const where = { ...currentFacts, externalId: data.externalId }
+          if (data.kind === 'identity')
+            changes.endedIdentities += await tx.institution_person_roles.count({ where })
+          else changes.endedRelationships += await tx.institution_person_relations.count({ where })
+        }
         if (data.kind === 'person' && data.status !== 'active') {
           const prior = await tx.institution_directory_people.findUnique({
             where: { sourceId_externalId: { sourceId: source.id, externalId: data.externalId } },
@@ -223,6 +251,11 @@ const applyRows = async (
     cursor = units.at(-1)!.id
   }
   if (run.mode === 'full' && source.authoritative && source.deactivateMissing) {
+    if (run.schemaVersion >= 2) {
+      const ended = await retireMissingRelationships(tx, source.id, run.sequence)
+      changes.endedIdentities += ended.identities
+      changes.endedRelationships += ended.relationships
+    }
     // A full source snapshot covers assignments as well as people. Removing a
     // post must not leave its former reviewer authorization alive indefinitely.
     while (true) {
@@ -275,6 +308,7 @@ const applyRows = async (
           data: { is_active: false, lifecycle_status: 'departed', updatedAt: new Date() },
         })
         await suspendPersonPrivileges(tx, source.institutionId, record.personId)
+        await reconcilePersonCorrections(tx, source.institutionId, record.personId)
       }
       changes.deactivated += missing.length
       if (missing.length < 250) break
@@ -294,6 +328,17 @@ const applyRows = async (
     grantsBefore - grantsAfter,
     source.maxDeactivationPercent,
   )
+  changes.confirmationRequired ||=
+    exceedsDeactivationLimit(
+      identitiesBefore,
+      changes.endedIdentities,
+      source.maxDeactivationPercent,
+    ) ||
+    exceedsDeactivationLimit(
+      relationshipsBefore,
+      changes.endedRelationships,
+      source.maxDeactivationPercent,
+    )
   return changes
 }
 
@@ -381,6 +426,8 @@ export const finishDirectoryRun = async (
             createdCount: changes.created,
             updatedCount: changes.updated,
             deactivatedCount: changes.deactivated,
+            endedIdentityCount: changes.endedIdentities,
+            endedRelationshipCount: changes.endedRelationships,
             error: null,
           },
         })
@@ -397,6 +444,8 @@ export const finishDirectoryRun = async (
           createdCount: error.changes.created,
           updatedCount: error.changes.updated,
           deactivatedCount: error.changes.deactivated,
+          endedIdentityCount: error.changes.endedIdentities,
+          endedRelationshipCount: error.changes.endedRelationships,
           error: null,
         },
       })

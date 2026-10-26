@@ -20,6 +20,16 @@ The authoritative versions are defined in `apps/api/package.json`.
 - **Common plugins**: Autoload, Env, Multipart, Rate Limit, and Sensible
 - **Development logging**: `pino-pretty` `^13.1.3`
 
+## Field naming and compatibility
+
+- New custom business APIs use `camelCase` for JSON fields, query parameters and TypeScript properties, for example `externalId`, `institutionId` and `createdAt`. Requests, responses, TypeBox schemas, frontend types, documentation and examples must agree.
+- Treat acronyms as ordinary words: use `personId` and `sourceUrl`, not `personID` or `sourceURL`. Field names are case-sensitive; alternate spellings are not automatically accepted.
+- Prefer `snake_case` for new database tables and columns. Prisma `@map` / `@@map` can retain camelCase code properties. Do not migrate existing columns for style alone. Define API fields through explicit projections instead of exposing database models as the contract.
+- Published contracts remain unchanged, including `institution_id` and `external_id` in legacy upload and paper/scholar import APIs. Renaming requires a compatibility transition or a new API version, not a silent product patch. If a transition accepts both spellings, reject conflicting input and document one canonical spelling.
+- Preserve the existing authentication exchange fields `client_id`, `client_secret`, `access_token`, `token_type` and `expires_in`. HTTP headers such as `Idempotency-Key` are also outside the JSON naming rule.
+- Enum values such as `doctoral_student` and `needs_confirmation`, scopes such as `directory:sync`, institution-defined dictionary keys and raw source data must not be renamed automatically. Do not recursively transform arbitrary JSON keys or values.
+- The personnel synchronization, conditional review routing and upload preflight APIs in this work use camelCase. `test/api-naming.test.ts` checks their schemas and actual responses. Extend coverage with new interfaces; a passing check does not mean legacy APIs throughout the repository have been migrated.
+
 ## Upstream documentation
 
 - [Fastify](https://fastify.dev/docs/latest/)

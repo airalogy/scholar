@@ -27,6 +27,18 @@ export const createStepTasks = async (
   step: content_review_step_instances,
 ): Promise<void> => {
   if (step.resolver_type !== 'governance') return
+  const raw = step.resolver_config as Prisma.JsonObject
+  if (typeof raw?.routingError === 'string') {
+    await tx.content_review_tasks.create({
+      data: {
+        stepId: step.id,
+        kind: 'routing',
+        status: 'pending',
+        exception: raw.routingError,
+      },
+    })
+    return
+  }
   if (!Check(GovernedStepSchema, step.resolver_config))
     throw new Error('Invalid governed workflow step')
   const config = step.resolver_config as GovernedStep
@@ -35,14 +47,70 @@ export const createStepTasks = async (
   })
   const snapshot = round.materialSnapshot as Prisma.JsonObject
   const participants = snapshot.participants as { personIds?: string[]; nodeIds?: string[] } | null
+  const routing = (round.workflowSnapshot as Prisma.JsonObject)?.routing as
+    | {
+        selected?: { identityCodes?: string[] }
+        context?: { identities?: Array<{ personId: string; codes: string[] }> }
+      }
+    | undefined
+  const roleFilter = routing?.selected?.identityCodes ?? []
+  const relationshipSubjects = (participants?.personIds ?? []).filter(
+    (personId) =>
+      !roleFilter.length ||
+      routing?.context?.identities?.some(
+        (person) =>
+          person.personId === personId && person.codes.some((code) => roleFilter.includes(code)),
+      ),
+  )
   const definitions: Array<{
     kind: string
     role?: string
     personId?: string
+    subjectPersonId?: string
     nodeId?: string
     exception?: string
   }> = []
   for (const group of config.groups) {
+    if (group.kind === 'supervisors' || group.kind === 'responsible') {
+      const kind = group.kind === 'supervisors' ? 'supervisor' : 'responsible'
+      if (!participants?.personIds?.length)
+        definitions.push({
+          kind: 'relationship',
+          role: kind,
+          exception: 'Verify all institution authors before resolving responsible people',
+        })
+      for (const subjectPersonId of relationshipSubjects) {
+        const now = new Date()
+        const relations = await tx.institution_person_relations.findMany({
+          where: {
+            institutionId: reviewCase.institutionId,
+            personId: subjectPersonId,
+            kind,
+            status: 'active',
+            supersededAt: null,
+            AND: [
+              { OR: [{ startsAt: null }, { startsAt: { lte: now } }] },
+              { OR: [{ endsAt: null }, { endsAt: { gt: now } }] },
+            ],
+          },
+        })
+        if (!relations.length)
+          definitions.push({
+            kind: 'relationship',
+            role: kind,
+            subjectPersonId,
+            exception:
+              'No effective responsible-person relationship; correct the source and start a new round',
+          })
+        for (const relation of relations)
+          definitions.push({
+            kind: 'relationship',
+            role: kind,
+            subjectPersonId,
+            personId: relation.relatedPersonId,
+          })
+      }
+    }
     if (group.kind === 'role')
       definitions.push({ kind: 'role', role: group.role, nodeId: group.nodeId })
     if (group.kind === 'departments') {
@@ -93,7 +161,10 @@ export const createStepTasks = async (
             : 'queued',
         exception:
           definition.exception ??
-          (definition.role && !eligible.length ? 'No active scoped reviewer grant' : null),
+          (definition.role &&
+          !eligible.some((person) => !definition.personId || person.id === definition.personId)
+            ? 'No active scoped reviewer grant'
+            : null),
         dueAt:
           step.status === 'pending' ? new Date(Date.now() + config.deadlineHours * 3600000) : null,
       },
