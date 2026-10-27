@@ -39,6 +39,7 @@
       <h3>{{ $t('governance.pendingTasks') }}</h3>
       <article v-for="task in state.tasks" :key="task.id" class="task-card">
         <h4>{{ task.material.title }}</h4><p>{{ task.stage }} · {{ task.exception || $t('governance.awaitingReviewer') }}</p>
+        <router-link :to="`/reviews/cases/${task.caseId}`">{{ $t('reviewProgress.open') }}</router-link>
         <button v-if="task.kind !== 'routing' && task.kind !== 'relationship'" :disabled="busy" @click="selectTask(task)">{{ $t('governance.reassign') }}</button>
         <button :disabled="busy" @click="restartTask = task; restartNotes = ''">{{ $t('routing.restart') }}</button>
         <button :disabled="busy" @click="selectParticipants(task)">{{ $t('governance.verifyParticipants') }}</button>
@@ -62,7 +63,7 @@
       <form class="settings-form" @submit.prevent="retryNotifications"><label>{{ $t('governance.reason') }}<input v-model="retryNotes" required maxlength="2000"></label><button :disabled="busy">{{ $t('governance.retryNotifications') }}</button></form>
       <button :disabled="busy || !retryNotes.trim()" @click="reconcileNotifications">{{ $t('governance.reconcileNotifications') }}</button>
       <h3>{{ $t('governance.executionFailures') }}</h3>
-      <article v-for="failure in state.executionFailures" :key="failure.id"><p>{{ $t(`governance.changeKinds.${failure.kind}`) }} · {{ failure.error }}</p><button :disabled="busy || !retryNotes.trim()" @click="retryExecution(failure.id)">{{ $t('governance.retryExecution') }}</button></article>
+      <article v-for="failure in state.executionFailures" :key="failure.id"><p>{{ $t(`governance.changeKinds.${failure.kind}`) }} · {{ failure.error }}</p><router-link :to="`/reviews/cases/${failure.caseId}`">{{ $t('reviewProgress.open') }}</router-link><button :disabled="busy || !retryNotes.trim()" @click="retryExecution(failure.id)">{{ $t('governance.retryExecution') }}</button></article>
       <nav><button v-if="offset" :disabled="busy" @click="page(Math.max(0, offset - 100))">{{ $t('governance.previousPage') }}</button><button v-if="state.nextOffset !== null" :disabled="busy" @click="page(state.nextOffset)">{{ $t('governance.more') }}</button></nav>
     </template>
   </section>

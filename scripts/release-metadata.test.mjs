@@ -128,6 +128,23 @@ test('release metadata rejects a tag that differs from the product version', asy
   )
 })
 
+test('administrator recovery rejects non-interactive input before invoking containers', async () => {
+  const fixture = await prepareFixture()
+  const envPath = path.join(fixture.root, '.env')
+  await writeFile(envPath, `SCHOLAR_VERSION=${version}\nINSTITUTION_SLUG=example\n`)
+  assert.throws(() => execFileSync('sh', [path.join(repositoryRoot, 'deploy', 'scholarctl'), 'recover-admin'], {
+    cwd: repositoryRoot,
+    env: { ...process.env, SCHOLAR_ENV_FILE: envPath, SCHOLAR_STATE_DIR: path.join(fixture.root, 'state') },
+    encoding: 'utf8', stdio: 'pipe',
+  }), /requires an interactive terminal/)
+  const source = await readFile(path.join(repositoryRoot, 'deploy', 'scholarctl'), 'utf8')
+  const recovery = source.slice(source.indexOf('recover_admin() {'), source.indexOf('\nusage() {'))
+  assert.match(recovery, /stty -echo/)
+  assert.match(recovery, /printf '%s\\000'/)
+  assert.match(recovery, /--no-deps -T --entrypoint node api dist\/src\/scripts\/recover-administrator.js/)
+  assert.doesNotMatch(recovery, /-e .*PASSWORD|--password/)
+})
+
 test('deployment write operations reject a concurrent operation lock', async () => {
   const fixture = await prepareFixture()
   const envPath = path.join(fixture.root, '.env')
@@ -147,7 +164,7 @@ test('deployment write operations reject a concurrent operation lock', async () 
         encoding: 'utf8',
         stdio: 'pipe',
       }),
-    /Another Scholar install, upgrade, backup, or bootstrap operation is already running/,
+    /Another Scholar install, upgrade, backup, bootstrap, or recovery operation is already running/,
   )
 })
 

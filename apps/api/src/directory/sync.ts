@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
+import { permissionContext } from '../administrators/access'
 import type {
   Prisma,
   institution_directory_runs,
@@ -366,6 +367,19 @@ export const finishDirectoryRun = async (
           where: { id: sourceId },
         })
         await lockMutationScope(tx, 'institution-identity', initial.institutionId)
+        await permissionContext(tx, {
+          institutionId: initial.institutionId,
+          actorUserId: options.actor.credentialId ? undefined : options.actor.userId,
+          actorLabel: options.actor.credentialId
+            ? `Directory credential ${options.actor.credentialId}`
+            : undefined,
+          source: 'directory_sync',
+          reason:
+            `Run ${runId}: ${options.notes?.trim() || 'Authoritative directory update'}`.slice(
+              0,
+              1000,
+            ),
+        })
         const source = await tx.institution_directory_sources.findUniqueOrThrow({
           where: { id: sourceId },
         })

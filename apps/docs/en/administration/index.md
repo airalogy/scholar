@@ -2,6 +2,8 @@
 
 For personnel lifecycle, routing simulation, handover and controlled corrections, see the [personnel and review handbook](/en/administration/personnel-review).
 
+For administrator appointment, permission auditing, departure handoff and host-only emergency recovery, see [Administrator Governance and Recovery](/en/administration/administrator-governance).
+
 Scholar provides layered administration in the same product. After sign-in, the application retrieves the current access summary from the server and shows only the tools and institutions assigned to that account.
 
 ## Administration levels

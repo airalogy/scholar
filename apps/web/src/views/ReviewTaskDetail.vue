@@ -6,6 +6,7 @@
     <template v-if="task">
       <h1>{{ task.material.title || $t('governance.reviewMaterial') }}</h1>
       <p>{{ task.stage }} · {{ $t('governance.round', { number: task.round }) }}</p>
+      <router-link :to="`/reviews/cases/${task.caseId}`">{{ $t('reviewProgress.open') }}</router-link>
       <p class="notice">{{ $t('governance.frozenNotice') }}</p>
       <dl class="material-list"><template v-for="entry in materialEntries" :key="entry.key"><dt>{{ entry.label }}</dt><dd>{{ entry.value }}</dd></template></dl>
       <button v-if="fileId" :disabled="busy" @click="openPdf">{{ $t('governance.openPdf') }}</button>

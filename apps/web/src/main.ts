@@ -3,6 +3,7 @@ import {
   Button,
   Checkbox,
   ConfigProvider,
+  Drawer,
   Empty,
   Form,
   Input,
@@ -14,12 +15,14 @@ import {
   Spin,
   Tabs,
   Textarea,
+  Timeline,
   Tooltip,
   Upload,
 } from '@arco-design/web-vue'
 import '@arco-design/web-vue/es/button/style/css.js'
 import '@arco-design/web-vue/es/checkbox/style/css.js'
 import '@arco-design/web-vue/es/config-provider/style/css.js'
+import '@arco-design/web-vue/es/drawer/style/css.js'
 import '@arco-design/web-vue/es/empty/style/css.js'
 import '@arco-design/web-vue/es/form/style/css.js'
 import '@arco-design/web-vue/es/input/style/css.js'
@@ -32,6 +35,7 @@ import '@arco-design/web-vue/es/select/style/css.js'
 import '@arco-design/web-vue/es/spin/style/css.js'
 import '@arco-design/web-vue/es/tabs/style/css.js'
 import '@arco-design/web-vue/es/textarea/style/css.js'
+import '@arco-design/web-vue/es/timeline/style/css.js'
 import '@arco-design/web-vue/es/tooltip/style/css.js'
 import '@arco-design/web-vue/es/upload/style/css.js'
 import './theme/design-tokens.sass'
@@ -54,6 +58,7 @@ for (const component of [
   Button,
   Checkbox,
   ConfigProvider,
+  Drawer,
   Empty,
   Form,
   Input,
@@ -65,6 +70,7 @@ for (const component of [
   Spin,
   Tabs,
   Textarea,
+  Timeline,
   Tooltip,
   Upload,
 ]) {

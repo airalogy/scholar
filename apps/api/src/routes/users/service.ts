@@ -9,6 +9,7 @@ import {
 } from '../../utils/permissions'
 import { assertCanUseProfileAvatar, resolveAvatarUrl } from '../../utils/avatar'
 import { resolveAdminAccess } from '../../utils/admin-access'
+import { normalizeInstitutionIdentifierKind } from '../../utils/institution-identifiers'
 
 const SALT_ROUNDS = 10
 interface UserJsonItem {
@@ -87,6 +88,16 @@ export async function getMyProfile(fastify: FastifyInstance, userId: string) {
     fastify.prisma.institution_people.findMany({
       where: { userId, institutionId: fixedInstitution.id, is_active: true },
       orderBy: { createdAt: 'asc' },
+      include: {
+        identifiers: {
+          where: {
+            revokedAt: null,
+            NOT: { normalizedValue: { startsWith: 'legacy-user:' } },
+          },
+          orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }],
+          select: { id: true, value: true, isPrimary: true, kind: true },
+        },
+      },
     }),
   ])
 
@@ -284,6 +295,10 @@ export async function getMyProfile(fastify: FastifyInstance, userId: string) {
             institutionName: fixedInstitution.name,
             internalId: institutionPerson.internalId,
             scholarId: institutionPerson.scholarId,
+            identifiers: institutionPerson.identifiers.map((identifier) => ({
+              ...identifier,
+              kind: normalizeInstitutionIdentifierKind(identifier.kind),
+            })),
           }
         : null,
       institution_papers: institutionPaperBindings.map((binding) => ({

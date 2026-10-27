@@ -54,9 +54,25 @@ export const suspendPersonPrivileges = async (
     },
   })
   if (person.userId) {
+    await tx.users.updateMany({
+      where: { id: person.userId, platform_role: 'platform_admin' },
+      data: { platform_role: 'member', updatedAt: now },
+    })
     await tx.institution_memberships.updateMany({
       where: { institutionId, userId: person.userId },
       data: { role: 'member', can_review_content: false, can_import_data: false, updatedAt: now },
+    })
+    await tx.lab_memberships.updateMany({
+      where: { userId: person.userId, lab: { institutionId } },
+      data: { role: 'member', updatedAt: now },
+    })
+    await tx.institution_user_provisions.updateMany({
+      where: { institutionId, createdBy: person.userId, status: 'pending_activation' },
+      data: { status: 'disabled', updatedAt: now },
+    })
+    await tx.institution_api_credentials.updateMany({
+      where: { institutionId, createdBy: person.userId, revokedAt: null },
+      data: { revokedAt: now, secretVersion: { increment: 1 }, updatedAt: now },
     })
     // Recovery belongs to the deployment's independent platform administrator.
     // Returning personnel must not regain an old owner or reviewer appointment.
@@ -64,7 +80,13 @@ export const suspendPersonPrivileges = async (
   if (person.provisionId)
     await tx.institution_user_provisions.update({
       where: { id: person.provisionId },
-      data: { role: 'member', can_review_content: false, can_import_data: false, updatedAt: now },
+      data: {
+        role: 'member',
+        can_review_content: false,
+        can_import_data: false,
+        status: 'disabled',
+        updatedAt: now,
+      },
     })
 }
 

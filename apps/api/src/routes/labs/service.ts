@@ -9,6 +9,50 @@ import {
 } from '../../utils/permissions'
 import { lockMutationScope } from '../../utils/advisory-lock'
 import { assertConfiguredInstitutionId } from '../../utils/institution-scope'
+import type { Prisma } from '../../../prisma/generated/client'
+import { assertActiveTarget, permissionContext } from '../../administrators/access'
+
+const lockLabPermissions = async (
+  fastify: FastifyInstance,
+  tx: Prisma.TransactionClient,
+  lab: LabRecord,
+  actorUserId: string,
+): Promise<void> => {
+  if (lab.institutionId) await lockMutationScope(tx, 'institution-identity', lab.institutionId)
+  await lockMutationScope(tx, 'lab', lab.id)
+  const actor = await tx.users.findUnique({ where: { id: actorUserId } })
+  if (
+    !actor ||
+    (actor.administratorAccessExpiresAt && actor.administratorAccessExpiresAt <= new Date())
+  )
+    throw fastify.httpErrors.forbidden('Account expired')
+  const person = lab.institutionId
+    ? await tx.institution_people.findUnique({
+        where: { institutionId_userId: { institutionId: lab.institutionId, userId: actorUserId } },
+      })
+    : null
+  if (lab.institutionId && (actor.platform_role !== 'platform_admin' || person))
+    await assertActiveTarget(fastify, tx, lab.institutionId, actorUserId)
+  const institutionMember = lab.institutionId
+    ? await tx.institution_memberships.findUnique({
+        where: { institutionId_userId: { institutionId: lab.institutionId, userId: actorUserId } },
+      })
+    : null
+  const labMember = await tx.lab_memberships.findUnique({
+    where: { labId_userId: { labId: lab.id, userId: actorUserId } },
+  })
+  if (
+    actor.platform_role !== 'platform_admin' &&
+    institutionMember?.role !== 'owner' &&
+    labMember?.role !== 'owner'
+  )
+    throw fastify.httpErrors.forbidden('Lab permission changed')
+  await permissionContext(tx, {
+    actorUserId,
+    source: 'lab_membership',
+    reason: 'Lab membership permission change',
+  })
+}
 
 interface ResearchDirectionItem {
   name: string
@@ -381,7 +425,8 @@ export const upsertLabMembership = async (
   }
 
   await fastify.prisma.$transaction(async (tx) => {
-    await lockMutationScope(tx, 'lab', lab.id)
+    await lockLabPermissions(fastify, tx, lab, currentUserId)
+    if (lab.institutionId) await assertActiveTarget(fastify, tx, lab.institutionId, body.userId)
     const currentMembership = await tx.lab_memberships.findUnique({
       where: {
         labId_userId: {
@@ -460,7 +505,7 @@ export const removeLabMembership = async (
   }
 
   await fastify.prisma.$transaction(async (tx) => {
-    await lockMutationScope(tx, 'lab', lab.id)
+    await lockLabPermissions(fastify, tx, lab, currentUserId)
     const currentMembership = await tx.lab_memberships.findUnique({
       where: {
         labId_userId: {

@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify'
 import { randomUUID } from 'node:crypto'
 import { Check } from 'typebox/value'
 import { requireIdentityAdmin } from '../identity/service'
+import { assertPermissionManager } from '../administrators/access'
 import { lockMutationScope } from '../utils/advisory-lock'
 import { resolveApplicableWorkflow } from '../utils/institution-org-structure'
 import { snapshotJson } from './rounds'
@@ -208,6 +209,7 @@ export const saveReviewRoute = async (
   const admin = await requireIdentityAdmin(fastify, slug, userId)
   return fastify.prisma.$transaction(async (tx) => {
     await lockMutationScope(tx, 'institution-identity', admin.institutionId)
+    await assertPermissionManager(fastify, tx, admin.institutionId, userId)
     const previous = await tx.institution_review_routes.findFirst({
       where: { institutionId: admin.institutionId, key: input.key, supersededAt: null },
     })

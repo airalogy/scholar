@@ -3,6 +3,8 @@ import type { FastifyInstance } from 'fastify'
 import { Prisma } from '../../prisma/generated/client'
 import type { UpsertInstitutionOrgStructureBody } from '../routes/institutions/schema'
 import { lockMutationScope } from './advisory-lock'
+import { assertPermissionManager, permissionContext } from '../administrators/access'
+import { suspendPersonPrivileges } from '../directory/records'
 import {
   assertInstitutionInternalId,
   normalizeInstitutionInternalId,
@@ -993,6 +995,13 @@ export const upsertInstitutionOrgStructure = async (
 
   await fastify.prisma.$transaction(async (tx) => {
     await lockMutationScope(tx, 'institution-identity', institutionId)
+    await assertPermissionManager(fastify, tx, institutionId, actorId)
+    await permissionContext(tx, {
+      actorUserId: actorId,
+      institutionId,
+      source: 'organization_structure',
+      reason: 'Legacy organization structure maintenance',
+    })
     if (await tx.institution_directory_sources.count({ where: { institutionId } }))
       throw fastify.httpErrors.conflict(
         'Directory-managed institutions use source synchronization for personnel and organization changes',
@@ -1128,6 +1137,12 @@ export const upsertInstitutionOrgStructure = async (
         },
       })
     }
+
+    const inactivePeople = await tx.institution_people.findMany({
+      where: { institutionId, is_active: false },
+      select: { id: true },
+    })
+    for (const person of inactivePeople) await suspendPersonPrivileges(tx, institutionId, person.id)
 
     const allPeople = await tx.institution_people.findMany({
       where: { institutionId },

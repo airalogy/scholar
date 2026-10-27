@@ -10,6 +10,7 @@ datasource db {
 }
 
 model users {
+  administratorAccessExpiresAt   DateTime?                               @db.Timestamp(6)
   verified_review_scopes         content_review_participant_scopes[]
   bibliography_events            paper_metadata_events[]
   id                             String                                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
@@ -425,52 +426,70 @@ model lab_memberships {
 }
 
 model institutions {
-  review_routes           institution_review_routes[]
-  org_edge_history        institution_org_edge_history[]
-  appointment_history     institution_appointment_history[]
-  directory_policy        institution_directory_policies?
-  directory_sources       institution_directory_sources[]
-  reviewer_grants         institution_reviewer_grants[]
-  bibliography_metadata   institution_paper_metadata[]
-  bibliography_sources    paper_sources[]
-  paper_field_definitions institution_paper_field_definitions[]
-  id                      String                                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name                    String                                 @db.VarChar(200)
-  slug                    String                                 @unique(map: "institutions_slug_idx") @db.VarChar(200)
-  summary                 String?                                @db.VarChar
-  website                 String?                                @db.VarChar(255)
-  createdAt               DateTime                               @default(now()) @db.Timestamp(6)
-  updatedAt               DateTime                               @default(now()) @db.Timestamp(6)
-  labs                    labs[]
-  memberships             institution_memberships[]
-  imports                 institution_data_imports[]
-  join_requests           institution_join_requests[]
-  paper_author_bindings   institution_paper_author_bindings[]
-  paper_claims            paper_claims[]
-  paper_submissions       paper_submissions[]
-  file_access_audits      file_access_audits[]
-  api_credentials         institution_api_credentials[]
-  user_provisions         institution_user_provisions[]
-  stored_files            oss_files[]
-  org_nodes               institution_org_nodes[]
-  org_edges               institution_org_edges[]
-  people                  institution_people[]
-  person_identifiers      institution_person_identifiers[]
-  identity_challenges     institution_identity_challenges[]
-  identity_requests       institution_identity_requests[]
-  identity_events         institution_identity_events[]
-  person_events           institution_person_events[]
-  org_positions           institution_org_positions[]
-  org_appointments        institution_org_appointments[]
-  review_workflows        institution_review_workflows[]
-  review_bindings         institution_review_workflow_bindings[]
-  review_workflow_steps   institution_review_workflow_steps[]
-  content_review_cases    content_review_cases[]
-  content_review_steps    content_review_step_instances[]
-  content_review_actions  content_review_actions[]
-  degree_theses           degree_theses[]
-  academic_subjects       academic_subjects[]
-  subject_mappings        institution_subject_mappings[]
+  administratorInitializedAt DateTime?                              @db.Timestamp(6)
+  review_routes              institution_review_routes[]
+  org_edge_history           institution_org_edge_history[]
+  appointment_history        institution_appointment_history[]
+  directory_policy           institution_directory_policies?
+  directory_sources          institution_directory_sources[]
+  reviewer_grants            institution_reviewer_grants[]
+  bibliography_metadata      institution_paper_metadata[]
+  bibliography_sources       paper_sources[]
+  paper_field_definitions    institution_paper_field_definitions[]
+  id                         String                                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                       String                                 @db.VarChar(200)
+  slug                       String                                 @unique(map: "institutions_slug_idx") @db.VarChar(200)
+  summary                    String?                                @db.VarChar
+  website                    String?                                @db.VarChar(255)
+  createdAt                  DateTime                               @default(now()) @db.Timestamp(6)
+  updatedAt                  DateTime                               @default(now()) @db.Timestamp(6)
+  labs                       labs[]
+  memberships                institution_memberships[]
+  imports                    institution_data_imports[]
+  join_requests              institution_join_requests[]
+  paper_author_bindings      institution_paper_author_bindings[]
+  paper_claims               paper_claims[]
+  paper_submissions          paper_submissions[]
+  file_access_audits         file_access_audits[]
+  api_credentials            institution_api_credentials[]
+  user_provisions            institution_user_provisions[]
+  stored_files               oss_files[]
+  org_nodes                  institution_org_nodes[]
+  org_edges                  institution_org_edges[]
+  people                     institution_people[]
+  person_identifiers         institution_person_identifiers[]
+  identity_challenges        institution_identity_challenges[]
+  identity_requests          institution_identity_requests[]
+  identity_events            institution_identity_events[]
+  person_events              institution_person_events[]
+  org_positions              institution_org_positions[]
+  org_appointments           institution_org_appointments[]
+  review_workflows           institution_review_workflows[]
+  review_bindings            institution_review_workflow_bindings[]
+  review_workflow_steps      institution_review_workflow_steps[]
+  content_review_cases       content_review_cases[]
+  content_review_steps       content_review_step_instances[]
+  content_review_actions     content_review_actions[]
+  degree_theses              degree_theses[]
+  academic_subjects          academic_subjects[]
+  subject_mappings           institution_subject_mappings[]
+}
+
+// Deliberately no mutable identity foreign keys: historical attribution survives account removal.
+model institution_permission_events {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  institutionId String?  @db.Uuid
+  entity        String   @db.VarChar(64)
+  entityId      String   @db.VarChar(100)
+  actorUserId   String?  @db.Uuid
+  actorLabel    String   @db.VarChar(200)
+  source        String   @db.VarChar(100)
+  reason        String   @db.VarChar(1000)
+  before        Json?
+  after         Json?
+  createdAt     DateTime @default(now()) @db.Timestamp(6)
+
+  @@index([institutionId, createdAt, id])
 }
 
 model institution_directory_policies {
@@ -1214,6 +1233,7 @@ model institution_person_identifiers {
   value           String                        @db.VarChar(100)
   normalizedValue String                        @db.VarChar(100)
   isPrimary       Boolean                       @default(false)
+  kind            String                        @default("unknown") @db.VarChar(16)
   source          String                        @db.VarChar(32)
   version         Int                           @default(1)
   revokedAt       DateTime?                     @db.Timestamp(6)
@@ -1485,23 +1505,27 @@ model content_review_rounds {
 }
 
 model content_review_tasks {
-  subjectPersonId  String?                       @db.Uuid
-  id               String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  stepId           String                        @db.Uuid
-  kind             String                        @db.VarChar(32)
-  role             String?                       @db.VarChar(32)
-  personId         String?                       @db.Uuid
-  nodeId           String?                       @db.Uuid
-  status           String                        @default("queued") @db.VarChar(32)
-  exception        String?                       @db.VarChar(500)
-  assignedPersonId String?                       @db.Uuid
-  completedBy      String?                       @db.Uuid
-  completedAt      DateTime?                     @db.Timestamp(6)
-  dueAt            DateTime?                     @db.Timestamp(6)
-  createdAt        DateTime                      @default(now()) @db.Timestamp(6)
-  step             content_review_step_instances @relation(fields: [stepId], references: [id], onDelete: Restrict)
-  actions          content_review_actions[]
-  outbox           review_inbox_events[]
+  personName         String?                       @map("person_name") @db.VarChar(200)
+  assignedPersonName String?                       @map("assigned_person_name") @db.VarChar(200)
+  nodeName           String?                       @map("node_name") @db.VarChar(200)
+  completedByName    String?                       @map("completed_by_name") @db.VarChar(200)
+  subjectPersonId    String?                       @db.Uuid
+  id                 String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  stepId             String                        @db.Uuid
+  kind               String                        @db.VarChar(32)
+  role               String?                       @db.VarChar(32)
+  personId           String?                       @db.Uuid
+  nodeId             String?                       @db.Uuid
+  status             String                        @default("queued") @db.VarChar(32)
+  exception          String?                       @db.VarChar(500)
+  assignedPersonId   String?                       @db.Uuid
+  completedBy        String?                       @db.Uuid
+  completedAt        DateTime?                     @db.Timestamp(6)
+  dueAt              DateTime?                     @db.Timestamp(6)
+  createdAt          DateTime                      @default(now()) @db.Timestamp(6)
+  step               content_review_step_instances @relation(fields: [stepId], references: [id], onDelete: Restrict)
+  actions            content_review_actions[]
+  outbox             review_inbox_events[]
 
   @@index([stepId, status])
   @@index([personId, status])
@@ -1634,6 +1658,9 @@ model content_review_step_instances {
 }
 
 model content_review_actions {
+  actorName     String?                        @map("actor_name") @db.VarChar(200)
+  assigneeName  String?                        @map("assignee_name") @db.VarChar(200)
+  assigneeId    String?                        @map("assignee_id") @db.Uuid
   roundNumber   Int?
   taskId        String?                        @db.Uuid
   task          content_review_tasks?          @relation(fields: [taskId], references: [id], onDelete: Restrict)

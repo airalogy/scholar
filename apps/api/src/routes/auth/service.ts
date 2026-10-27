@@ -366,17 +366,8 @@ export async function activateInstitutionProvision(
       laboratory: provision.laboratory,
     },
     user.id,
+    data.token,
   )
-
-  await fastify.prisma.institution_user_provisions.update({
-    where: { id: provision.id },
-    data: {
-      claimedUserId: user.id,
-      status: 'claimed',
-      claimedAt: now,
-      updatedAt: now,
-    },
-  })
 
   return {
     access_token: signAccessToken(fastify, user.id),

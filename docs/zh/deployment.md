@@ -153,7 +153,7 @@ deploy/scholarctl status
 
 `install` 会依次验证发布清单、拉取固定摘要镜像（离线模式只检查本地镜像）、核对 API/Web 镜像标签、等待数据库就绪、执行全部数据库迁移、启动 API 和 Web、运行数据完整性审计，并确认 `/version` 的版本、Tag 和 Git 提交与清单完全一致。完成后会在 `SCHOLAR_STATE_DIR` 保存当前发布身份，不保存密码或其他密钥。
 
-`install`、`upgrade`、`backup` 和 `bootstrap` 使用同一个部署操作锁，同一实例不能并发执行这些写操作，避免两个运维终端同时迁移或备份。
+`install`、`upgrade`、`backup`、`bootstrap` 和 `recover-admin` 使用同一个部署操作锁，同一实例不能并发执行这些写操作。
 
 随后交互式创建首个机构和 owner：
 
@@ -161,7 +161,7 @@ deploy/scholarctl status
 deploy/scholarctl bootstrap
 ```
 
-该命令不会把 owner 密码写入 `.env`。重复运行只会修复同一账号与机构的 owner 权限，不会覆盖已有账号密码。完成后保持 `ENABLE_PUBLIC_SIGNUP=false`。
+该命令不会把 owner 密码写入 `.env`。它仅首次初始化新机构和新账号；已初始化机构不能重跑，也不会接管已有账户或恢复已撤销权限。完成后保持 `ENABLE_PUBLIC_SIGNUP=false`。锁定时由获授权的主机运维人员执行 `deploy/scholarctl recover-admin`，创建独立的四小时应急账号，并在核验交接后回收。前置条件、密码登录设置和完整恢复清单见[管理员维护手册](./administrator-governance.md)。
 
 ## 6. 版本升级
 

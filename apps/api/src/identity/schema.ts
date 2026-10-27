@@ -76,8 +76,13 @@ export const IdentityRequestsQuery = Type.Object({
   offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 100000 })),
 })
 export const IdentityNoteBody = Type.Object({ notes: Text(2000) }, { additionalProperties: false })
+export const IdentityIdentifierKind = Type.Union([
+  Type.Literal('unknown'),
+  Type.Literal('formal'),
+  Type.Literal('temporary'),
+])
 export const IdentityIdentifierBody = Type.Object(
-  { value: Text(100), notes: Text(2000) },
+  { value: Text(100), notes: Text(2000), kind: Type.Optional(IdentityIdentifierKind) },
   { additionalProperties: false },
 )
 export const IdentityDecisionBody = Type.Object(
@@ -105,6 +110,7 @@ const Identifier = Type.Object({
   id: Uuid,
   value: Type.String(),
   isPrimary: Type.Boolean(),
+  kind: IdentityIdentifierKind,
   source: Type.String(),
   version: Type.Integer(),
   revokedAt: NullableText,

@@ -20,6 +20,7 @@
       <article v-for="application in applications" :key="application.id" class="review-card">
         <h2>{{ application.rounds[0]?.material.title || $t('governance.reviewMaterial') }}</h2>
         <p>{{ statusLabel(application.status) }}</p>
+        <router-link :to="`/reviews/cases/${application.id}`">{{ $t('reviewProgress.open') }}</router-link>
         <details v-for="round in application.rounds" :key="round.id">
           <summary>{{ $t('governance.round', { number: round.number }) }} · {{ statusLabel(round.status) }} · {{ statusLabel(round.executionStatus) }}</summary>
           <ul><li v-for="(stage, index) in round.stages" :key="index">{{ stage.name }} — {{ statusLabel(stage.status) }} ({{ completion(stage.tasks) }})</li></ul>

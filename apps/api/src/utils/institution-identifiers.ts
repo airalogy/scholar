@@ -11,6 +11,11 @@ export class InstitutionPersonConflictError extends Error {
 export const normalizeInstitutionInternalId = (value: string): string =>
   value.trim().toLocaleLowerCase('en-US')
 
+export const normalizeInstitutionIdentifierKind = (
+  kind: string,
+): 'unknown' | 'formal' | 'temporary' =>
+  kind === 'formal' || kind === 'temporary' ? kind : 'unknown'
+
 export const assertInstitutionInternalId = (value: string): string => {
   const internalId = value.trim()
   if (!internalId || internalId.length > 100) {

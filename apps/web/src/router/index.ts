@@ -291,6 +291,7 @@ export const appRoutes: RouteRecordRaw[] = [
   ...adminRoutes,
   { path: '/reviews', name: 'MyReviewTasks', component: () => import('../views/MyReviewTasks.vue') },
   { path: '/reviews/tasks/:taskId', name: 'ReviewTaskDetail', component: () => import('../views/ReviewTaskDetail.vue') },
+  { path: '/reviews/cases/:caseId', name: 'ReviewProgress', component: () => import('../views/ReviewProgress.vue') },
   {
     path: '/admin/forbidden',
     name: 'AdminAccessDenied',

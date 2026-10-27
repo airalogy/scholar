@@ -15,6 +15,7 @@ import { publicReviewMaterial } from '../../../review/queries'
 import { participantCandidates, verifyReviewParticipants } from '../../../review/participants'
 import { enqueueInboxEvent } from '../../../review/tasks'
 import { personnelGovernanceRoutes } from './routes.personnel-governance'
+import { assertPermissionManager, permissionContext } from '../../../administrators/access'
 
 const params = Type.Object({ slug: Type.String() })
 const response = { 200: Type.Object({ code: Type.Literal(0), data: Type.Unknown() }) }
@@ -230,6 +231,12 @@ export const reviewGovernanceRoutes: FastifyPluginAsyncTypebox = async (fastify)
         await lockMutationScope(tx, 'institution-identity', admin.institutionId)
         const grant = await tx.institution_reviewer_grants.findFirst({
           where: { id: request.params.grantId, institutionId: admin.institutionId },
+        })
+        await assertPermissionManager(fastify, tx, admin.institutionId, request.user.userId)
+        await permissionContext(tx, {
+          actorUserId: request.user.userId,
+          source: 'reviewer_revoke',
+          reason: request.body.notes.slice(0, 1000),
         })
         if (!grant) throw fastify.httpErrors.notFound('Review grant not found')
         if (grant.revokedAt) return

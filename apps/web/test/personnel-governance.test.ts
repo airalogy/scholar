@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+vi.mock('@/components/ReviewFlow.vue', () => ({ default: { template: '<div />' } }))
 import { createApp, nextTick, type App, type Component } from 'vue'
 import i18n from '@/i18n'
 import { useAuth } from '@/composables/useAuth'

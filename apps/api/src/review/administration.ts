@@ -7,6 +7,7 @@ import { ReviewerGrantSchema, GovernedWorkflowSchema } from './governance-schema
 import { snapshotJson } from './rounds'
 import { enqueueInboxEvent } from './tasks'
 import { eligibleGrantPeople } from './authorization'
+import { assertPermissionManager, permissionContext } from '../administrators/access'
 
 export const grantReviewer = async (
   fastify: FastifyInstance,
@@ -17,6 +18,12 @@ export const grantReviewer = async (
   const admin = await requireIdentityAdmin(fastify, slug, userId)
   return fastify.prisma.$transaction(async (tx) => {
     await lockMutationScope(tx, 'institution-identity', admin.institutionId)
+    await assertPermissionManager(fastify, tx, admin.institutionId, userId)
+    await permissionContext(tx, {
+      actorUserId: userId,
+      source: 'reviewer_grant',
+      reason: input.notes.slice(0, 1000),
+    })
     if (!(await personAdmitted(tx, admin.institutionId, input.personId)))
       throw fastify.httpErrors.conflict('Reviewer must be an active admitted person')
     const sourcePerson = await tx.institution_people.findFirst({
@@ -111,6 +118,7 @@ export const saveGovernedWorkflow = async (
     )
   await fastify.prisma.$transaction(async (tx) => {
     await lockMutationScope(tx, 'institution-identity', admin.institutionId)
+    await assertPermissionManager(fastify, tx, admin.institutionId, userId)
     for (const stage of input.steps)
       for (const group of stage.groups)
         if (
@@ -187,6 +195,7 @@ export const reassignReviewTask = async (
   const admin = await requireIdentityAdmin(fastify, slug, userId)
   await fastify.prisma.$transaction(async (tx) => {
     await lockMutationScope(tx, 'institution-identity', admin.institutionId)
+    await assertPermissionManager(fastify, tx, admin.institutionId, userId)
     const task = await tx.content_review_tasks.findFirst({
       where: { id: taskId, step: { institutionId: admin.institutionId } },
       include: { step: { include: { review_case: true } } },
@@ -241,6 +250,7 @@ export const reassignReviewTask = async (
         roundNumber: task.step.roundNumber,
         actorId: userId,
         action: 'task_reassigned',
+        assigneeId: input.personId,
         from_status: 'pending_review',
         to_status: 'pending_review',
         versionId: input.expectedVersionId,

@@ -374,6 +374,7 @@ export const UpdateInstitutionBodySchema = Type.Partial(
 export type UpdateInstitutionBody = Static<typeof UpdateInstitutionBodySchema>
 
 export const UpsertInstitutionMembershipBodySchema = Type.Object({
+  reason: Type.Optional(Type.String({ minLength: 3, maxLength: 1000, pattern: '\\S' })),
   userId: Type.String({ format: 'uuid' }),
   internalId: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
   role: InstitutionRoleSchema,
@@ -384,6 +385,7 @@ export const UpsertInstitutionMembershipBodySchema = Type.Object({
 export type UpsertInstitutionMembershipBody = Static<typeof UpsertInstitutionMembershipBodySchema>
 
 export const UpsertInstitutionProvisionBodySchema = Type.Object({
+  reason: Type.Optional(Type.String({ minLength: 3, maxLength: 1000, pattern: '\\S' })),
   email: Type.String({ format: 'email' }),
   name: Type.String({ minLength: 1, maxLength: 100 }),
   internalId: Type.String({ minLength: 1, maxLength: 100 }),

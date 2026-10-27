@@ -134,7 +134,11 @@ export default fp(async (fastify: FastifyInstance) => {
           where: { id: userId },
           select: { platform_role: true },
         })
-        if (user?.platform_role !== 'platform_admin')
+        const person = await fastify.prisma.institution_people.findUnique({
+          where: { institutionId_userId: { institutionId: institution.id, userId } },
+          select: { id: true },
+        })
+        if (user?.platform_role !== 'platform_admin' || person)
           throw fastify.httpErrors.forbidden(
             'Institution personnel status does not currently permit access',
           )

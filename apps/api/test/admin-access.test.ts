@@ -193,6 +193,7 @@ test('the current-user profile exposes papers prebound to the institution identi
             institutionId: INSTITUTION_ID,
             internalId: 'FACULTY-42',
             scholarId,
+            identifiers: [],
           },
         ],
       },
@@ -237,6 +238,7 @@ test('the current-user profile exposes papers prebound to the institution identi
     institutionName: 'Example University',
     internalId: 'FACULTY-42',
     scholarId,
+    identifiers: [],
   })
   assert.deepEqual(response.data.institution_papers, [
     {

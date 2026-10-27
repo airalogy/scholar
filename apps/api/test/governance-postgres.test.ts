@@ -30,6 +30,12 @@ import { assertInstitutionIdentitySession } from '../src/utils/institution-ident
 import intakeRoutes from '../src/routes/v1/papers'
 import { updatePaper, deletePaper } from '../src/routes/papers/service.paper'
 import { reviewLegacyPaperImport } from '../src/routes/v1/institutions/service.paper-import-review'
+import { administratorRoutes } from '../src/routes/v1/institutions/routes.administrators'
+import institutionRoutes from '../src/routes/institutions'
+import { bootstrapDeployment, recoverAdministrator } from '../src/administrators/deployment'
+import { upsertInstitutionPerson } from '../src/utils/institution-people'
+import { syncInstitutionProvisionToUser } from '../src/utils/institution-provisions'
+import { permissionContext } from '../src/administrators/access'
 
 const databaseUrl = process.env.GOVERNANCE_TEST_DATABASE_URL
 const schemaName = `scholar_governance_test_${randomBytes(8).toString('hex')}`
@@ -114,6 +120,8 @@ const fixture = async (t: TestContext) => {
   } as never)
   await app.register(jwtPlugin)
   await app.register(directoryRoutes, { prefix: '/v1/institutions' })
+  await app.register(administratorRoutes, { prefix: '/v1/institutions' })
+  await app.register(institutionRoutes, { prefix: '/institutions' })
   await app.register(reviewGovernanceRoutes, { prefix: '/v1/institutions' })
   await app.register(reviewRoutes, { prefix: '/v1/reviews' })
   await app.register(intakeRoutes, { prefix: '/v1/papers' })
@@ -206,7 +214,7 @@ describe(
   'PostgreSQL directory and review governance',
   { skip: !databaseUrl, concurrency: false },
   () => {
-    before(() => {
+    before(async () => {
       assert.ok(databaseUrl)
       assert.ok(
         ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(new URL(databaseUrl).hostname),
@@ -220,17 +228,831 @@ describe(
       sql(
         `CREATE SCHEMA "${schemaName}"; SET search_path TO "${schemaName}", public;\n${migrations.map((name) => readFileSync(path.join(directory, name, 'migration.sql'), 'utf8')).join('\n')}`,
       )
+      // Connection-string options override pool options, including the raw SQL search path.
+      const isolatedDatabaseUrl = new URL(databaseUrl)
+      isolatedDatabaseUrl.searchParams.set('schema', schemaName)
+      isolatedDatabaseUrl.searchParams.set('options', `-c search_path=${schemaName},public`)
       prisma = new PrismaClient({
         adapter: new PrismaPg(
-          { connectionString: databaseUrl, options: `-c search_path=${schemaName},public` },
+          { connectionString: isolatedDatabaseUrl.toString() },
           { schema: schemaName },
         ),
       })
+      const [connection] = await prisma.$queryRaw<Array<{ schema: string }>>`
+        SELECT current_schema() AS schema
+      `
+      assert.equal(connection.schema, schemaName, 'Raw SQL must use the isolated test schema')
     })
     after(async () => {
       await prisma?.$disconnect()
       if (databaseUrl && /^scholar_governance_test_[0-9a-f]{16}$/.test(schemaName))
         sql(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`)
+    })
+
+    test('administrator grants enforce hierarchy, immutable account identity, reasons and current target status', async (t) => {
+      const f = await fixture(t)
+      const admin = await f.user('admin')
+      await prisma.institution_memberships.create({
+        data: { institutionId: f.institution.id, userId: admin.id, role: 'admin' },
+      })
+      const url = `/institutions/${f.institution.slug}/memberships`
+      assert.equal(
+        (await f.post(url, { userId: f.member.id, role: 'admin', internalId: 'MEMBER' }, admin.id))
+          .statusCode,
+        403,
+      )
+      assert.equal(
+        (await f.post(url, { userId: f.owner.id, role: 'member' }, admin.id)).statusCode,
+        403,
+      )
+      assert.equal(
+        (
+          await f.post(
+            `${f.base}/administrators/handoff/preview`,
+            { fromUserId: f.owner.id, toUserId: f.member.id },
+            admin.id,
+          )
+        ).statusCode,
+        403,
+      )
+      const granted = await f.post(url, {
+        userId: f.member.id,
+        role: 'admin',
+        internalId: 'MEMBER',
+        reason: 'Approved appointment',
+      })
+      assert.equal(granted.statusCode, 200, granted.body)
+      assert.equal(
+        (
+          await f.post(url, {
+            userId: f.member.id,
+            role: 'admin',
+            internalId: 'OTHER',
+            reason: 'Wrong identity',
+          })
+        ).statusCode,
+        409,
+      )
+      const event = await prisma.institution_permission_events.findFirstOrThrow({
+        where: {
+          institutionId: f.institution.id,
+          source: 'membership_update',
+          entity: 'institution_memberships',
+        },
+      })
+      assert.equal(event.actorUserId, f.owner.id)
+      assert.equal(event.reason, 'Approved appointment')
+      assert.equal((event.before as { role: string }).role, 'member')
+      assert.equal((event.after as { role: string }).role, 'admin')
+      await prisma.institution_people.updateMany({
+        where: { userId: f.member.id },
+        data: { manually_suspended: true },
+      })
+      assert.equal(
+        (await f.post(url, { userId: f.member.id, role: 'owner', reason: 'Cannot regrant' }))
+          .statusCode,
+        409,
+      )
+      assert.equal(
+        (
+          await f.post(
+            url,
+            { userId: admin.id, role: 'member', reason: 'Old session' },
+            f.member.id,
+          )
+        ).statusCode,
+        403,
+      )
+      const deniedAudit = await f.app.inject({
+        url: `${f.base}/administrators/audit`,
+        headers: { authorization: `Bearer ${f.token(admin.id)}` },
+      })
+      assert.equal(deniedAudit.statusCode, 403)
+    })
+
+    test('concurrent demotions cannot remove the last active owner', async (t) => {
+      const f = await fixture(t)
+      const url = `/institutions/${f.institution.slug}/memberships`
+      for (const [user, internalId] of [
+        [f.owner, 'OWNER'],
+        [f.member, 'SUCCESSOR'],
+      ] as const) {
+        const result = await f.post(url, {
+          userId: user.id,
+          internalId,
+          role: 'owner',
+          reason: 'Assign initial owners',
+        })
+        assert.equal(result.statusCode, 200, result.body)
+      }
+      const results = await Promise.all(
+        [f.owner, f.member].map((user) =>
+          f.post(
+            url,
+            { userId: user.id, role: 'member', reason: 'Concurrent demotion' },
+            f.platform.id,
+          ),
+        ),
+      )
+      assert.deepEqual(results.map((result) => result.statusCode).sort(), [200, 409])
+      assert.equal(
+        await prisma.institution_memberships.count({
+          where: { institutionId: f.institution.id, role: 'owner' },
+        }),
+        1,
+      )
+    })
+
+    test('handoff is preview-bound, atomic and preserves identities while revoking departure authority', async (t) => {
+      const f = await fixture(t)
+      const people = []
+      for (const [user, internalId] of [
+        [f.owner, 'OLD-ID'],
+        [f.member, 'NEW-ID'],
+      ] as const) {
+        people.push(
+          await upsertInstitutionPerson(prisma, {
+            institutionId: f.institution.id,
+            internalId,
+            name: user.name,
+            userId: user.id,
+            source: 'test',
+          }),
+        )
+      }
+      const oldPerson = people[0]!
+      const lab = await prisma.labs.create({
+        data: { institutionId: f.institution.id, name: 'Handoff lab', slug: `lab-${randomUUID()}` },
+      })
+      await prisma.lab_memberships.create({
+        data: { labId: lab.id, userId: f.owner.id, role: 'owner' },
+      })
+      const grant = await prisma.institution_reviewer_grants.create({
+        data: {
+          institutionId: f.institution.id,
+          personId: oldPerson.id,
+          role: 'library_final',
+          grantedBy: f.owner.id,
+          notes: 'Original appointment',
+        },
+      })
+      const invite = await prisma.institution_user_provisions.create({
+        data: {
+          institutionId: f.institution.id,
+          createdBy: f.owner.id,
+          name: 'Pending',
+          email: 'pending@example.invalid',
+          role: 'admin',
+          inviteToken: randomUUID(),
+        },
+      })
+      const credential = await prisma.institution_api_credentials.create({
+        data: {
+          institutionId: f.institution.id,
+          createdBy: f.owner.id,
+          name: 'Integration',
+          clientId: randomUUID(),
+          secretHash: 'PRIVATE-HASH',
+          scopes: ['papers:import'],
+          expiresAt: new Date(Date.now() + 86400000),
+        },
+      })
+      const review = await prisma.content_review_cases.create({
+        data: {
+          institutionId: f.institution.id,
+          content_type: 'paper',
+          subjectId: randomUUID(),
+          submittedBy: f.member.id,
+          status: 'pending_review',
+        },
+      })
+      await prisma.content_review_rounds.create({
+        data: {
+          caseId: review.id,
+          number: 1,
+          status: 'pending_review',
+          materialDigest: 'synthetic',
+          materialSnapshot: {},
+          workflowSnapshot: {},
+        },
+      })
+      const step = await prisma.content_review_step_instances.create({
+        data: {
+          caseId: review.id,
+          institutionId: f.institution.id,
+          step_order: 1,
+          step_name: 'Library review',
+          status: 'pending',
+          resolver_type: 'governance',
+          resolver_config: {},
+        },
+      })
+      const pending = await prisma.content_review_tasks.create({
+        data: { stepId: step.id, kind: 'role', role: 'library_final', status: 'pending' },
+      })
+      const historical = await prisma.content_review_tasks.create({
+        data: {
+          stepId: step.id,
+          kind: 'author',
+          personId: oldPerson.id,
+          status: 'approved',
+          completedBy: f.owner.id,
+          completedAt: new Date(),
+        },
+      })
+      const input = { fromUserId: f.owner.id, toUserId: f.member.id }
+      const preview = await f.post(`${f.base}/administrators/handoff/preview`, input)
+      assert.equal(preview.statusCode, 200, preview.body)
+      assert.deepEqual(
+        preview.json().data.tasks.map((task: { id: string }) => task.id),
+        [pending.id],
+      )
+      const digest = preview.json().data.digest as string
+      assert.equal(
+        (
+          await f.post(`${f.base}/administrators/handoff`, {
+            ...input,
+            digest,
+            reason: 'Departure handoff',
+            acknowledgeOutstanding: false,
+          })
+        ).statusCode,
+        400,
+      )
+      await prisma.institution_memberships.update({
+        where: { institutionId_userId: { institutionId: f.institution.id, userId: f.member.id } },
+        data: { can_import_data: true },
+      })
+      assert.equal(
+        (
+          await f.post(`${f.base}/administrators/handoff`, {
+            ...input,
+            digest,
+            reason: 'Departure handoff',
+            acknowledgeOutstanding: true,
+          })
+        ).statusCode,
+        409,
+      )
+      const fresh = await f.post(`${f.base}/administrators/handoff/preview`, input)
+      const auditCount = await prisma.institution_permission_events.count({
+        where: { institutionId: f.institution.id },
+      })
+      await prisma.$executeRawUnsafe(
+        `CREATE FUNCTION test_reject_handoff() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.entity = 'administrator_handoff' THEN RAISE EXCEPTION 'Injected handoff audit failure'; END IF; RETURN NEW; END $$`,
+      )
+      await prisma.$executeRawUnsafe(
+        'CREATE TRIGGER test_reject_handoff BEFORE INSERT ON institution_permission_events FOR EACH ROW EXECUTE FUNCTION test_reject_handoff()',
+      )
+      try {
+        const failed = await f.post(`${f.base}/administrators/handoff`, {
+          ...input,
+          digest: fresh.json().data.digest,
+          reason: 'Departure handoff',
+          acknowledgeOutstanding: true,
+        })
+        assert.equal(failed.statusCode, 500)
+        assert.equal(
+          (await prisma.institution_people.findUniqueOrThrow({ where: { id: oldPerson.id } }))
+            .manually_suspended,
+          false,
+        )
+        assert.equal(
+          (
+            await prisma.institution_api_credentials.findUniqueOrThrow({
+              where: { id: credential.id },
+            })
+          ).revokedAt,
+          null,
+        )
+        assert.equal(
+          (
+            await prisma.institution_memberships.findFirstOrThrow({
+              where: { userId: f.member.id, institutionId: f.institution.id },
+            })
+          ).role,
+          'member',
+        )
+        assert.equal(
+          await prisma.lab_memberships.count({ where: { labId: lab.id, userId: f.member.id } }),
+          0,
+        )
+        assert.equal(
+          await prisma.institution_permission_events.count({
+            where: { institutionId: f.institution.id },
+          }),
+          auditCount,
+        )
+      } finally {
+        await prisma.$executeRawUnsafe(
+          'DROP TRIGGER test_reject_handoff ON institution_permission_events',
+        )
+        await prisma.$executeRawUnsafe('DROP FUNCTION test_reject_handoff()')
+      }
+      const done = await f.post(`${f.base}/administrators/handoff`, {
+        ...input,
+        digest: fresh.json().data.digest,
+        reason: 'Departure handoff',
+        acknowledgeOutstanding: true,
+      })
+      assert.equal(done.statusCode, 200, done.body)
+      const members = await prisma.institution_memberships.findMany({
+        where: { institutionId: f.institution.id },
+      })
+      assert.equal(members.find((item) => item.userId === f.owner.id)?.role, 'member')
+      assert.equal(members.find((item) => item.userId === f.member.id)?.role, 'owner')
+      assert.equal(
+        (await prisma.institution_people.findUniqueOrThrow({ where: { id: oldPerson.id } }))
+          .manually_suspended,
+        true,
+      )
+      assert.equal(
+        (await prisma.institution_people.findUniqueOrThrow({ where: { id: people[1]!.id } }))
+          .internalId,
+        'NEW-ID',
+      )
+      assert.equal(
+        (await prisma.institution_people.findUniqueOrThrow({ where: { id: oldPerson.id } }))
+          .internalId,
+        'OLD-ID',
+      )
+      assert.equal(
+        (
+          await prisma.lab_memberships.findUniqueOrThrow({
+            where: { labId_userId: { labId: lab.id, userId: f.member.id } },
+          })
+        ).role,
+        'owner',
+      )
+      assert.ok(
+        (await prisma.institution_reviewer_grants.findUniqueOrThrow({ where: { id: grant.id } }))
+          .revokedAt,
+      )
+      assert.equal(
+        await prisma.institution_reviewer_grants.count({ where: { personId: people[1]!.id } }),
+        0,
+      )
+      assert.equal(
+        (await prisma.institution_user_provisions.findUniqueOrThrow({ where: { id: invite.id } }))
+          .status,
+        'disabled',
+      )
+      assert.equal(
+        (
+          await prisma.institution_api_credentials.findUniqueOrThrow({
+            where: { id: credential.id },
+          })
+        ).secretVersion,
+        2,
+      )
+      assert.deepEqual(
+        await prisma.content_review_tasks.findUniqueOrThrow({ where: { id: historical.id } }),
+        historical,
+      )
+      assert.deepEqual(
+        await prisma.content_review_tasks.findUniqueOrThrow({ where: { id: pending.id } }),
+        pending,
+      )
+      const oldSession = await f.app.inject({
+        url: `${f.base}/administrators/audit`,
+        headers: { authorization: `Bearer ${f.token(f.owner.id)}` },
+      })
+      assert.equal(oldSession.statusCode, 403)
+      const audit = await f.app.inject({
+        url: `${f.base}/administrators/audit`,
+        headers: { authorization: `Bearer ${f.token(f.member.id)}` },
+      })
+      assert.equal(audit.statusCode, 200, audit.body)
+      assert.equal(audit.json().data.activeOwners, 1)
+      assert.ok(
+        audit
+          .json()
+          .data.items.some((event: { entity: string }) => event.entity === 'administrator_handoff'),
+      )
+      assert.ok(!audit.body.includes(invite.inviteToken))
+      assert.ok(!audit.body.includes('PRIVATE-HASH'))
+    })
+
+    test('audit events are append-only and roll back with failed permission mutations', async (t) => {
+      const f = await fixture(t)
+      const before = await prisma.institution_permission_events.count({
+        where: { institutionId: f.institution.id },
+      })
+      await assert.rejects(
+        prisma.$transaction(async (tx) => {
+          await permissionContext(tx, {
+            actorUserId: f.owner.id,
+            source: 'test_rollback',
+            reason: 'Injected failure',
+          })
+          await tx.institution_memberships.updateMany({
+            where: { institutionId: f.institution.id },
+            data: { role: 'admin' },
+          })
+          throw new Error('Injected failure')
+        }),
+        /Injected failure/,
+      )
+      assert.equal(
+        await prisma.institution_permission_events.count({
+          where: { institutionId: f.institution.id },
+        }),
+        before,
+      )
+      assert.equal(
+        (
+          await prisma.institution_memberships.findFirstOrThrow({
+            where: { institutionId: f.institution.id, userId: f.owner.id },
+          })
+        ).role,
+        'owner',
+      )
+      await assert.rejects(
+        prisma.institution_permission_events.updateMany({
+          where: { institutionId: f.institution.id },
+          data: { reason: 'tamper' },
+        }),
+        /append-only/,
+      )
+      await assert.rejects(
+        prisma.institution_permission_events.deleteMany({
+          where: { institutionId: f.institution.id },
+        }),
+        /append-only/,
+      )
+      await assert.rejects(
+        prisma.$executeRawUnsafe('TRUNCATE institution_permission_events'),
+        /append-only/,
+      )
+    })
+
+    test('bootstrap is one-time; recovery requires exact confirmation and expires even existing tokens', async (t) => {
+      const f = await fixture(t)
+      const suffix = randomBytes(5).toString('hex')
+      const input = {
+        institutionName: 'New institution',
+        institutionSlug: `bootstrap-${suffix}`,
+        ownerName: 'First owner',
+        ownerEmail: `first-${suffix}@example.invalid`,
+        ownerUsername: `first-${suffix}`,
+        ownerInternalId: 'FIRST',
+        ownerPassword: 'test-password-long-enough',
+        makePlatformAdmin: false,
+      }
+      const first = await bootstrapDeployment(prisma, input)
+      await assert.rejects(bootstrapDeployment(prisma, input), /already initialized/)
+      await prisma.institution_memberships.deleteMany({
+        where: { institutionId: first.institutionId },
+      })
+      await assert.rejects(bootstrapDeployment(prisma, input), /already initialized/)
+      await assert.rejects(
+        bootstrapDeployment(prisma, { ...input, institutionSlug: `other-${suffix}` }),
+        /existing accounts/,
+      )
+      const recovery = {
+        institutionSlug: f.institution.slug,
+        operator: 'Operator incident 123',
+        reason: 'Lost all owners',
+        confirmation: `RECOVER ${f.institution.slug}`,
+        action: 'create' as const,
+        name: 'Emergency',
+        email: `recovery-${suffix}@example.invalid`,
+        username: `recovery-${suffix}`,
+        password: 'test-recovery-password',
+      }
+      await assert.rejects(
+        recoverAdministrator(prisma, { ...recovery, confirmation: 'RECOVER wrong' }),
+        /confirmation/,
+      )
+      await assert.rejects(
+        recoverAdministrator(prisma, { ...recovery, password: '短'.repeat(25) }),
+        /72 UTF-8 bytes/,
+      )
+      const result = await recoverAdministrator(prisma, recovery)
+      assert.ok(result.expiresAt && Date.parse(result.expiresAt) > Date.now() + 3 * 3600000)
+      assert.ok(result.expiresAt && Date.parse(result.expiresAt) <= Date.now() + 4 * 3600000)
+      await assert.rejects(recoverAdministrator(prisma, recovery), /new independent account/)
+      const token = f.token(result.userId)
+      const get = (): ReturnType<typeof f.app.inject> =>
+        f.app.inject({
+          url: `${f.base}/administrators/audit`,
+          headers: { authorization: `Bearer ${token}` },
+        })
+      assert.equal((await get()).statusCode, 200)
+      await prisma.users.update({
+        where: { id: result.userId },
+        data: { administratorAccessExpiresAt: new Date(0) },
+      })
+      assert.equal((await get()).statusCode, 401)
+      await recoverAdministrator(prisma, {
+        ...recovery,
+        action: 'revoke-platform',
+        userId: result.userId,
+      })
+      assert.equal(
+        (await prisma.users.findUniqueOrThrow({ where: { id: result.userId } })).platform_role,
+        'member',
+      )
+      const audit = await prisma.institution_permission_events.findMany({
+        where: { institutionId: f.institution.id, source: 'host_recovery' },
+      })
+      assert.equal(audit.length, 2)
+      assert.ok(!JSON.stringify(audit).includes(recovery.password))
+    })
+
+    test('invitation activation rechecks token, status and grantor authority atomically', async (t) => {
+      const f = await fixture(t)
+      const invite = await prisma.institution_user_provisions.create({
+        data: {
+          institutionId: f.institution.id,
+          createdBy: f.owner.id,
+          name: 'Invited',
+          email: 'invited@example.invalid',
+          role: 'admin',
+          inviteToken: randomUUID(),
+        },
+      })
+      const account = await f.user('invited')
+      await upsertInstitutionPerson(prisma, {
+        institutionId: f.institution.id,
+        internalId: 'INVITED',
+        name: 'Invited',
+        provisionId: invite.id,
+        source: 'test',
+      })
+      await assert.rejects(
+        syncInstitutionProvisionToUser(f.app, invite, account.id, 'old-token'),
+        /no longer valid/,
+      )
+      await prisma.institution_memberships.updateMany({
+        where: { institutionId: f.institution.id, userId: f.owner.id },
+        data: { role: 'admin' },
+      })
+      await assert.rejects(
+        syncInstitutionProvisionToUser(f.app, invite, account.id, invite.inviteToken),
+        /Only owners/,
+      )
+      await prisma.institution_memberships.updateMany({
+        where: { institutionId: f.institution.id, userId: f.owner.id },
+        data: { role: 'owner' },
+      })
+      await prisma.institution_user_provisions.update({
+        where: { id: invite.id },
+        data: { status: 'disabled' },
+      })
+      await assert.rejects(
+        syncInstitutionProvisionToUser(f.app, invite, account.id, invite.inviteToken),
+        /no longer valid/,
+      )
+      assert.equal(await prisma.institution_memberships.count({ where: { userId: account.id } }), 0)
+      await prisma.institution_user_provisions.update({
+        where: { id: invite.id },
+        data: { status: 'pending_activation' },
+      })
+      await syncInstitutionProvisionToUser(f.app, invite, account.id, invite.inviteToken)
+      assert.equal(
+        (await prisma.institution_user_provisions.findUniqueOrThrow({ where: { id: invite.id } }))
+          .status,
+        'claimed',
+      )
+      await assert.rejects(
+        syncInstitutionProvisionToUser(f.app, invite, account.id, invite.inviteToken),
+        /no longer valid/,
+      )
+    })
+
+    test('review progress is scoped, paginated and preserves historical names without granting decision rights', async (t) => {
+      const f = await fixture(t)
+      const librarian = await f.user('progress-reviewer')
+      const outsider = await f.user('unrelated')
+      await f.sync([{ ...personRow('PROGRESS'), name: 'Original reviewer' }])
+      const person = await prisma.institution_people.findFirstOrThrow({
+        where: { institutionId: f.institution.id },
+      })
+      await prisma.institution_people.update({
+        where: { id: person.id },
+        data: { userId: librarian.id },
+      })
+      const grant = await f.post(`${f.base}/review-governance/grants`, {
+        personId: person.id,
+        role: 'library_final',
+        startsAt: new Date(Date.now() - 1000).toISOString(),
+        endsAt: null,
+        notes: 'Synthetic authorization',
+      })
+      assert.equal(grant.statusCode, 200, grant.body)
+      const review = await prisma.content_review_cases.create({
+        data: {
+          institutionId: f.institution.id,
+          content_type: 'paper',
+          subjectId: randomUUID(),
+          submittedBy: f.member.id,
+          currentRound: 2,
+          currentVersionId: randomUUID(),
+          status: 'pending_review',
+        },
+      })
+      for (const number of [1, 2])
+        await prisma.content_review_rounds.create({
+          data: {
+            caseId: review.id,
+            number,
+            versionId: review.currentVersionId,
+            status: number === 1 ? 'superseded' : 'pending_review',
+            materialDigest: 'synthetic',
+            materialSnapshot: { title: `Frozen title ${number}`, student_id: 'PRIVATE-ID' },
+            workflowSnapshot: {
+              workflow: { name: `Frozen workflow ${number}` },
+              routing: { selected: { name: 'Frozen rule', revision: number } },
+            },
+          },
+        })
+      const stage = await prisma.content_review_step_instances.create({
+        data: {
+          caseId: review.id,
+          institutionId: f.institution.id,
+          roundNumber: 2,
+          step_order: 1,
+          step_name: 'Final library review',
+          status: 'pending',
+          resolver_type: 'governance',
+          resolver_config: {},
+        },
+      })
+      const task = await prisma.content_review_tasks.create({
+        data: {
+          stepId: stage.id,
+          kind: 'role',
+          role: 'library_final',
+          status: 'pending',
+          dueAt: new Date(Date.now() + 3600000),
+        },
+      })
+      const get = (path: string, actor = f.member.id) =>
+        f.app.inject({
+          url: `/v1/reviews/cases/${review.id}/${path}`,
+          headers: { authorization: `Bearer ${f.token(actor)}` },
+        })
+      assert.equal(
+        (await f.app.inject({ url: `/v1/reviews/cases/${review.id}/progress` })).statusCode,
+        401,
+      )
+      const applicant = await get('progress')
+      assert.equal(applicant.statusCode, 200, applicant.body)
+      assert.equal(applicant.json().data.viewer, 'applicant')
+      assert.equal(applicant.json().data.round.stages[0].tasks[0].candidateCount, null)
+      assert.equal(applicant.json().data.round.stages[0].tasks[0].canAct, false)
+      assert.equal(applicant.body.includes('PRIVATE-ID'), false)
+      assert.equal((await get('progress', outsider.id)).statusCode, 404)
+      assert.equal((await get('history', outsider.id)).statusCode, 404)
+      assert.equal((await get(`stages/${stage.id}/tasks`, outsider.id)).statusCode, 404)
+      assert.equal((await get('progress?round_number=1')).statusCode, 400)
+      assert.equal((await get('progress?roundNumber=99')).statusCode, 404)
+      const admin = (await get('progress', f.owner.id)).json().data
+      assert.equal(admin.viewer, 'administrator')
+      assert.deepEqual(admin.round.stages[0].tasks[0].candidateNames, ['Original reviewer'])
+      assert.equal(admin.round.stages[0].tasks[0].canAct, false)
+      assert.equal((await get('progress', f.platform.id)).statusCode, 200)
+      assert.equal(
+        (await get('progress', librarian.id)).json().data.round.stages[0].tasks[0].canAct,
+        true,
+      )
+      const reassign = await f.post(`${f.base}/review-governance/tasks/${task.id}/reassign`, {
+        personId: person.id,
+        expectedVersionId: review.currentVersionId,
+        notes: 'Synthetic reassignment',
+      })
+      assert.equal(reassign.statusCode, 200, reassign.body)
+      await prisma.institution_people.update({
+        where: { id: person.id },
+        data: { name: 'Renamed person' },
+      })
+      await prisma.users.update({
+        where: { id: f.owner.id },
+        data: { name: 'Renamed administrator' },
+      })
+      await prisma.content_review_tasks.update({
+        where: { id: task.id },
+        data: { dueAt: new Date(Date.now() - 1000), assignedPersonName: 'Tampered' },
+      })
+      const overdue = await get('progress', librarian.id)
+      assert.equal(overdue.statusCode, 200, overdue.body)
+      assert.equal(
+        overdue.json().data.round.stages[0].tasks[0].assignedPersonName,
+        'Original reviewer',
+      )
+      assert.equal(overdue.json().data.round.stages[0].tasks[0].overdue, true)
+      assert.equal(overdue.json().data.round.stages[0].tasks[0].canAct, false)
+      const events = await get('history?roundNumber=2')
+      assert.equal(events.statusCode, 200, events.body)
+      assert.equal(events.json().data.items[0].actorName, 'owner')
+      assert.equal(events.json().data.items[0].assigneeName, 'Original reviewer')
+      assert.equal(events.json().data.items[0].notes, null)
+      await prisma.content_review_actions.update({
+        where: { id: events.json().data.items[0].id },
+        data: { actorName: 'Tampered', assigneeName: 'Tampered' },
+      })
+      assert.equal((await get('history?roundNumber=2')).json().data.items[0].actorName, 'owner')
+      assert.equal(
+        (await get('history?roundNumber=2')).json().data.items[0].assigneeName,
+        'Original reviewer',
+      )
+      for (const privateField of [
+        'actorId',
+        'assigneeId',
+        'sourceIp',
+        'userAgent',
+        'internalId',
+        'email',
+      ])
+        assert.equal(events.body.includes(`"${privateField}"`), false)
+      assert.match(
+        (await get('history', f.owner.id)).json().data.items[0].notes,
+        /Synthetic reassignment/,
+      )
+      await prisma.content_review_tasks.update({
+        where: { id: task.id },
+        data: { completedBy: librarian.id, completedAt: new Date(), status: 'approved' },
+      })
+      await prisma.users.update({ where: { id: librarian.id }, data: { name: 'Renamed login' } })
+      const completed = (await get('progress')).json().data.round.stages[0].tasks[0]
+      assert.equal(completed.completedByName, 'progress-reviewer')
+      const past = (await get('progress?roundNumber=1')).json().data
+      assert.equal(past.title, 'Frozen title 1')
+      assert.equal(past.round.workflowName, 'Frozen workflow 1')
+      assert.equal(past.round.ruleRevision, 1)
+      const legacyReviewer = await f.user('legacy-reviewer')
+      await prisma.content_review_step_instances.create({
+        data: {
+          caseId: review.id,
+          institutionId: f.institution.id,
+          roundNumber: 1,
+          step_order: 1,
+          step_name: 'Legacy stage',
+          status: 'approved',
+          resolver_type: 'institution_admin',
+          resolver_config: {},
+          reviewedBy: legacyReviewer.id,
+        },
+      })
+      const legacy = await get('progress?roundNumber=1', legacyReviewer.id)
+      assert.equal(legacy.statusCode, 200, legacy.body)
+      assert.equal(legacy.json().data.round.stages[0].legacy, true)
+      assert.deepEqual(legacy.json().data.round.stages[0].tasks, [])
+      await prisma.content_review_tasks.createMany({
+        data: Array.from({ length: 51 }, () => ({
+          stepId: stage.id,
+          kind: 'cc',
+          status: 'notified',
+          personId: person.id,
+        })),
+      })
+      const page = (await get('progress')).json().data.round.stages[0]
+      assert.equal(page.tasks.length, 50)
+      assert.equal(page.nextTaskOffset, 50)
+      assert.equal(page.taskCount, 1)
+      assert.equal(page.approvedCount, 1)
+      const more = await get(`stages/${stage.id}/tasks?offset=50`)
+      assert.equal(more.json().data.items.length, 2)
+      assert.equal(more.json().data.nextOffset, null)
+      assert.equal((await get(`stages/${randomUUID()}/tasks`)).statusCode, 404)
+      await prisma.content_review_actions.createMany({
+        data: Array.from({ length: 51 }, () => ({
+          caseId: review.id,
+          institutionId: f.institution.id,
+          actorId: librarian.id,
+          roundNumber: 2,
+          action: 'task_approved',
+          to_status: 'pending_review',
+          taskId: task.id,
+          notes: 'Public review comment',
+        })),
+      })
+      const history = (await get('history?roundNumber=2')).json().data
+      assert.equal(history.items.length, 50)
+      assert.equal(history.nextOffset, 50)
+      assert.equal(history.items[0].notes, 'Public review comment')
+      assert.equal((await get('history?roundNumber=2&offset=50')).json().data.items.length, 2)
+      assert.equal(
+        (await get(`history?roundNumber=2&taskId=${task.id}`)).json().data.items.length,
+        50,
+      )
+      assert.equal((await get(`history?taskId=${randomUUID()}`)).json().data.items.length, 0)
+      const foreign = await fixture(t)
+      assert.equal(
+        (
+          await foreign.app.inject({
+            url: `/v1/reviews/cases/${review.id}/progress`,
+            headers: { authorization: `Bearer ${foreign.token(f.platform.id)}` },
+          })
+        ).statusCode,
+        404,
+      )
+      await prisma.institution_people.update({
+        where: { id: person.id },
+        data: { manually_suspended: true },
+      })
+      assert.equal((await get('progress', librarian.id)).statusCode, 403)
     })
 
     test('v2 preserves multiple identities, relationship revisions and organization/appointment history', async (t) => {
@@ -918,6 +1740,35 @@ describe(
         where: { id: person.id },
         data: { userId: f.member.id },
       })
+      await prisma.users.update({
+        where: { id: f.member.id },
+        data: { platform_role: 'platform_admin' },
+      })
+      await prisma.institution_memberships.updateMany({
+        where: { institutionId: f.institution.id, userId: f.member.id },
+        data: { role: 'owner', can_review_content: true, can_import_data: true },
+      })
+      const lab = await prisma.labs.create({
+        data: {
+          institutionId: f.institution.id,
+          name: 'Departing lab',
+          slug: `departure-${randomUUID()}`,
+        },
+      })
+      await prisma.lab_memberships.create({
+        data: { labId: lab.id, userId: f.member.id, role: 'owner' },
+      })
+      const credential = await prisma.institution_api_credentials.create({
+        data: {
+          institutionId: f.institution.id,
+          createdBy: f.member.id,
+          name: 'Departing integration',
+          clientId: randomUUID(),
+          secretHash: 'private',
+          scopes: ['papers:import'],
+          expiresAt: new Date(Date.now() + 86400000),
+        },
+      })
       await prisma.institution_reviewer_grants.create({
         data: {
           institutionId: f.institution.id,
@@ -946,7 +1797,36 @@ describe(
         headers: { authorization: `Bearer ${f.token(f.member.id)}` },
       })
       assert.equal(denied.statusCode, 403, denied.body)
+      assert.equal(
+        (await prisma.users.findUniqueOrThrow({ where: { id: f.member.id } })).platform_role,
+        'member',
+      )
+      assert.equal(
+        (
+          await prisma.lab_memberships.findFirstOrThrow({
+            where: { labId: lab.id, userId: f.member.id },
+          })
+        ).role,
+        'member',
+      )
+      assert.ok(
+        (
+          await prisma.institution_api_credentials.findUniqueOrThrow({
+            where: { id: credential.id },
+          })
+        ).revokedAt,
+      )
       await f.sync([personRow('A')])
+      const returned = await prisma.institution_memberships.findFirstOrThrow({
+        where: { institutionId: f.institution.id, userId: f.member.id },
+      })
+      assert.equal(returned.role, 'member')
+      assert.equal(returned.can_review_content, false)
+      assert.equal(returned.can_import_data, false)
+      assert.equal(
+        (await prisma.users.findUniqueOrThrow({ where: { id: f.member.id } })).platform_role,
+        'member',
+      )
       assert.equal(
         await prisma.institution_reviewer_grants.count({
           where: { personId: person.id, revokedAt: null },
@@ -1052,6 +1932,12 @@ describe(
       })
       const headers = { authorization: `Bearer ${token}` }
       assert.equal((await f.app.inject({ url: '/v1/reviews/tasks', headers })).statusCode, 403)
+      for (const suffix of ['progress', 'history', `stages/${randomUUID()}/tasks`])
+        assert.equal(
+          (await f.app.inject({ url: `/v1/reviews/cases/${randomUUID()}/${suffix}`, headers }))
+            .statusCode,
+          403,
+        )
       for (const path of ['/directory/corrections', '/review-governance/routes'])
         assert.equal((await f.app.inject({ url: `${f.base}${path}`, headers })).statusCode, 403)
       assert.equal(

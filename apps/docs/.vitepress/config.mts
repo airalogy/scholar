@@ -17,6 +17,7 @@ const zhSidebar: DefaultTheme.Sidebar = [
       { text: '管理控制台', link: '/zh/administration/' },
       { text: '管理后台导入', link: '/zh/administration/data-import' },
       { text: '人员与审核维护手册', link: '/zh/administration/personnel-review' },
+      { text: '管理员授权与应急恢复', link: '/zh/administration/administrator-governance' },
     ],
   },
   {
@@ -50,6 +51,7 @@ const enSidebar: DefaultTheme.Sidebar = [
       { text: 'Admin Console', link: '/en/administration/' },
       { text: 'Admin Console Import', link: '/en/administration/data-import' },
       { text: 'Personnel and Review Handbook', link: '/en/administration/personnel-review' },
+      { text: 'Administrator Governance and Recovery', link: '/en/administration/administrator-governance' },
     ],
   },
   {

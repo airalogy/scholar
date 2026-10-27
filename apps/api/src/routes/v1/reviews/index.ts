@@ -14,6 +14,7 @@ import { createReviewChange, changeContext } from '../../../review/changes'
 import { decideReviewCase } from '../../../review/service'
 import { lockMutationScope } from '../../../utils/advisory-lock'
 import { closeReviewCase } from '../../../review/closing'
+import { progressRoutes } from './progress'
 
 const response = { 200: Type.Object({ code: Type.Literal(0), data: Type.Unknown() }) }
 const params = Type.Object({ taskId: Type.String({ format: 'uuid' }) })
@@ -21,6 +22,7 @@ const page = Type.Object({ offset: Type.Optional(Type.Integer({ minimum: 0, defa
 
 const reviewRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.setValidatorCompiler(TypeBoxValidatorCompiler)
+  await fastify.register(progressRoutes)
   fastify.get(
     '/subjects/:subjectType/:subjectId',
     {

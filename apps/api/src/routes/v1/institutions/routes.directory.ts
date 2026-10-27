@@ -14,6 +14,7 @@ import {
 } from '../../../directory/sync'
 import * as schema from '../../../directory/schema'
 import { suspendPersonPrivileges } from '../../../directory/records'
+import { assertPermissionManager, permissionContext } from '../../../administrators/access'
 import { activeAppointmentWhere } from '../../../directory/policy'
 import { eligibleGrantPeople } from '../../../review/authorization'
 import { GovernedStepSchema } from '../../../review/governance-schema'
@@ -345,6 +346,13 @@ export const directoryRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
           include: { user: true },
         })
         if (!person) throw fastify.httpErrors.notFound('Person not found')
+        await assertPermissionManager(fastify, tx, admin.institutionId, admin.userId)
+        await permissionContext(tx, {
+          institutionId: admin.institutionId,
+          actorUserId: admin.userId,
+          source: 'person_suspension',
+          reason: request.body.notes.slice(0, 1000),
+        })
         if (!admin.isPlatformAdmin && person.user?.platform_role === 'platform_admin')
           throw fastify.httpErrors.forbidden(
             'Platform administrator recovery requires a platform administrator',

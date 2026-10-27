@@ -8,6 +8,7 @@ import {
 } from '../../../identity/service'
 import { adminRequest, decideIdentityRequest } from '../../../identity/requests'
 import * as schemas from '../../../identity/schema'
+import { normalizeInstitutionIdentifierKind } from '../../../utils/institution-identifiers'
 
 export const identityAdminRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.get(
@@ -67,6 +68,7 @@ export const identityAdminRoutes: FastifyPluginAsyncTypebox = async (fastify) =>
           person,
           identifiers: identifiers.map((item) => ({
             ...item,
+            kind: normalizeInstitutionIdentifierKind(item.kind),
             revokedAt: item.revokedAt?.toISOString() ?? null,
             createdAt: item.createdAt.toISOString(),
           })),

@@ -27,6 +27,12 @@
         <router-link v-if="canManageOwnerRole" :to="`/admin/institutions/${institution.slug}/governance`">{{ $t('governance.title') }}</router-link>
         <InstitutionIdentityRequestsPanel v-if="canManageOwnerRole" :slug="institution.slug" />
         <InstitutionIdentifiersPanel v-if="canManageOwnerRole" :slug="institution.slug" />
+        <AdministratorGovernancePanel v-if="canManageOwnerRole" :key="institution.slug" :slug="institution.slug" :memberships="memberships" @completed="load(institution.slug)" />
+        <section v-if="institution.access.can_manage_members" class="admin-panel">
+          <label for="permission-reason">{{ $t('administrators.reason') }}</label>
+          <a-textarea id="permission-reason" v-model="permissionReason" :max-length="1000" />
+          <p>{{ $t('administrators.roleRestriction') }}</p>
+        </section>
         <section class="admin-panel">
           <div class="panel-head">
             <div>
@@ -455,6 +461,7 @@ import { searchUsers, type UserSearchItem } from '@/api/users'
 import { INSTITUTION_ROLE_LABEL_KEYS, PLATFORM_ROLE_LABEL_KEYS, PROVISION_STATUS_LABEL_KEYS } from '@/i18n/helpers'
 import InstitutionIdentityRequestsPanel from '@/components/InstitutionIdentityRequestsPanel.vue'
 import InstitutionIdentifiersPanel from '@/components/InstitutionIdentifiersPanel.vue'
+import AdministratorGovernancePanel from '@/components/AdministratorGovernancePanel.vue'
 
 const route = useRoute()
 const { t, locale } = useI18n()
@@ -478,6 +485,12 @@ const actionUserId = ref('')
 const provisionActionId = ref('')
 const provisionActionKind = ref<'copy' | 'disable' | ''>('')
 const loadError = ref('')
+const permissionReason = ref('')
+const requirePermissionReason = (): boolean => {
+  if (permissionReason.value.trim().length >= 3) return true
+  Message.error(t('administrators.reasonRequired'))
+  return false
+}
 
 const formState = reactive({
   summary: '',
@@ -518,7 +531,7 @@ const manageableRoleOptions = computed(() => {
     return allRoleOptions.value
   }
 
-  return allRoleOptions.value.filter((item) => item.value !== 'owner')
+  return allRoleOptions.value.filter((item) => item.value === 'member')
 })
 const canSubmitProvision = computed(() => {
   return !isSavingProvision.value &&
@@ -623,7 +636,7 @@ const getRoleLabel = (
 }
 
 const canManageMember = (role: InstitutionRole): boolean => {
-  return canManageOwnerRole.value || role !== 'owner'
+  return canManageOwnerRole.value || role === 'member'
 }
 
 const getManageableRoleOptions = (
@@ -743,6 +756,7 @@ const saveInstitutionContent = async (): Promise<void> => {
 }
 
 const saveProvision = async (): Promise<void> => {
+  if (!requirePermissionReason()) return
   const slug = String(route.params.slug ?? '')
   if (!slug || !canSubmitProvision.value) {
     return
@@ -751,6 +765,7 @@ const saveProvision = async (): Promise<void> => {
   isSavingProvision.value = true
   try {
     provisions.value = await upsertInstitutionProvision(slug, {
+      reason: permissionReason.value.trim(),
       email: provisionForm.email.trim(),
       name: provisionForm.name.trim(),
       internalId: provisionForm.internalId.trim(),
@@ -793,6 +808,7 @@ const copyProvisionToken = async (provisionId: string, token: string): Promise<v
 }
 
 const disableProvision = async (provisionId: string): Promise<void> => {
+  if (!requirePermissionReason()) return
   const slug = String(route.params.slug ?? '')
   if (!slug) {
     return
@@ -801,7 +817,7 @@ const disableProvision = async (provisionId: string): Promise<void> => {
   provisionActionId.value = provisionId
   provisionActionKind.value = 'disable'
   try {
-    provisions.value = await disableInstitutionProvision(slug, provisionId)
+    provisions.value = await disableInstitutionProvision(slug, provisionId, permissionReason.value.trim())
     Message.success(t('adminInstitutionMembers.provisionDisabled'))
   } catch (error) {
     Message.error(getErrorMessage(error, t('adminInstitutionMembers.provisionDisableFailed')))
@@ -835,6 +851,7 @@ const upsertMember = async (
   canImportData: boolean,
   internalId?: string,
 ): Promise<void> => {
+  if (!requirePermissionReason()) return
   const slug = String(route.params.slug ?? '')
   if (!slug) {
     return
@@ -843,6 +860,7 @@ const upsertMember = async (
   actionUserId.value = userId
   try {
     memberships.value = await upsertInstitutionMembership(slug, {
+      reason: permissionReason.value.trim(),
       userId,
       internalId: internalId?.trim() || undefined,
       role,
@@ -923,6 +941,7 @@ const handleProvisionImportPermissionChange = (value: unknown): void => {
 }
 
 const removeMember = async (userId: string): Promise<void> => {
+  if (!requirePermissionReason()) return
   const slug = String(route.params.slug ?? '')
   if (!slug) {
     return
@@ -930,7 +949,7 @@ const removeMember = async (userId: string): Promise<void> => {
 
   actionUserId.value = userId
   try {
-    memberships.value = await removeInstitutionMembership(slug, userId)
+    memberships.value = await removeInstitutionMembership(slug, userId, permissionReason.value.trim())
     Message.success(t('adminInstitutionMembers.memberRemoved'))
   } catch (error) {
     Message.error(getErrorMessage(error, t('adminInstitutionMembers.memberRemoveFailed')))

@@ -19,4 +19,5 @@
 ## 运维文档
 
 - [部署](./deployment.md)
+- [管理员授权、离职交接与应急恢复](./administrator-governance.md)
 - [发布流程](./releasing.md)

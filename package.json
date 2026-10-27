@@ -1,6 +1,6 @@
 {
   "name": "airalogy-scholar",
-  "version": "5.0.1",
+  "version": "5.1.0",
   "private": true,
   "description": "Airalogy Scholar - Vue 3 + Vite + Arco Design + Fastify",
   "bugs": {
@@ -79,7 +79,8 @@
       "source-map-js@^1.0.0": "^1.2.2",
       "vitepress>vite": "6.4.3",
       "ws@^8.0.0": "^8.21.0",
-      "yaml@^2.0.0": "^2.8.3"
+      "yaml@^2.0.0": "^2.8.3",
+      "zod@^4.0.0": "^4.6.6"
     },
     "onlyBuiltDependencies": [
       "@parcel/watcher",

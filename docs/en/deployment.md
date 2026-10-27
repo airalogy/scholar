@@ -136,7 +136,7 @@ deploy/scholarctl status
 
 Installation verifies the release manifest, obtains or checks pinned images, waits for the database, runs all migrations, starts API and Web, executes the integrity audit, and verifies that `/version` matches the manifest's version, tag, and commit. It records the release identity in `SCHOLAR_STATE_DIR` without storing secrets.
 
-`install`, `upgrade`, `backup`, and `bootstrap` share one operation lock so two administrators cannot migrate or back up the same instance concurrently.
+`install`, `upgrade`, `backup`, `bootstrap`, and `recover-admin` share one operation lock so two administrators cannot mutate the same instance concurrently.
 
 Create the first institution and owner interactively:
 
@@ -144,7 +144,7 @@ Create the first institution and owner interactively:
 deploy/scholarctl bootstrap
 ```
 
-Bootstrap does not write the owner password to `.env`. Repeating it repairs the same account's ownership relationship without replacing the password. Keep `ENABLE_PUBLIC_SIGNUP=false` afterward.
+Bootstrap does not write the owner password to `.env`. It initializes a new institution and new account only once; it refuses initialized institutions and never adopts an existing account or restores revoked authority. Keep `ENABLE_PUBLIC_SIGNUP=false` afterward. For lockout, an authorized host operator uses `deploy/scholarctl recover-admin` to create a separate four-hour recovery account and revokes it after verified handoff. See the [administrator maintenance handbook](./administrator-governance.md) for prerequisites, password-sign-in configuration and the complete recovery checklist.
 
 ## 6. Upgrades
 

@@ -8,6 +8,7 @@ import type {
 import { getInstitutionAccessById, type InstitutionAccess } from '../../utils/permissions'
 import { INTEGRATION_SCOPES, type IntegrationScope } from '../../utils/integration-auth'
 import { lockMutationScope } from '../../utils/advisory-lock'
+import { assertPermissionManager, permissionContext } from '../../administrators/access'
 
 const SECRET_SALT_ROUNDS = 12
 const DEFAULT_EXPIRY_DAYS = 90
@@ -167,6 +168,13 @@ export const createInstitutionApiCredential = async (
   const now = new Date()
   const secretHash = await bcrypt.hash(clientSecret, SECRET_SALT_ROUNDS)
   const credential = await fastify.prisma.$transaction(async (tx) => {
+    await lockMutationScope(tx, 'institution-identity', institution.id)
+    await assertPermissionManager(fastify, tx, institution.id, currentUserId)
+    await permissionContext(tx, {
+      actorUserId: currentUserId,
+      source: 'credential_create',
+      reason: `Create integration credential: ${body.name}`,
+    })
     await lockMutationScope(tx, 'credentials', institution.id)
     const activeCount = await tx.institution_api_credentials.count({
       where: {
@@ -222,14 +230,29 @@ export const rotateInstitutionApiCredential = async (
 
   const clientSecret = buildSecret()
   const now = new Date()
-  const credential = await fastify.prisma.institution_api_credentials.update({
-    where: { id: credentialId },
-    data: {
-      secretHash: await bcrypt.hash(clientSecret, SECRET_SALT_ROUNDS),
-      secretVersion: { increment: 1 },
-      expiresAt: body.expiresInDays ? buildExpiry(body.expiresInDays) : existing.expiresAt,
-      updatedAt: now,
-    },
+  const secretHash = await bcrypt.hash(clientSecret, SECRET_SALT_ROUNDS)
+  const credential = await fastify.prisma.$transaction(async (tx) => {
+    await lockMutationScope(tx, 'institution-identity', institution.id)
+    await assertPermissionManager(fastify, tx, institution.id, currentUserId)
+    const current = await tx.institution_api_credentials.findUniqueOrThrow({
+      where: { id: credentialId },
+    })
+    if (current.revokedAt)
+      throw fastify.httpErrors.conflict('Revoked credentials cannot be rotated')
+    await permissionContext(tx, {
+      actorUserId: currentUserId,
+      source: 'credential_rotate',
+      reason: `Rotate integration credential: ${current.name}`,
+    })
+    return tx.institution_api_credentials.update({
+      where: { id: credentialId },
+      data: {
+        secretHash,
+        secretVersion: { increment: 1 },
+        expiresAt: body.expiresInDays ? buildExpiry(body.expiresInDays) : current.expiresAt,
+        updatedAt: now,
+      },
+    })
   })
 
   return {
@@ -253,13 +276,22 @@ export const revokeInstitutionApiCredential = async (
   const now = new Date()
 
   if (!existing.revokedAt) {
-    await fastify.prisma.institution_api_credentials.update({
-      where: { id: credentialId },
-      data: {
-        revokedAt: now,
-        secretVersion: { increment: 1 },
-        updatedAt: now,
-      },
+    await fastify.prisma.$transaction(async (tx) => {
+      await lockMutationScope(tx, 'institution-identity', institution.id)
+      await assertPermissionManager(fastify, tx, institution.id, currentUserId)
+      await permissionContext(tx, {
+        actorUserId: currentUserId,
+        source: 'credential_revoke',
+        reason: `Revoke integration credential: ${existing.name}`,
+      })
+      await tx.institution_api_credentials.update({
+        where: { id: credentialId },
+        data: {
+          revokedAt: now,
+          secretVersion: { increment: 1 },
+          updatedAt: now,
+        },
+      })
     })
   }
 

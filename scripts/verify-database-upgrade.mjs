@@ -97,6 +97,14 @@ END $$;
 const assertions = `
 DO $$
 BEGIN
+  IF EXISTS (SELECT 1 FROM institutions WHERE "administratorInitializedAt" IS NULL)
+    OR EXISTS (SELECT 1 FROM users WHERE "administratorAccessExpiresAt" IS NOT NULL)
+    OR EXISTS (SELECT 1 FROM institution_permission_events) THEN
+    RAISE EXCEPTION 'Administrator upgrade reopened bootstrap, expired ordinary accounts or fabricated historical audits';
+  END IF;
+  IF EXISTS (SELECT 1 FROM content_review_actions WHERE actor_name IS NOT NULL OR assignee_name IS NOT NULL) THEN
+    RAISE EXCEPTION 'Review upgrade fabricated historical display-name snapshots';
+  END IF;
   IF (SELECT count(*) FROM institution_appointment_history) <> 1
     OR NOT EXISTS (
       SELECT 1 FROM institution_appointment_history history

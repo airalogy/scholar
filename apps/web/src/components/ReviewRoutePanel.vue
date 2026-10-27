@@ -179,28 +179,18 @@
               : t('routing.default')
           }}
         </p>
-        <ol>
-          <li v-for="(stage, index) in simulation.stages" :key="`${index}-${stage.name}`">
-            <strong>{{ stage.name }}</strong>
-            <ul>
-              <li
-                v-for="reviewer in stage.reviewers"
-                :key="`${reviewer.personId}-${reviewer.role}`"
-              >
-                {{ reviewer.name }} · {{ reviewer.role }}
-              </li>
-            </ul>
-            <p v-for="problem in stage.problems" :key="problem" role="alert">{{ problem }}</p>
-          </li>
-        </ol>
+        <ReviewFlow :stages="simulationStages" preview />
+        <div v-for="(stage, index) in simulation.stages" :key="index"><p v-for="problem in stage.problems" :key="problem" role="alert">{{ stage.name }}: {{ problem }}</p></div>
       </article>
     </section>
   </section>
 </template>
 <script setup lang="ts">
-import { onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import IdentityPersonPicker from './IdentityPersonPicker.vue'
+import ReviewFlow from './ReviewFlow.vue'
+import type { ReviewFlowStage } from '@/utils/review-flow'
 import {
   governanceBase,
   governancePost,
@@ -353,6 +343,10 @@ const sample = reactive({
   nodeIds: [] as string[],
 })
 const simulation = ref<Simulation | null>(null)
+const simulationStages = computed<ReviewFlowStage[]>(() => (simulation.value?.stages ?? []).map((stage, index) => ({
+  id: `simulation-${index}`, label: stage.name, status: 'queued', detail: stage.problems.join(' · '),
+  tasks: [{ id: `candidates-${index}`, label: t('reviewProgress.candidates'), status: 'queued', detail: stage.reviewers.map(person => `${person.name} · ${person.role}`).join(', ') || t('reviewProgress.noCandidates') }],
+})))
 const addParticipant = (person: { id: string; name: string }): void => {
   if (!selectedPeople.value.some((item) => item.id === person.id))
     selectedPeople.value.push({ id: person.id, name: person.name })

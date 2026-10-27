@@ -2,6 +2,19 @@
 
 For library and institution administrators. Open **Personnel and review governance** from institution members to access synchronization, people and corrections, reviewer grants, and routing simulation.
 
+## Reading review progress
+
+Use **View review progress** in My reviews → My applications, a review task, or the administrative queue. Papers, degree theses and change requests share this page.
+
+- **Flow / List**: stages run sequentially; all parallel approval tasks within a stage must pass. A role task is handled by one eligible reviewer, not separately by every candidate. CC recipients are listed separately and do not vote. Mobile screens default to a list; the canvas supports zoom and automatic layout.
+- **Task details**: select a node for the designated reviewer, actual reviewer, assignment scope, deadline and task-specific activity. Overdue and blocked tasks never pass automatically. Only an actionable current task offers a review link.
+- **Candidates and evidence**: current candidate names are administrator-only and do not mean assignment. New task/action records retain display-name snapshots. Missing legacy names are shown as not recorded, never reconstructed from today's directory. Reassignments retain the actor and new assignee names.
+- **Rounds and versions**: switch rounds to inspect the actual material version, workflow and routing rule revision used at submission. New rules do not redraw previous rounds. Large task lists, round lists and histories are paginated.
+- **Approval versus application**: approved does not necessarily mean applied to the repository. Administrators should resolve a failed application from the failure queue rather than re-uploading the paper.
+- **Access**: submitters, relevant reviewers, the institution owner and platform administrators have scoped access. Unrelated members and integration credentials cannot read progress. This view grants no additional material, file or decision permissions; personnel suspension still blocks access.
+
+Rule simulation reuses the diagram, explicitly marked as a simulation, without creating tasks. Use Refresh for the latest state. Unsaved rule edits never change existing rounds.
+
 ## Responsibilities
 
 | Information or action | Owner |

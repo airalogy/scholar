@@ -3,6 +3,7 @@ import type { Prisma } from '../../prisma/generated/client'
 import { Type, type Static } from 'typebox'
 import { requireIdentityAdmin } from '../identity/service'
 import { lockMutationScope } from '../utils/advisory-lock'
+import { assertPermissionManager, permissionContext } from '../administrators/access'
 
 export const CorrectionSchema = Type.Object(
   {
@@ -83,6 +84,13 @@ export const requestCorrection = async (
     )
   return fastify.prisma.$transaction(async (tx) => {
     await lockMutationScope(tx, 'institution-identity', admin.institutionId)
+    await assertPermissionManager(fastify, tx, admin.institutionId, userId)
+    await permissionContext(tx, {
+      actorUserId: userId,
+      institutionId: admin.institutionId,
+      source: 'correction_request',
+      reason: input.reason.slice(0, 1000),
+    })
     await reconcilePersonCorrections(tx, admin.institutionId, input.personId)
     const person = await tx.institution_people.findFirst({
       where: { id: input.personId, institutionId: admin.institutionId },
@@ -144,6 +152,13 @@ export const decideCorrection = async (
   const admin = await requireIdentityAdmin(fastify, slug, userId)
   await fastify.prisma.$transaction(async (tx) => {
     await lockMutationScope(tx, 'institution-identity', admin.institutionId)
+    await assertPermissionManager(fastify, tx, admin.institutionId, userId)
+    await permissionContext(tx, {
+      actorUserId: userId,
+      institutionId: admin.institutionId,
+      source: 'correction_decision',
+      reason: notes.slice(0, 1000),
+    })
     const correction = await tx.institution_directory_corrections.findFirst({
       where: { id, institutionId: admin.institutionId },
       include: { person: { include: { directory_record: true } } },

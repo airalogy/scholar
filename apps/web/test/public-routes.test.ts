@@ -42,6 +42,9 @@ describe('public route policies', () => {
     'Favorites',
     'MyUploads',
     'Settings',
+    'MyReviewTasks',
+    'ReviewTaskDetail',
+    'ReviewProgress',
   ])('keeps %s behind sign-in', (name) => {
     expect(routeByName(name).meta?.allowAnonymous).not.toBe(true)
   })

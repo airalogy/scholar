@@ -50,6 +50,15 @@ export interface UserInstitutionIdentity {
   institutionName: string
   internalId: string
   scholarId: string | null
+  // Optional while older API deployments still return only internalId.
+  identifiers?: UserInstitutionIdentifier[]
+}
+
+export interface UserInstitutionIdentifier {
+  id: string
+  value: string
+  isPrimary: boolean
+  kind: 'unknown' | 'formal' | 'temporary'
 }
 
 export interface UserInstitutionPaper {
