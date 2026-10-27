@@ -6,6 +6,7 @@ import {
 import { resolvePaperScope } from '../../papers/service.paper'
 import { requireNormalizedDoi } from '../../../utils/doi'
 import { assertFeatureEnabled } from '../../../utils/deployment'
+import { hasGovernedReview } from '../../../review/configuration'
 
 const routes: FastifyPluginAsyncTypebox = async (fastify) => {
   fastify.setValidatorCompiler(TypeBoxValidatorCompiler)
@@ -54,12 +55,13 @@ const routes: FastifyPluginAsyncTypebox = async (fastify) => {
       if (!claim) return { code: 0 as const, data: { action: 'new' as const, paperId: null } }
       const status = claim.review_case.status
       const own = claim.submittedBy === request.user.userId
+      const governed = await hasGovernedReview(fastify.prisma, scope.institutionId, 'paper')
       const action =
-        status === 'approved'
+        status === 'approved' && governed
           ? ('change_request' as const)
           : status === 'archived'
             ? ('archived' as const)
-            : own
+            : own || !governed
               ? ('resubmit' as const)
               : ('pending' as const)
       return {

@@ -28,7 +28,8 @@ import { personAdmitted } from '../src/directory/policy'
 import { canActOnTask } from '../src/review/authorization'
 import { assertInstitutionIdentitySession } from '../src/utils/institution-identifiers'
 import intakeRoutes from '../src/routes/v1/papers'
-import { updatePaper, deletePaper } from '../src/routes/papers/service.paper'
+import { updatePaper, deletePaper, resolvePaperAccess } from '../src/routes/papers/service.paper'
+import { upsertInstitutionOrgStructure } from '../src/utils/institution-org-structure'
 import { reviewLegacyPaperImport } from '../src/routes/v1/institutions/service.paper-import-review'
 import { administratorRoutes } from '../src/routes/v1/institutions/routes.administrators'
 import institutionRoutes from '../src/routes/institutions'
@@ -2369,6 +2370,256 @@ describe(
       )
       assert.equal(invalidRestore.statusCode, 409)
     })
+    test('legacy paper preflight permits resubmission and deletion archives retained evidence', async (t) => {
+      const f = await fixture(t)
+      const input = {
+        title: 'Legacy submission',
+        doi: `10.1234/legacy-${randomUUID()}`,
+        institution_id: f.institution.id,
+        publish_year: 2026,
+        paper_type: 1,
+        language: 2,
+      }
+      const first = await createPaper(f.app, input, f.owner.id)
+      const claim = await prisma.paper_claims.findUniqueOrThrow({ where: { id: first.claimId! } })
+      const approve = async (): Promise<void> => {
+        await prisma.$transaction((tx) =>
+          decideReviewCase(f.app, tx, {
+            caseId: claim.reviewCaseId,
+            actorId: f.platform.id,
+            decision: 'approve',
+          }),
+        )
+      }
+      await approve()
+      await resolvePaperAccess(f.app, first.id, null)
+      for (const actor of [f.owner.id, f.member.id]) {
+        const preflight = await f.post(
+          '/v1/papers/submission-check',
+          {
+            doi: input.doi,
+            institutionId: f.institution.id,
+          },
+          actor,
+        )
+        assert.equal(preflight.statusCode, 200, preflight.body)
+        assert.deepEqual(preflight.json().data, { action: 'resubmit', paperId: first.id })
+      }
+      await createPaper(f.app, { ...input, title: 'Replacement submission' }, f.owner.id)
+      await approve()
+      const rounds = await prisma.content_review_rounds.findMany({
+        where: { caseId: claim.reviewCaseId },
+        orderBy: { number: 'asc' },
+      })
+      const actions = await prisma.content_review_actions.count({
+        where: { caseId: claim.reviewCaseId },
+      })
+      assert.equal(rounds.length, 2)
+      const archived = await deletePaper(f.app, first.id, f.platform.id)
+      assert.match(archived.message, /archived/)
+      assert.equal(
+        (await prisma.content_review_cases.findUniqueOrThrow({ where: { id: claim.reviewCaseId } }))
+          .status,
+        'archived',
+      )
+      assert.deepEqual(
+        await prisma.content_review_rounds.findMany({
+          where: { caseId: claim.reviewCaseId },
+          orderBy: { number: 'asc' },
+        }),
+        rounds,
+      )
+      assert.equal(
+        await prisma.content_review_actions.count({ where: { caseId: claim.reviewCaseId } }),
+        actions + 1,
+      )
+      assert.equal(await prisma.paper_submissions.count({ where: { claimId: claim.id } }), 2)
+      assert.ok(await prisma.papers.findUnique({ where: { id: first.id } }))
+      assert.ok(await prisma.paper_claims.findUnique({ where: { id: claim.id } }))
+      await assert.rejects(resolvePaperAccess(f.app, first.id, null))
+      await deletePaper(f.app, first.id, f.platform.id)
+      assert.equal(
+        await prisma.content_review_actions.count({ where: { caseId: claim.reviewCaseId } }),
+        actions + 1,
+      )
+      const preflight = await f.post('/v1/papers/submission-check', {
+        doi: input.doi,
+        institutionId: f.institution.id,
+      })
+      assert.equal(preflight.json().data.action, 'archived')
+
+      const pending = await createPaper(
+        f.app,
+        { ...input, doi: `10.1234/pending-${randomUUID()}` },
+        f.owner.id,
+      )
+      const pendingClaim = await prisma.paper_claims.findUniqueOrThrow({
+        where: { id: pending.claimId! },
+      })
+      const step = await prisma.content_review_step_instances.create({
+        data: {
+          caseId: pendingClaim.reviewCaseId,
+          institutionId: f.institution.id,
+          roundNumber: 1,
+          step_order: 1,
+          step_name: 'Legacy review',
+          status: 'pending',
+          resolver_type: 'user',
+          resolver_config: {},
+        },
+      })
+      const task = await prisma.content_review_tasks.create({
+        data: { stepId: step.id, kind: 'cc', status: 'notified' },
+      })
+      await deletePaper(f.app, pending.id, f.platform.id)
+      assert.equal(
+        (await prisma.content_review_step_instances.findUniqueOrThrow({ where: { id: step.id } }))
+          .status,
+        'cancelled',
+      )
+      assert.equal(
+        (await prisma.content_review_tasks.findUniqueOrThrow({ where: { id: task.id } })).status,
+        'cancelled',
+      )
+      assert.equal(
+        (
+          await prisma.content_review_rounds.findFirstOrThrow({
+            where: { caseId: pendingClaim.reviewCaseId },
+          })
+        ).status,
+        'withdrawn',
+      )
+      assert.equal(
+        await prisma.review_inbox_events.count({
+          where: { taskId: task.id, eventType: 'cancelled' },
+        }),
+        1,
+      )
+    })
+
+    test('explicit legacy reactivation restores admission without restoring revoked privileges', async (t) => {
+      const f = await fixture(t)
+      const body = {
+        replaceMissing: false,
+        nodes: [],
+        edges: [],
+        positions: [],
+        appointments: [],
+        workflows: [],
+        people: [
+          {
+            key: 'legacy-member',
+            internalId: 'DEMO-STAFF-001',
+            name: 'Legacy member',
+            userId: f.member.id,
+            isActive: true,
+          },
+        ],
+      }
+      await assert.rejects(
+        upsertInstitutionOrgStructure(f.app, f.institution.id, f.owner.id, body),
+        /Directory-managed/,
+      )
+      await prisma.institution_directory_sources.delete({ where: { id: f.source.id } })
+      await upsertInstitutionOrgStructure(f.app, f.institution.id, f.owner.id, body)
+      const person = await prisma.institution_people.findUniqueOrThrow({
+        where: { institutionId_userId: { institutionId: f.institution.id, userId: f.member.id } },
+      })
+      const identifiers = await prisma.institution_person_identifiers.findMany({
+        where: { personId: person.id },
+        orderBy: { id: 'asc' },
+      })
+      const grant = await prisma.institution_reviewer_grants.create({
+        data: {
+          institutionId: f.institution.id,
+          personId: person.id,
+          role: 'library_final',
+          grantedBy: f.owner.id,
+          notes: 'Synthetic legacy grant',
+        },
+      })
+      await prisma.institution_memberships.update({
+        where: { institutionId_userId: { institutionId: f.institution.id, userId: f.member.id } },
+        data: { role: 'admin', can_review_content: true, can_import_data: true },
+      })
+      body.people[0]!.isActive = false
+      await upsertInstitutionOrgStructure(f.app, f.institution.id, f.owner.id, body)
+      const departed = await prisma.institution_people.findUniqueOrThrow({
+        where: { id: person.id },
+      })
+      assert.equal(departed.lifecycle_status, 'departed')
+      assert.equal(await personAdmitted(prisma, f.institution.id, person.id), false)
+      const revoked = await prisma.institution_reviewer_grants.findUniqueOrThrow({
+        where: { id: grant.id },
+      })
+      assert.ok(revoked.revokedAt)
+      // Saving an inactive person again is also valid and must not restore privileges.
+      await upsertInstitutionOrgStructure(f.app, f.institution.id, f.owner.id, body)
+      assert.equal(await personAdmitted(prisma, f.institution.id, person.id), false)
+      // Generic identity upserts (including SSO) must not reactivate departed people.
+      await assert.rejects(
+        prisma.$transaction((tx) =>
+          upsertInstitutionPerson(tx, {
+            institutionId: f.institution.id,
+            internalId: person.internalId!,
+            name: person.name,
+            userId: f.member.id,
+            source: 'sso',
+          }),
+        ),
+        /no longer active/,
+      )
+      assert.equal(await personAdmitted(prisma, f.institution.id, person.id), false)
+      body.people[0]!.isActive = true
+      await upsertInstitutionOrgStructure(f.app, f.institution.id, f.owner.id, body)
+      const active = await prisma.institution_people.findUniqueOrThrow({ where: { id: person.id } })
+      assert.equal(active.lifecycle_status, 'active')
+      assert.equal(active.internalId, person.internalId)
+      assert.equal(active.userId, person.userId)
+      assert.equal(await personAdmitted(prisma, f.institution.id, person.id), true)
+      assert.deepEqual(
+        await prisma.institution_person_identifiers.findMany({
+          where: { personId: person.id },
+          orderBy: { id: 'asc' },
+        }),
+        identifiers,
+      )
+      assert.deepEqual(
+        await prisma.institution_reviewer_grants.findUniqueOrThrow({ where: { id: grant.id } }),
+        revoked,
+      )
+      const membership = await prisma.institution_memberships.findUniqueOrThrow({
+        where: { institutionId_userId: { institutionId: f.institution.id, userId: f.member.id } },
+      })
+      assert.equal(membership.role, 'member')
+      assert.equal(membership.can_review_content, false)
+      assert.equal(membership.can_import_data, false)
+      await prisma.institution_people.update({
+        where: { id: person.id },
+        data: { manually_suspended: true },
+      })
+      await upsertInstitutionOrgStructure(f.app, f.institution.id, f.owner.id, body)
+      assert.equal(await personAdmitted(prisma, f.institution.id, person.id), false)
+      await upsertInstitutionOrgStructure(f.app, f.institution.id, f.owner.id, {
+        ...body,
+        replaceMissing: true,
+        people: [],
+      })
+      assert.equal(
+        (await prisma.institution_people.findUniqueOrThrow({ where: { id: person.id } }))
+          .lifecycle_status,
+        'departed',
+      )
+      await prisma.institution_person_identifiers.updateMany({
+        where: { personId: person.id },
+        data: { revokedAt: new Date() },
+      })
+      await assert.rejects(
+        upsertInstitutionOrgStructure(f.app, f.institution.id, f.owner.id, body),
+        /no longer active/,
+      )
+    })
+
     test('duplicate uploads cannot replace another submitter or hide a published governed claim', async (t) => {
       const f = await fixture(t)
       await f.sync([personRow('LIBRARY')])

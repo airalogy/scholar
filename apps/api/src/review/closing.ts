@@ -1,7 +1,62 @@
 import type { FastifyInstance } from 'fastify'
+import type { Prisma } from '../../prisma/generated/client'
 import { lockMutationScope } from '../utils/advisory-lock'
 import { canActOnTask } from './authorization'
 import { enqueueInboxEvent } from './tasks'
+
+// Called under the institution identity lock, after legacy deletion permissions
+// and the governed-review guard have been checked. Keep subjects and evidence.
+export const archiveLegacyPaperReviews = async (
+  tx: Prisma.TransactionClient,
+  institutionId: string,
+  claimIds: string[],
+  actorId: string,
+): Promise<void> => {
+  const cases = await tx.content_review_cases.findMany({
+    where: { institutionId, content_type: 'paper', subjectId: { in: claimIds } },
+  })
+  const now = new Date()
+  for (const reviewCase of cases) {
+    if (reviewCase.status === 'archived') continue
+    const caseId = reviewCase.id
+    const tasks = await tx.content_review_tasks.findMany({
+      where: { step: { caseId }, status: { in: ['pending', 'queued', 'notified'] } },
+    })
+    for (const task of tasks) {
+      await tx.content_review_tasks.update({
+        where: { id: task.id },
+        data: { status: 'cancelled' },
+      })
+      await enqueueInboxEvent(tx, task.id, 'cancelled')
+    }
+    await tx.content_review_step_instances.updateMany({
+      where: { caseId, status: { in: ['pending', 'queued'] } },
+      data: { status: 'cancelled', updatedAt: now },
+    })
+    // Completed decisions and immutable material/workflow snapshots stay intact.
+    await tx.content_review_rounds.updateMany({
+      where: { caseId, status: { in: ['pending_review', 'changes_requested'] } },
+      data: { status: 'withdrawn', executionStatus: 'not_applicable', completedAt: now },
+    })
+    await tx.content_review_cases.update({
+      where: { id: caseId },
+      data: { status: 'archived', currentStep: null, updatedAt: now },
+    })
+    await tx.content_review_actions.create({
+      data: {
+        caseId,
+        institutionId,
+        actorId,
+        roundNumber: reviewCase.currentRound,
+        action: 'withdrawn',
+        from_status: reviewCase.status,
+        to_status: 'archived',
+        versionId: reviewCase.currentVersionId,
+        notes: 'Archived by a legacy paper deletion request; history retained',
+      },
+    })
+  }
+}
 
 export const closeReviewCase = async (
   fastify: FastifyInstance,

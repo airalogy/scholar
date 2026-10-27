@@ -38,6 +38,8 @@ interface UpsertInstitutionPersonInput {
   provisionId?: string | null
   source: string
   actorUserId?: string | null
+  // Only for authorized personnel management that sets admission in this transaction.
+  allowInactivePerson?: boolean
 }
 
 const buildPersonKey = (normalizedInternalId: string): string => {
@@ -98,6 +100,7 @@ export const upsertInstitutionPerson = async (
     prisma,
     input.institutionId,
     input.internalId,
+    input.allowInactivePerson === true,
   )
   // An alias locates a person; it must never replace that person's canonical ID.
   const internalId = identifier?.person.internalId ?? assertInstitutionInternalId(input.internalId)

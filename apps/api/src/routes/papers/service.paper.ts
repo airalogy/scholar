@@ -4,6 +4,7 @@ import type { InstitutionPaperBoundMember } from '../../utils/institution-paper-
 import type { UpdatePaperBody } from './schema'
 import type { ClaimRecord, FormattedPaper, PaperScope, SubmissionRecord } from './service.shared'
 import { hasGovernedReview } from '../../review/configuration'
+import { archiveLegacyPaperReviews } from '../../review/closing'
 import { lockMutationScope } from '../../utils/advisory-lock'
 import {
   assertCanReviewPaperClaim,
@@ -790,12 +791,6 @@ export async function deletePaper(fastify: FastifyInstance, id: string, userId: 
       'This legacy paper is linked to another institution and cannot be deleted in single-institution mode',
     )
   }
-  const posts = await fastify.prisma.forum_posts.findMany({
-    where: { paperId: id },
-    select: { id: true },
-  })
-  const postIds = posts.map((post) => post.id)
-
   const claimIds = claims.map((claim) => claim.id)
   await fastify.prisma.$transaction(async (tx) => {
     await lockMutationScope(tx, 'institution-identity', configuredInstitution.id)
@@ -813,29 +808,8 @@ export async function deletePaper(fastify: FastifyInstance, id: string, userId: 
         'This paper is referenced by a published bibliometric edition and cannot be deleted',
       )
     }
-    if (postIds.length > 0) {
-      await tx.forum_likes.deleteMany({
-        where: { postId: { in: postIds } },
-      })
-      await tx.forum_comments.deleteMany({
-        where: { postId: { in: postIds } },
-      })
-    }
-
-    await tx.forum_posts.deleteMany({ where: { paperId: id } })
-    await tx.user_bookmarks.deleteMany({ where: { paperId: id } })
-    await tx.scholar_papers.deleteMany({ where: { paperId: id } })
-    await tx.paper_authors.deleteMany({ where: { paperId: id } })
-    await tx.paper_submissions.deleteMany({ where: { paperId: id } })
-    if (claimIds.length > 0) {
-      await tx.content_review_cases.deleteMany({
-        where: { content_type: 'paper', subjectId: { in: claimIds } },
-      })
-    }
-    await tx.paper_claims.deleteMany({ where: { paperId: id } })
-    await tx.$executeRawUnsafe('DELETE FROM embeddings WHERE "paperId" = $1', id)
-    await tx.papers.delete({ where: { id } })
+    await archiveLegacyPaperReviews(tx, configuredInstitution.id, claimIds, userId)
   })
 
-  return { message: 'Paper deleted' }
+  return { message: 'Paper archived; review history retained' }
 }

@@ -1110,12 +1110,14 @@ export const upsertInstitutionOrgStructure = async (
         provisionId: provision.provisionId,
         source: 'organization_structure',
         actorUserId: actorId,
+        allowInactivePerson: true,
       })
       await tx.institution_people.update({
         where: { id: persistedPerson.id },
         data: {
           is_provisioning_enabled: person.createProvision === true,
           is_active: person.isActive !== false,
+          lifecycle_status: person.isActive !== false ? 'active' : 'departed',
           metadata: toNullableJsonInput(person.metadata),
           updatedAt: now,
         },
@@ -1133,6 +1135,7 @@ export const upsertInstitutionOrgStructure = async (
         },
         data: {
           is_active: false,
+          lifecycle_status: 'departed',
           updatedAt: now,
         },
       })
