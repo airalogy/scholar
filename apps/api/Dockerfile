@@ -6,7 +6,7 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates openssl \
   && rm -rf /var/lib/apt/lists/*
 
-FROM base AS build
+FROM base AS dependencies
 
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
@@ -14,15 +14,30 @@ WORKDIR /workspace
 
 RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml VERSION LICENSE NOTICE TRADEMARKS.md ASSETS.md ./
+# Keep fetched packages in an ordinary layer so remote BuildKit caches include them.
+COPY pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm fetch --frozen-lockfile --ignore-scripts
+
+COPY package.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/docs/package.json apps/docs/package.json
 COPY apps/web/package.json apps/web/package.json
 COPY scripts/install-git-hooks.mjs scripts/install-git-hooks.mjs
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
+RUN pnpm install --offline --frozen-lockfile
+
+FROM dependencies AS production-dependencies
+
+# Export dependencies before copying source or release metadata.
+RUN pnpm --filter @airalogy/scholar-server deploy --prod --legacy /opt/scholar-api
+
+FROM dependencies AS build
 
 COPY apps/api apps/api
 COPY scripts scripts
+COPY VERSION LICENSE NOTICE TRADEMARKS.md ASSETS.md ./
+
+RUN DATABASE_URL=postgresql://scholar:scholar@localhost:5432/scholar?schema=public \
+  pnpm --filter @airalogy/scholar-server db:generate
 
 ARG APP_VERSION=dev
 ARG GIT_COMMIT=unknown
@@ -34,10 +49,7 @@ ENV GIT_TAG=$GIT_TAG
 ENV BUILD_TIME=$BUILD_TIME
 ENV BUILD_DIRTY=false
 
-RUN DATABASE_URL=postgresql://scholar:scholar@localhost:5432/scholar?schema=public \
-  pnpm --filter @airalogy/scholar-server db:generate
 RUN pnpm --filter @airalogy/scholar-server build
-RUN pnpm --filter @airalogy/scholar-server deploy --prod --legacy /opt/scholar-api
 
 FROM base AS runtime
 
@@ -51,7 +63,11 @@ ENV HOST=0.0.0.0
 ENV PORT=3000
 WORKDIR /app
 
-COPY --from=build --chown=node:node /opt/scholar-api/ ./
+COPY --from=production-dependencies --chown=node:node /opt/scholar-api/node_modules/ ./node_modules/
+COPY --from=build --chown=node:node /workspace/apps/api/package.json /workspace/apps/api/prisma.config.ts /workspace/apps/api/README.md ./
+COPY --from=build --chown=node:node /workspace/apps/api/prisma/schema.prisma ./prisma/schema.prisma
+COPY --from=build --chown=node:node /workspace/apps/api/prisma/migrations/ ./prisma/migrations/
+COPY --from=build --chown=node:node /workspace/apps/api/dist/ ./dist/
 COPY --from=build --chown=node:node /workspace/LICENSE /workspace/NOTICE /workspace/TRADEMARKS.md /workspace/ASSETS.md ./
 RUN mkdir -p /var/lib/scholar/uploads && chown -R node:node /var/lib/scholar
 

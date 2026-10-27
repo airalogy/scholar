@@ -60,3 +60,60 @@ for (const workflow of ['ci', 'release']) {
     })
   }
 }
+
+for (const [description, file, before, after, message] of [
+  ['native ARM runner', '.github/workflows/release.yml', 'runner: ubuntu-24.04-arm', 'runner: ubuntu-24.04', /runner: ubuntu-24.04-arm/],
+  ['both release architectures', '.github/workflows/release.yml', 'arch: [amd64, arm64]', 'arch: [amd64]', /arch: \[amd64, arm64\]/],
+  ['verification before builds', '.github/workflows/release.yml', 'needs: verify', 'needs: []', /needs: verify/],
+  ['all native checks before index publication', '.github/workflows/release.yml', 'needs: image-platforms', 'needs: verify', /needs: image-platforms/],
+  ['index before packaging', '.github/workflows/release.yml', 'needs: images', 'needs: verify', /needs: images/],
+  ['native API smoke test', '.github/workflows/release.yml', 'dist/src/scripts/smoke-built-app.js', 'dist/src/index.js', /smoke-built-app/],
+  ['native Web smoke test', '.github/workflows/release.yml', '--entrypoint caddy "$IMAGE" validate', '--entrypoint caddy "$IMAGE" version', /caddy.*validate/],
+  ['multi-platform index verification', '.github/workflows/release.yml', 'sort == ["amd64", "arm64"]', 'length > 0', /sort ==/],
+  ['trusted release cache', '.github/workflows/release.yml', 'scope=main-', 'scope=pr-', /scope=main-/],
+  ['native image metadata labels', '.github/workflows/release.yml', '          labels: ${{ steps.metadata.outputs.labels }}\n', '', /labels: /],
+  ['PR cache isolation', '.github/workflows/ci.yml', "github.event_name == 'push' && 'main' || format('pr-{0}', github.event.pull_request.number)", "'main'", /format\('pr-/],
+  ['ARM cache restricted to main', '.github/workflows/ci.yml', "if: github.event_name == 'push' && github.ref == 'refs/heads/main'", 'if: always()', /if: github.event_name/],
+  ['required PR job identity', '.github/workflows/ci.yml', '  container-build:', '  fast-build:', /release acceleration/],
+  ['separate runtime dependency layer', 'apps/api/Dockerfile', '/opt/scholar-api/node_modules/ ./node_modules/', '/opt/scholar-api/ ./', /node_modules/],
+]) {
+  test(`release acceleration retains ${description}`, async () => {
+    const result = await checkConfiguration((edit) => edit(file, (source) => {
+      assert.ok(source.includes(before), `Missing mutation target: ${before}`)
+      return source.replace(before, after)
+    }))
+    assert.equal(result.status, 1, result.stdout)
+    assert.match(result.stderr, message)
+  })
+}
+
+for (const component of ['api', 'web']) {
+  test(`${component} fetch layer cannot depend on a product version change`, async () => {
+    const result = await checkConfiguration((edit) => edit(`apps/${component}/Dockerfile`, (source) =>
+      source.replace('COPY pnpm-lock.yaml pnpm-workspace.yaml ./', 'COPY pnpm-lock.yaml pnpm-workspace.yaml VERSION ./')))
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /fetch must depend only on the lockfile/)
+  })
+  test(`${component} cannot silently download dependencies during installation`, async () => {
+    const result = await checkConfiguration((edit) => edit(`apps/${component}/Dockerfile`, (source) =>
+      source.replace('pnpm install --offline --frozen-lockfile', 'pnpm install --frozen-lockfile')))
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /offline and frozen/)
+  })
+}
+
+test('release does not spend time exporting tag-scoped caches', async () => {
+  const result = await checkConfiguration((edit) => edit('.github/workflows/release.yml', (source) =>
+    source.replace('          sbom: true', '          cache-to: type=gha,mode=max\n          sbom: true')))
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /without tag-cache exports/)
+})
+
+for (const workflow of ['ci', 'release']) {
+  test(`${workflow} cannot make checks optional to accelerate releases`, async () => {
+    const result = await checkConfiguration((edit) => edit(`.github/workflows/${workflow}.yml`, (source) =>
+      source.replace('  verify:\n', '  verify:\n    continue-on-error: true\n')))
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /optional/)
+  })
+}

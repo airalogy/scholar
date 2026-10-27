@@ -260,6 +260,65 @@ if (!ciWorkflow.includes('pnpm db:verify:bibliography')) {
   fail(ciWorkflowPath, 1, 'CI must run the PostgreSQL bibliography verification')
 }
 
+// Keep the existing required PR job IDs and matrix entries while separating native builds.
+const workflowJob = (workflow, name) => workflow.match(new RegExp(`^  ${name}:\\n[\\s\\S]*?(?=^  [\\w-]+:|$(?![\\s\\S]))`, 'm'))?.[0] ?? ''
+const requireFragments = (file, source, fragments) => {
+  for (const fragment of fragments) {
+    if (!source.includes(fragment)) fail(file, 1, `release acceleration must retain ${fragment}`)
+  }
+}
+const nativeBuilds = workflowJob(releaseWorkflow, 'image-platforms')
+requireFragments(releaseWorkflowPath, nativeBuilds, [
+  'needs: verify',
+  'runs-on: ${{ matrix.runner }}',
+  'component: [api, web]',
+  'arch: [amd64, arm64]',
+  '- arch: amd64\n            runner: ubuntu-24.04',
+  '- arch: arm64\n            runner: ubuntu-24.04-arm',
+  'platforms: linux/${{ matrix.arch }}',
+  'push-by-digest=true,name-canonical=true,push=true',
+  'labels: ${{ steps.metadata.outputs.labels }}',
+  'cache-from: type=gha,scope=main-${{ matrix.component }}-${{ matrix.arch }},timeout=3m',
+  'dist/src/scripts/smoke-built-app.js',
+  '--entrypoint caddy "$IMAGE" validate',
+  'sbom: true',
+  'provenance: mode=max',
+  'subject-digest: ${{ steps.build.outputs.digest }}',
+])
+requireFragments(releaseWorkflowPath, workflowJob(releaseWorkflow, 'images'), [
+  'needs: image-platforms',
+  '$COMPONENT-amd64.digest',
+  '$COMPONENT-arm64.digest',
+  'docker buildx imagetools create --metadata-file merged.json',
+  '"$IMAGE_REPOSITORY@$amd64" "$IMAGE_REPOSITORY@$arm64"',
+  'sort == ["amd64", "arm64"]',
+  'subject-digest: ${{ steps.merge.outputs.digest }}',
+  '"image-metadata/$COMPONENT.digest"',
+])
+requireFragments(releaseWorkflowPath, workflowJob(releaseWorkflow, 'release'), ['needs: images', 'scholarctl install'])
+if (/^\s+(?:cache-to|continue-on-error):/m.test(releaseWorkflow) || releaseWorkflow.includes('docker/setup-qemu-action')) {
+  fail(releaseWorkflowPath, 1, 'Release must use native builds without tag-cache exports or optional checks')
+}
+const requiredContainerBuild = workflowJob(ciWorkflow, 'container-build')
+requireFragments(ciWorkflowPath, requiredContainerBuild, [
+  '- deployment-config', '- verify',
+  '- component: api\n            dockerfile: apps/api/Dockerfile',
+  '- component: web\n            dockerfile: apps/web/Dockerfile',
+  'platforms: linux/amd64',
+  "scope=${{ github.event_name == 'push' && 'main' || format('pr-{0}', github.event.pull_request.number) }}-${{ matrix.component }}-amd64,timeout=3m,ignore-error=true",
+])
+requireFragments(ciWorkflowPath, workflowJob(ciWorkflow, 'container-cache-arm64'), [
+  "if: github.event_name == 'push' && github.ref == 'refs/heads/main'",
+  '- deployment-config', '- verify',
+  'runs-on: ubuntu-24.04-arm',
+  'platforms: linux/arm64',
+  'outputs: type=cacheonly',
+  'cache-to: type=gha,mode=max,scope=main-${{ matrix.component }}-arm64,timeout=3m,ignore-error=true',
+])
+if (/^\s+continue-on-error:/m.test(ciWorkflow)) {
+  fail(ciWorkflowPath, 1, 'CI checks cannot be optional; only cache export failures may be ignored')
+}
+
 const lifecycleScriptPaths = new Set()
 const lifecycleNames = ['preinstall', 'install', 'postinstall', 'prepare']
 
@@ -306,6 +365,20 @@ for (const dockerFile of dockerFiles) {
 
   const copiedSources = lines.slice(0, installIndex).flatMap((line) => dockerCopySources(line))
 
+  const fetchIndex = lines.findIndex((line) => line === 'RUN pnpm fetch --frozen-lockfile --ignore-scripts')
+  const beforeFetch = lines.slice(0, fetchIndex).flatMap((line) => dockerCopySources(line))
+  if (fetchIndex < 0 || fetchIndex >= installIndex ||
+    !beforeFetch.includes('pnpm-lock.yaml') || !beforeFetch.includes('pnpm-workspace.yaml') ||
+    beforeFetch.some((source) => !['pnpm-lock.yaml', 'pnpm-workspace.yaml'].includes(source))) {
+    fail(dockerFile, 1, 'fetch must depend only on the lockfile and workspace configuration before installation')
+  }
+  if (lines[installIndex] !== 'RUN pnpm install --offline --frozen-lockfile') {
+    fail(dockerFile, installIndex + 1, 'Docker dependency installation must be offline and frozen')
+  }
+  if (copiedSources.some((source) => ['.', 'apps/api', 'apps/web', 'apps/docs', 'VERSION'].includes(source))) {
+    fail(dockerFile, 1, 'application source and VERSION must not invalidate the dependency installation layer')
+  }
+
   for (const scriptPath of lifecycleScriptPaths) {
     const copiedBeforeInstall = copiedSources.some((source) => {
       const normalizedSource = source.replace(/\/$/, '')
@@ -325,6 +398,12 @@ for (const dockerFile of dockerFiles) {
     }
   }
 }
+
+requireFragments(dockerFiles[0], await readFile(dockerFiles[0], 'utf8'), [
+  'FROM dependencies AS production-dependencies',
+  'COPY --from=production-dependencies --chown=node:node /opt/scholar-api/node_modules/ ./node_modules/',
+  'COPY --from=build --chown=node:node /workspace/apps/api/dist/ ./dist/',
+])
 
 const versionedFiles = [...dockerFiles, path.join(repositoryRoot, 'deploy', 'compose.build.yaml')]
 

@@ -9,15 +9,20 @@ WORKDIR /workspace
 
 RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml VERSION ./
+# Fetch is keyed by the lockfile, not by the frequently changing product version.
+COPY pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm fetch --frozen-lockfile --ignore-scripts
+
+COPY package.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/docs/package.json apps/docs/package.json
 COPY apps/web/package.json apps/web/package.json
 COPY scripts/install-git-hooks.mjs scripts/install-git-hooks.mjs
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
+RUN pnpm install --offline --frozen-lockfile
 
 COPY apps/docs apps/docs
 COPY apps/web apps/web
+COPY VERSION ./
 
 ARG VITE_API_BASE_URL=/api
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
