@@ -3,6 +3,8 @@ import type { FastifyInstance } from 'fastify'
 import { normalizeInstitutionRole } from './permissions'
 import { linkInstitutionPersonToUser } from './institution-people'
 import { lockMutationScope } from './advisory-lock'
+import { assertPermissionManager, permissionContext } from '../administrators/access'
+import { personAdmitted } from '../directory/policy'
 
 export type InstitutionProvisionStatus = 'pending_activation' | 'claimed' | 'disabled'
 
@@ -43,6 +45,7 @@ export const syncInstitutionProvisionToUser = async (
   fastify: FastifyInstance,
   provision: InstitutionProvisionLike,
   userId: string,
+  expectedToken: string,
 ): Promise<void> => {
   const now = new Date()
   const user = await fastify.prisma.users.findUnique({
@@ -75,6 +78,24 @@ export const syncInstitutionProvisionToUser = async (
 
   await fastify.prisma.$transaction(async (tx) => {
     await lockMutationScope(tx, 'institution-identity', provision.institutionId)
+    const current = await tx.institution_user_provisions.findUnique({ where: { id: provision.id } })
+    if (
+      !current ||
+      current.inviteToken !== expectedToken ||
+      current.status !== 'pending_activation' ||
+      (current.expiresAt && current.expiresAt <= new Date())
+    )
+      throw fastify.httpErrors.conflict(
+        'Activation invitation is no longer valid; request a new invitation',
+      )
+    await assertPermissionManager(fastify, tx, current.institutionId, current.createdBy, [
+      current.role,
+    ])
+    await permissionContext(tx, {
+      actorUserId: userId,
+      source: 'provision_activation',
+      reason: `Accepted invitation ${current.id}; authorized by ${current.createdBy}`,
+    })
     const person = await tx.institution_people.findUnique({
       where: {
         institutionId_provisionId: {
@@ -88,6 +109,19 @@ export const syncInstitutionProvisionToUser = async (
         'Institution provision is not linked to an institution person',
       )
     }
+    if (
+      !person.is_active ||
+      person.lifecycle_status !== 'active' ||
+      !(await personAdmitted(tx, provision.institutionId, person.id))
+    )
+      throw fastify.httpErrors.forbidden('Institution person is not active')
+    const membership = await tx.institution_memberships.findUnique({
+      where: { institutionId_userId: { institutionId: provision.institutionId, userId } },
+    })
+    if (membership)
+      throw fastify.httpErrors.conflict(
+        'An existing member must use the membership permission workflow',
+      )
 
     await linkInstitutionPersonToUser(tx, {
       institutionId: provision.institutionId,
@@ -107,18 +141,23 @@ export const syncInstitutionProvisionToUser = async (
       create: {
         institutionId: provision.institutionId,
         userId,
-        role: normalizeInstitutionRole(provision.role),
-        can_review_content: provision.can_review_content,
-        can_import_data: provision.can_import_data,
+        role: normalizeInstitutionRole(current.role),
+        can_review_content: current.can_review_content,
+        can_import_data: current.can_import_data,
         createdAt: now,
         updatedAt: now,
       },
       update: {
-        role: normalizeInstitutionRole(provision.role),
-        can_review_content: provision.can_review_content,
-        can_import_data: provision.can_import_data,
+        role: normalizeInstitutionRole(current.role),
+        can_review_content: current.can_review_content,
+        can_import_data: current.can_import_data,
         updatedAt: now,
       },
+    })
+
+    await tx.institution_user_provisions.update({
+      where: { id: current.id },
+      data: { claimedUserId: userId, status: 'claimed', claimedAt: now, updatedAt: now },
     })
 
     if (shouldUpdateUser) {

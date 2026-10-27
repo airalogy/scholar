@@ -238,6 +238,35 @@ const run = async (): Promise<void> => {
     JOIN "content_review_cases" review_case ON review_case."id" = thesis."reviewCaseId"
     WHERE review_case."currentVersionId" IS DISTINCT FROM thesis."currentVersionId"
     UNION ALL
+    SELECT 'content_review_changes.case_scope_mismatch', count(*)::bigint
+    FROM content_review_changes change
+    JOIN content_review_cases review_case ON review_case.id = change."caseId"
+    WHERE change."institutionId" <> review_case."institutionId"
+      OR change."submittedBy" <> review_case."submittedBy"
+      OR review_case.content_type <> 'change_request' OR review_case."subjectId" <> change.id
+    UNION ALL
+    SELECT 'content_review_cases.missing_current_round', count(*)::bigint
+    FROM content_review_cases review_case
+    LEFT JOIN content_review_rounds round ON round."caseId" = review_case.id AND round.number = review_case."currentRound"
+    WHERE review_case."currentRound" > 0 AND round.id IS NULL
+    UNION ALL
+    SELECT 'content_review_tasks.foreign_participant', count(*)::bigint
+    FROM content_review_tasks task
+    JOIN content_review_step_instances step ON step.id = task."stepId"
+    LEFT JOIN institution_people person ON person.id = task."personId"
+    LEFT JOIN institution_people assignee ON assignee.id = task."assignedPersonId"
+    LEFT JOIN institution_org_nodes node ON node.id = task."nodeId"
+    WHERE (task."personId" IS NOT NULL AND (person.id IS NULL OR person."institutionId" <> step."institutionId"))
+      OR (task."assignedPersonId" IS NOT NULL AND (assignee.id IS NULL OR assignee."institutionId" <> step."institutionId"))
+      OR (task."nodeId" IS NOT NULL AND (node.id IS NULL OR node."institutionId" <> step."institutionId"))
+    UNION ALL
+    SELECT 'institution_reviewer_grants.foreign_appointment', count(*)::bigint
+    FROM institution_reviewer_grants grant_row
+    CROSS JOIN LATERAL unnest(grant_row."appointmentIds") AS held(id)
+    LEFT JOIN institution_org_appointments appointment ON appointment.id = held.id
+    WHERE appointment.id IS NULL OR appointment."personId" <> grant_row."personId"
+      OR appointment."institutionId" <> grant_row."institutionId"
+    UNION ALL
     SELECT 'database.unvalidated_foreign_keys', count(*)::bigint
     FROM pg_constraint constraint_row
     JOIN pg_class relation ON relation.oid = constraint_row.conrelid

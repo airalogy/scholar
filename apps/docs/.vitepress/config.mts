@@ -16,6 +16,8 @@ const zhSidebar: DefaultTheme.Sidebar = [
     items: [
       { text: '管理控制台', link: '/zh/administration/' },
       { text: '管理后台导入', link: '/zh/administration/data-import' },
+      { text: '人员与审核维护手册', link: '/zh/administration/personnel-review' },
+      { text: '管理员授权与应急恢复', link: '/zh/administration/administrator-governance' },
     ],
   },
   {
@@ -23,6 +25,8 @@ const zhSidebar: DefaultTheme.Sidebar = [
     items: [
       { text: '鉴权与权限', link: '/zh/integration/authentication' },
       { text: '批量导入 API', link: '/zh/integration/bulk-import' },
+      { text: '人员同步接口规范', link: '/zh/integration/personnel-sync' },
+      { text: '人员与组织字段字典', link: '/zh/integration/personnel-fields' },
     ],
   },
   {
@@ -46,6 +50,8 @@ const enSidebar: DefaultTheme.Sidebar = [
     items: [
       { text: 'Admin Console', link: '/en/administration/' },
       { text: 'Admin Console Import', link: '/en/administration/data-import' },
+      { text: 'Personnel and Review Handbook', link: '/en/administration/personnel-review' },
+      { text: 'Administrator Governance and Recovery', link: '/en/administration/administrator-governance' },
     ],
   },
   {
@@ -53,6 +59,8 @@ const enSidebar: DefaultTheme.Sidebar = [
     items: [
       { text: 'Authentication and Access', link: '/en/integration/authentication' },
       { text: 'Bulk Import API', link: '/en/integration/bulk-import' },
+      { text: 'Personnel Synchronization', link: '/en/integration/personnel-sync' },
+      { text: 'Personnel Field Reference', link: '/en/integration/personnel-fields' },
     ],
   },
   {

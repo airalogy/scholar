@@ -81,7 +81,7 @@ acquire_operation_lock() {
   mkdir -p "$state_dir"
   OPERATION_LOCK_DIRECTORY=$state_dir/operation.lock
   if ! mkdir "$OPERATION_LOCK_DIRECTORY" 2>/dev/null; then
-    fail "Another Scholar install, upgrade, backup, or bootstrap operation is already running ($OPERATION_LOCK_DIRECTORY)"
+    fail "Another Scholar install, upgrade, backup, bootstrap, or recovery operation is already running ($OPERATION_LOCK_DIRECTORY)"
   fi
   trap 'release_operation_lock' EXIT INT TERM
   printf 'Acquired Scholar deployment lock for %s.\n' "$operation"
@@ -758,6 +758,44 @@ bootstrap() {
     api node dist/src/scripts/bootstrap-deployment.js
 }
 
+recover_admin() {
+  ensure_env_file
+  [ -t 0 ] || fail 'Administrator recovery requires an interactive terminal'
+  recovery_slug=$(read_env_value INSTITUTION_SLUG)
+  printf 'Institution: %s\nAction (create / revoke-platform): ' "$recovery_slug" >&2
+  IFS= read -r recovery_action
+  case "$recovery_action" in create|revoke-platform) ;; *) fail 'Unknown recovery action' ;; esac
+  printf 'Operator / incident reference: ' >&2
+  IFS= read -r recovery_operator
+  printf 'Reason: ' >&2
+  IFS= read -r recovery_reason
+  recovery_name= recovery_email= recovery_username= recovery_password= recovery_user_id=
+  if [ "$recovery_action" = 'create' ]; then
+    printf 'New independent recovery account name: ' >&2
+    IFS= read -r recovery_name
+    printf 'New account email: ' >&2
+    IFS= read -r recovery_email
+    printf 'New account username: ' >&2
+    IFS= read -r recovery_username
+    printf 'Password (12+ characters, hidden): ' >&2
+    trap 'stty echo; release_operation_lock' EXIT INT TERM
+    stty -echo
+    IFS= read -r recovery_password
+    stty echo
+    trap 'release_operation_lock' EXIT INT TERM
+    printf '\nAccount expires after four hours. Password sign-in must be enabled to use it.\n' >&2
+  else
+    printf 'Exact platform administrator user ID to revoke: ' >&2
+    IFS= read -r recovery_user_id
+  fi
+  printf 'Type RECOVER %s to confirm: ' "$recovery_slug" >&2
+  IFS= read -r recovery_confirmation
+  [ "$recovery_confirmation" = "RECOVER $recovery_slug" ] || fail 'Confirmation does not match'
+  printf '%s\000' "$recovery_slug" "$recovery_action" "$recovery_operator" "$recovery_reason" "$recovery_confirmation" "$recovery_name" "$recovery_email" "$recovery_username" "$recovery_password" "$recovery_user_id" |
+    compose run --rm --no-deps -T --entrypoint node api dist/src/scripts/recover-administrator.js
+  unset recovery_password
+}
+
 usage() {
   printf '%s\n' \
     'Usage: deploy/scholarctl <command>' \
@@ -768,7 +806,8 @@ usage() {
     '  upgrade    Back up the bundled database, pull, migrate, and restart' \
     '  backup     Back up the bundled database and local upload storage' \
     '  audit      Audit database relationships and migration constraints' \
-    '  bootstrap  Create or repair the first institution owner interactively' \
+    '  bootstrap  Initialize the first institution owner (never restore authority)' \
+    '  recover-admin  Create an expiring recovery account or revoke platform authority' \
     '  status     Show service state and the running Scholar version' \
     '  recovery   Show the latest non-secret upgrade recovery record' \
     '  logs       Follow API and Web logs' \
@@ -854,6 +893,11 @@ case "$command" in
     ensure_env_file
     acquire_operation_lock bootstrap
     bootstrap
+    ;;
+  recover-admin)
+    ensure_env_file
+    acquire_operation_lock recover-admin
+    recover_admin
     ;;
   status)
     ensure_env_file

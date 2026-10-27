@@ -1,211 +1,253 @@
 <template>
   <div class="settings-page">
     <div class="settings-container">
-      <h1 class="settings-title">{{ $t('settings.title') }}</h1>
+      <header class="settings-header">
+        <h1 class="settings-title">{{ $t('settings.title') }}</h1>
+        <p class="settings-description">{{ $t('settings.pageHint') }}</p>
+      </header>
 
-      <a-tabs v-model:active-key="activeTab" class="settings-tabs">
+      <div v-if="!profileLoaded" class="section-card profile-state" :aria-busy="isLoading">
+        <template v-if="loadError">
+          <p role="alert">{{ $t('settings.loadFailed') }}</p>
+          <a-button type="outline" @click="fillProfile">{{ $t('settings.retryLoad') }}</a-button>
+        </template>
+        <template v-else>
+          <a-spin />
+          <p role="status">{{ $t('common.loading') }}</p>
+        </template>
+      </div>
+
+      <a-tabs v-else v-model:active-key="activeTab" class="settings-tabs">
         <a-tab-pane key="profile" :title="$t('settings.profileTab')">
-          <div class="section-card profile-section profile-section--first">
-            <div class="section-title">{{ $t('settings.basicInfo') }}</div>
-
-            <div class="profile-top">
-              <div class="avatar-box">
+          <div class="profile-content">
+            <div class="section-card profile-overview">
+              <div class="profile-summary">
                 <div class="avatar-circle">
                   <img v-if="avatarPreview" :src="avatarPreview" :alt="$t('settings.avatarAlt')" />
                   <span v-else>{{ profileForm.name?.slice(0, 1) || 'U' }}</span>
                 </div>
-                <a-upload
-                  :show-file-list="false"
-                  :custom-request="handleAvatarUpload"
-                  accept="image/*"
-                >
-                  <template #upload-button>
-                    <a-button type="text" size="mini">{{ $t('common.changeAvatar') }}</a-button>
-                  </template>
-                </a-upload>
-              </div>
-
-              <div class="basic-grid">
-                <a-form :model="profileForm" layout="vertical">
-                  <div class="grid-row">
-                    <a-form-item field="name" :label="$t('settings.name')">
-                      <a-input v-model="profileForm.name" :placeholder="$t('settings.namePlaceholder')" />
-                    </a-form-item>
-                    <a-form-item field="gender" :label="$t('settings.gender')">
-                      <a-select v-model="profileForm.gender" :placeholder="$t('settings.genderPlaceholder')" allow-clear>
-                        <a-option value="male">{{ $t('settings.genders.male') }}</a-option>
-                        <a-option value="female">{{ $t('settings.genders.female') }}</a-option>
-                        <a-option value="other">{{ $t('settings.genders.other') }}</a-option>
-                      </a-select>
-                    </a-form-item>
-                  </div>
-
-                  <div class="grid-row">
-                    <a-form-item field="grade" :label="$t('settings.grade')">
-                      <a-input v-model="profileForm.grade" :placeholder="$t('settings.gradePlaceholder')" />
-                    </a-form-item>
-                    <a-form-item field="degree" :label="$t('settings.degree')">
-                      <a-input v-model="profileForm.degree" :placeholder="$t('settings.degreePlaceholder')" />
-                    </a-form-item>
-                  </div>
-
-                  <div class="grid-row">
-                    <a-form-item field="college" :label="$t('common.college')">
-                      <a-input v-model="profileForm.college" :placeholder="$t('settings.collegePlaceholder')" />
-                    </a-form-item>
-                    <a-form-item field="major" :label="$t('settings.major')">
-                      <a-input v-model="profileForm.major" :placeholder="$t('settings.majorPlaceholder')" />
-                    </a-form-item>
-                  </div>
-
-                  <div class="grid-row">
-                    <a-form-item field="laboratory" :label="$t('settings.lab')">
-                      <a-input v-model="profileForm.laboratory" :placeholder="$t('settings.labPlaceholder')" />
-                    </a-form-item>
-                    <a-form-item field="email" :label="$t('settings.email')">
-                      <a-input :model-value="profileForm.email" disabled />
-                    </a-form-item>
-                  </div>
-                </a-form>
-              </div>
-            </div>
-          </div>
-
-          <div class="section-card profile-section">
-            <div class="section-title">{{ $t('settings.academicInfo') }}</div>
-
-            <a-form :model="profileForm" layout="vertical">
-              <a-form-item :label="$t('settings.bio')">
-                <a-textarea
-                  v-model="profileForm.bio"
-                  :max-length="1000"
-                  :auto-size="{ minRows: 4, maxRows: 6 }"
-                  :placeholder="$t('settings.bioPlaceholder')"
-                  allow-clear
-                />
-              </a-form-item>
-
-              <a-form-item :label="$t('settings.researchInterests')">
-                <a-textarea
-                  v-model="profileForm.research_interests"
-                  :max-length="2000"
-                  :auto-size="{ minRows: 4, maxRows: 6 }"
-                  :placeholder="$t('settings.researchInterestsPlaceholder')"
-                  allow-clear
-                />
-              </a-form-item>
-            </a-form>
-          </div>
-
-          <div v-if="institutionIdentity" class="section-card profile-section">
-            <div class="section-header">
-              <div>
-                <div class="section-title">{{ $t('settings.institutionIdentityTitle') }}</div>
-                <div class="institution-identity-meta">
-                  {{ institutionIdentity.institutionName }} · {{ institutionIdentity.internalId }}
+                <div class="profile-summary-main">
+                  <p class="profile-name">{{ profileForm.name || $t('settings.profileTab') }}</p>
+                  <dl class="profile-contact">
+                    <dt>{{ $t('settings.email') }} · {{ $t('settings.readOnly') }}</dt>
+                    <dd>{{ profileForm.email || $t('settings.notBound') }}</dd>
+                  </dl>
+                  <a-upload :show-file-list="false" :custom-request="handleAvatarUpload" accept="image/*">
+                    <template #upload-button>
+                      <a-button type="outline" size="small">{{ $t('common.changeAvatar') }}</a-button>
+                    </template>
+                  </a-upload>
                 </div>
               </div>
-              <router-link
-                v-if="institutionIdentity.scholarId"
-                :to="`/scholars/${institutionIdentity.scholarId}`"
-                class="identity-link"
-              >
-                {{ $t('settings.viewScholarProfile') }}
-              </router-link>
+              <ProfileInstitutionIdentity :identity="institutionIdentity" :memberships="institutionMemberships" />
             </div>
-            <p class="institution-identity-hint">{{ $t('settings.institutionIdentityHint') }}</p>
-            <div v-if="institutionPapers.length" class="institution-paper-list">
-              <router-link
-                v-for="paper in institutionPapers"
-                :key="paper.id"
-                :to="`/papers/${paper.id}`"
-                class="institution-paper-item"
-              >
-                <span>{{ paper.title }}</span>
-                <span class="institution-paper-meta">
-                  {{ paper.authorName }}<template v-if="paper.publishYear"> · {{ paper.publishYear }}</template>
-                </span>
-              </router-link>
-            </div>
-            <a-empty v-else :description="$t('settings.noInstitutionPapers')" />
-          </div>
 
-          <div class="section-card profile-section">
-            <div class="section-header">
-              <div class="section-title">{{ $t('settings.projects') }}</div>
-              <a-button type="text" size="mini" @click="addProject">{{ $t('settings.addProject') }}</a-button>
-            </div>
-            <div class="list-editor">
-              <div v-for="(item, index) in profileForm.project_experiences" :key="item.id" class="list-row">
-                <a-input
-                  v-model="item.title"
-                  :placeholder="$t('settings.projectNamePlaceholder')"
-                  class="list-row-title"
-                />
-                <a-input
-                  v-model="item.period"
-                  :placeholder="$t('settings.projectPeriodPlaceholder')"
-                  class="list-row-period"
-                />
-                <a-button type="text" status="danger" size="mini" @click="removeProject(index)">{{ $t('common.delete') }}</a-button>
+            <section class="section-card" aria-labelledby="basic-info-title">
+              <div class="section-header">
+                <div>
+                  <h2 id="basic-info-title" class="section-title">{{ $t('settings.basicInfo') }}</h2>
+                  <p class="section-description">{{ $t('settings.basicInfoHint') }}</p>
+                </div>
               </div>
-              <a-empty v-if="!profileForm.project_experiences.length" :description="$t('settings.noProjects')" />
-            </div>
-          </div>
+              <a-form :model="profileForm" layout="vertical" class="profile-form">
+                <div class="grid-row">
+                  <a-form-item field="name" :label="$t('settings.name')">
+                    <a-input v-model="profileForm.name" :placeholder="$t('settings.namePlaceholder')" />
+                  </a-form-item>
+                  <a-form-item field="gender" :label="$t('settings.gender')">
+                    <a-select v-model="profileForm.gender" :placeholder="$t('settings.genderPlaceholder')" allow-clear>
+                      <a-option value="male">{{ $t('settings.genders.male') }}</a-option>
+                      <a-option value="female">{{ $t('settings.genders.female') }}</a-option>
+                      <a-option value="other">{{ $t('settings.genders.other') }}</a-option>
+                    </a-select>
+                  </a-form-item>
+                  <a-form-item field="college" :label="$t('common.college')">
+                    <a-input v-model="profileForm.college" :placeholder="$t('settings.collegePlaceholder')" />
+                  </a-form-item>
+                  <a-form-item field="major" :label="$t('settings.major')">
+                    <a-input v-model="profileForm.major" :placeholder="$t('settings.majorPlaceholder')" />
+                  </a-form-item>
+                  <a-form-item field="grade" :label="$t('settings.grade')">
+                    <a-input v-model="profileForm.grade" :placeholder="$t('settings.gradePlaceholder')" />
+                  </a-form-item>
+                  <a-form-item field="degree" :label="$t('settings.degree')">
+                    <a-input v-model="profileForm.degree" :placeholder="$t('settings.degreePlaceholder')" />
+                  </a-form-item>
+                  <a-form-item field="laboratory" :label="$t('settings.lab')" class="grid-full">
+                    <a-input v-model="profileForm.laboratory" :placeholder="$t('settings.labPlaceholder')" />
+                  </a-form-item>
+                </div>
+              </a-form>
+            </section>
 
-          <div class="section-card profile-section">
-            <div class="section-header">
-              <div class="section-title">{{ $t('settings.publications') }}</div>
-              <a-button type="text" size="mini" @click="addPublication">{{ $t('settings.addPublication') }}</a-button>
-            </div>
-            <div class="list-editor">
-              <div v-for="(item, index) in profileForm.publications" :key="item.id" class="list-row">
-                <a-input v-model="item.title" :placeholder="$t('settings.publicationTitlePlaceholder')" class="list-row-title" />
-                <a-button type="text" status="danger" size="mini" @click="removePublication(index)">{{ $t('common.delete') }}</a-button>
+            <section class="section-card" aria-labelledby="academic-info-title">
+              <div class="section-header">
+                <div>
+                  <h2 id="academic-info-title" class="section-title">{{ $t('settings.academicInfo') }}</h2>
+                  <p class="section-description">{{ $t('settings.academicInfoHint') }}</p>
+                </div>
               </div>
-              <a-empty v-if="!profileForm.publications.length" :description="$t('settings.noPublications')" />
-            </div>
-          </div>
+              <a-form :model="profileForm" layout="vertical" class="profile-form">
+                <div class="grid-row">
+                  <a-form-item field="bio" :label="$t('settings.bio')">
+                    <a-textarea
+                      v-model="profileForm.bio"
+                      :max-length="1000"
+                      :auto-size="{ minRows: 5, maxRows: 8 }"
+                      :placeholder="$t('settings.bioPlaceholder')"
+                      allow-clear
+                      show-word-limit
+                    />
+                  </a-form-item>
+                  <a-form-item field="research_interests" :label="$t('settings.researchInterests')">
+                    <a-textarea
+                      v-model="profileForm.research_interests"
+                      :max-length="2000"
+                      :auto-size="{ minRows: 5, maxRows: 8 }"
+                      :placeholder="$t('settings.researchInterestsPlaceholder')"
+                      allow-clear
+                      show-word-limit
+                    />
+                  </a-form-item>
+                </div>
+              </a-form>
+            </section>
 
-          <div class="action-row">
-            <a-button type="primary" :loading="savingProfile" @click="() => saveProfile()">{{ $t('settings.saveProfile') }}</a-button>
+            <section class="section-card" aria-labelledby="projects-title">
+              <div class="section-header">
+                <div>
+                  <h2 id="projects-title" class="section-title">{{ $t('settings.projects') }}</h2>
+                  <p class="section-description">{{ $t('settings.projectsHint') }}</p>
+                </div>
+                <a-button type="outline" size="small" @click="addProject">{{ $t('settings.addProject') }}</a-button>
+              </div>
+              <div class="list-editor">
+                <div v-for="(item, index) in profileForm.project_experiences" :key="item.id" class="list-row project-row">
+                  <div class="editor-field">
+                    <label :for="'project-title-' + item.id">{{ $t('settings.projectNamePlaceholder') }}</label>
+                    <a-input
+                      v-model="item.title"
+                      :input-attrs="{ id: 'project-title-' + item.id }"
+                      :placeholder="$t('settings.projectNamePlaceholder')"
+                    />
+                  </div>
+                  <div class="editor-field">
+                    <label :for="'project-period-' + item.id">{{ $t('settings.projectPeriod') }}</label>
+                    <a-input
+                      v-model="item.period"
+                      :input-attrs="{ id: 'project-period-' + item.id }"
+                      :placeholder="$t('settings.projectPeriodPlaceholder')"
+                    />
+                  </div>
+                  <a-button class="remove-item" type="text" status="danger" size="small" :aria-label="$t('settings.removeProject', { index: index + 1 })" @click="removeProject(index)">{{ $t('common.delete') }}</a-button>
+                </div>
+                <p v-if="!profileForm.project_experiences.length" class="compact-empty">{{ $t('settings.noProjects') }}</p>
+              </div>
+            </section>
+
+            <section class="section-card" aria-labelledby="publications-title">
+              <div class="section-header">
+                <div>
+                  <h2 id="publications-title" class="section-title">{{ $t('settings.publications') }}</h2>
+                  <p class="section-description">{{ $t('settings.publicationsHint') }}</p>
+                </div>
+                <a-button type="outline" size="small" @click="addPublication">{{ $t('settings.addPublication') }}</a-button>
+              </div>
+              <div class="list-editor">
+                <div v-for="(item, index) in profileForm.publications" :key="item.id" class="list-row publication-row">
+                  <div class="editor-field">
+                    <label :for="'publication-title-' + item.id">{{ $t('settings.publicationTitlePlaceholder') }}</label>
+                    <a-input
+                      v-model="item.title"
+                      :input-attrs="{ id: 'publication-title-' + item.id }"
+                      :placeholder="$t('settings.publicationTitlePlaceholder')"
+                    />
+                  </div>
+                  <a-button class="remove-item" type="text" status="danger" size="small" :aria-label="$t('settings.removePublication', { index: index + 1 })" @click="removePublication(index)">{{ $t('common.delete') }}</a-button>
+                </div>
+                <p v-if="!profileForm.publications.length" class="compact-empty">{{ $t('settings.noPublications') }}</p>
+              </div>
+            </section>
+
+            <section v-if="institutionIdentity" class="section-card linked-papers-section" aria-labelledby="linked-papers-title">
+              <div class="section-header">
+                <div>
+                  <div class="section-heading-line">
+                    <h2 id="linked-papers-title" class="section-title">{{ $t('settings.institutionPapersTitle') }}</h2>
+                    <span class="readonly-label">{{ $t('settings.readOnly') }}</span>
+                  </div>
+                  <p class="section-description">{{ $t('settings.institutionPapersHint') }}</p>
+                </div>
+                <router-link v-if="institutionIdentity.scholarId" :to="'/scholars/' + institutionIdentity.scholarId" class="identity-link">
+                  {{ $t('settings.viewScholarProfile') }}
+                </router-link>
+              </div>
+              <div v-if="institutionPapers.length" id="institution-paper-list" class="institution-paper-list">
+                <router-link v-for="paper in visibleInstitutionPapers" :key="paper.id" :to="'/papers/' + paper.id" class="institution-paper-item">
+                  <span class="institution-paper-title">{{ paper.title }}</span>
+                  <span class="institution-paper-meta">
+                    {{ paper.authorName }}<template v-if="paper.publishYear"> · {{ paper.publishYear }}</template>
+                  </span>
+                </router-link>
+              </div>
+              <p v-else class="compact-empty">{{ $t('settings.noInstitutionPapers') }}</p>
+              <a-button
+                v-if="institutionPapers.length > PAPER_PREVIEW_LIMIT"
+                class="paper-toggle"
+                type="text"
+                :aria-expanded="showAllInstitutionPapers"
+                aria-controls="institution-paper-list"
+                @click="showAllInstitutionPapers = !showAllInstitutionPapers"
+              >
+                {{ showAllInstitutionPapers ? $t('settings.collapsePapers') : $t('settings.showAllPapers', { count: institutionPapers.length }) }}
+              </a-button>
+            </section>
           </div>
         </a-tab-pane>
 
         <a-tab-pane key="password" :title="$t('settings.passwordTab')">
-          <div class="section-card security-card">
+          <section class="section-card security-card" aria-labelledby="security-title">
+            <div class="section-header">
+              <div>
+                <h2 id="security-title" class="section-title">{{ $t('settings.passwordTab') }}</h2>
+                <p class="section-description">{{ $t('settings.securityHint') }}</p>
+              </div>
+            </div>
             <div class="security-item">
               <div class="security-item-main">
-                <div class="security-item-title">{{ $t('settings.accountSecurity') }}</div>
-                <div class="security-item-desc">{{ $t('settings.accountSecurityHint') }}</div>
+                <h3 class="security-item-title">{{ $t('settings.accountSecurity') }}</h3>
+                <p class="security-item-desc">{{ $t('settings.accountSecurityHint') }}</p>
               </div>
-              <button class="security-link" type="button" @click="showPasswordModal = true">{{ $t('common.changePassword') }}</button>
+              <a-button type="outline" size="small" @click="showPasswordModal = true">{{ $t('common.changePassword') }}</a-button>
             </div>
-
             <div class="security-item">
               <div class="security-item-main">
-                <div class="security-item-title">{{ $t('settings.phone') }}</div>
-                <div class="security-item-desc">{{ $t('settings.boundPrefix', { value: maskedPhone }) }}</div>
+                <h3 class="security-item-title">{{ $t('settings.phone') }}</h3>
+                <p class="security-item-desc">{{ $t('settings.boundPrefix', { value: maskedPhone }) }}</p>
               </div>
-              <button class="security-link" type="button" @click="showBindTip">{{ $t('common.switchBinding') }}</button>
+              <a-button type="text" size="small" @click="showBindTip">{{ $t('common.switchBinding') }}</a-button>
             </div>
-
-            <div class="security-item security-item--last">
+            <div class="security-item">
               <div class="security-item-main">
-                <div class="security-item-title">{{ $t('settings.emailBinding') }}</div>
-                <div class="security-item-desc">{{ $t('settings.boundPrefix', { value: maskedEmail }) }}</div>
+                <h3 class="security-item-title">{{ $t('settings.emailBinding') }}</h3>
+                <p class="security-item-desc">{{ $t('settings.boundPrefix', { value: maskedEmail }) }}</p>
               </div>
-              <button class="security-link" type="button" @click="showBindTip">{{ $t('common.switchBinding') }}</button>
+              <a-button type="text" size="small" @click="showBindTip">{{ $t('common.switchBinding') }}</a-button>
             </div>
-          </div>
+          </section>
         </a-tab-pane>
       </a-tabs>
+
+      <div v-if="profileLoaded && activeTab === 'profile'" class="action-row">
+        <p>{{ $t('settings.saveProfileHint') }}</p>
+        <a-button type="primary" :loading="savingProfile" @click="() => saveProfile()">{{ $t('settings.saveProfile') }}</a-button>
+      </div>
 
       <a-modal
         v-model:visible="showPasswordModal"
         :title="$t('settings.passwordModalTitle')"
         :footer="false"
-        width="460px"
+        width="min(460px, calc(100vw - 32px))"
         unmount-on-close
       >
         <a-form :model="passwordForm" layout="vertical">
@@ -219,16 +261,11 @@
             <a-input-password v-model="passwordForm.confirmPassword" :placeholder="$t('settings.confirmPasswordPlaceholder')" allow-clear />
           </a-form-item>
         </a-form>
-
         <div class="password-modal-actions">
           <a-button @click="showPasswordModal = false">{{ $t('common.cancel') }}</a-button>
           <a-button type="primary" :loading="savingPassword" @click="savePassword">{{ $t('common.confirmUpdate') }}</a-button>
         </div>
       </a-modal>
-
-      <div v-if="isLoading" class="mask-loading">
-        <a-spin />
-      </div>
     </div>
   </div>
 </template>
@@ -238,6 +275,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { Message, type RequestOption, type UploadRequest } from '@arco-design/web-vue'
 import { useI18n } from 'vue-i18n'
 import { useAuth } from '@/composables/useAuth'
+import ProfileInstitutionIdentity from '@/components/ProfileInstitutionIdentity.vue'
 import {
   changeMyPassword,
   getMyProfile,
@@ -246,6 +284,7 @@ import {
   type ProjectExperienceItem,
   type PublicationItem,
   type UserInstitutionIdentity,
+  type UserInstitutionMembershipItem,
   type UserInstitutionPaper,
 } from '@/api/users'
 
@@ -256,7 +295,15 @@ const savingPassword = ref(false)
 const showPasswordModal = ref(false)
 const avatarPreview = ref('')
 const institutionIdentity = ref<UserInstitutionIdentity | null>(null)
+const institutionMemberships = ref<UserInstitutionMembershipItem[]>([])
+const profileLoaded = ref(false)
+const loadError = ref(false)
+const PAPER_PREVIEW_LIMIT = 3
+const showAllInstitutionPapers = ref(false)
 const institutionPapers = ref<UserInstitutionPaper[]>([])
+const visibleInstitutionPapers = computed(() => showAllInstitutionPapers.value
+  ? institutionPapers.value
+  : institutionPapers.value.slice(0, PAPER_PREVIEW_LIMIT))
 const { updateName, updateAvatar } = useAuth()
 const { t } = useI18n()
 
@@ -344,6 +391,7 @@ const showBindTip = (): void => {
 
 const fillProfile = async (): Promise<void> => {
   isLoading.value = true
+  loadError.value = false
   try {
     const data = await getMyProfile()
     profileForm.name = data.name ?? ''
@@ -368,9 +416,13 @@ const fillProfile = async (): Promise<void> => {
       id: item.id || createItemId(),
       title: item.title || '',
     }))
-    institutionIdentity.value = data.institution_identity
-    institutionPapers.value = data.institution_papers
+    institutionIdentity.value = data.institution_identity ?? null
+    institutionMemberships.value = data.institution_memberships ?? []
+    institutionPapers.value = data.institution_papers ?? []
+    profileLoaded.value = true
     updateAvatar(avatarPreview.value)
+  } catch {
+    loadError.value = true
   } finally {
     isLoading.value = false
   }
@@ -504,174 +556,286 @@ onMounted(() => {
 .settings-page
   display: flex
   justify-content: center
-  padding: 32px 24px 60px
+  padding: 32px 28px 48px
+  background: var(--scholar-bg-sidebar)
+  min-height: 100%
 
 .settings-container
-  width: 920px
+  width: 1000px
   max-width: 100%
-  position: relative
+  min-width: 0
+  :deep(.arco-btn)
+    border-radius: 8px
+  :deep(.arco-btn-primary:not(.arco-btn-disabled))
+    background-color: var(--scholar-primary)
+    border-color: var(--scholar-primary)
+    &:hover
+      background-color: var(--scholar-primary-hover)
+      border-color: var(--scholar-primary-hover)
+  :deep(.arco-btn-outline:not(.arco-btn-disabled))
+    color: var(--scholar-primary)
+    border-color: var(--scholar-primary)
+    &:hover
+      background-color: var(--scholar-primary-light)
+  :deep(.arco-btn-text:not(.arco-btn-status-danger):not(.arco-btn-disabled))
+    color: var(--scholar-primary)
+
+.settings-header
+  margin-bottom: 20px
 
 .settings-title
-  margin: 0 0 18px
+  margin: 0 0 8px
   font-size: 28px
-  font-weight: 700
+  line-height: 1.3
+  font-weight: 650
   color: var(--scholar-text-1)
+
+.settings-description, .section-description
+  margin: 0
+  font-size: 13px
+  line-height: 1.65
+  color: var(--scholar-text-desc)
 
 .settings-tabs
   :deep(.arco-tabs-tab)
-    font-size: 16px
+    font-size: 15px
     font-weight: 500
+  :deep(.arco-tabs-tab-active)
+    color: var(--scholar-primary)
+  :deep(.arco-tabs-nav-ink)
+    background-color: var(--scholar-primary)
+  :deep(.arco-tabs-content)
+    padding-top: 20px
+
+.profile-content
+  display: grid
+  gap: 20px
 
 .section-card
-  padding: 20px 0
-  margin-bottom: 0
-
-.section-title
-  font-size: 16px
-  font-weight: 600
-  color: var(--scholar-text-1)
-  margin-bottom: 14px
-
-.profile-section
-  border-top: 1px solid var(--scholar-border-light)
-
-.profile-section--first
-  margin-top: 8px
+  min-width: 0
+  padding: 24px
+  border: 1px solid var(--scholar-border-medium)
+  border-radius: var(--scholar-radius-md)
+  background: var(--scholar-bg-white)
 
 .section-header
   display: flex
-  align-items: center
+  align-items: flex-start
   justify-content: space-between
+  gap: 16px
+  margin-bottom: 20px
+  > div
+    min-width: 0
+  > .arco-btn, > .identity-link
+    flex-shrink: 0
 
-.profile-top
-  display: flex
-  gap: 20px
+.section-title
+  margin: 0
+  font-size: 16px
+  line-height: 1.5
+  font-weight: 600
+  color: var(--scholar-text-1)
 
-.avatar-box
-  width: 120px
+.section-description
+  margin-top: 5px
+
+.section-heading-line
   display: flex
-  flex-direction: column
   align-items: center
-  gap: 8px
+  flex-wrap: wrap
+  gap: 10px
+
+.readonly-label
+  padding: 2px 7px
+  border-radius: 5px
+  background: var(--scholar-bg-sidebar)
+  color: var(--scholar-text-desc)
+  font-size: 12px
+  line-height: 1.5
+
+.profile-overview
+  display: grid
+  grid-template-columns: 216px minmax(0, 1fr)
+  gap: 28px
+
+.profile-summary
+  padding-right: 24px
+  border-right: 1px solid var(--scholar-border-medium)
+
+.profile-summary-main
+  min-width: 0
 
 .avatar-circle
-  width: 88px
-  height: 88px
+  width: 72px
+  height: 72px
+  margin-bottom: 16px
   border-radius: 50%
-  background: #edf2f7
+  background: var(--scholar-primary-light)
   overflow: hidden
   display: flex
   align-items: center
   justify-content: center
-  font-size: 30px
+  flex-shrink: 0
+  font-size: 28px
+  font-weight: 600
   color: var(--scholar-primary)
+  img
+    width: 100%
+    height: 100%
+    object-fit: cover
 
-.avatar-circle img
-  width: 100%
-  height: 100%
-  object-fit: cover
+.profile-name
+  margin: 0 0 12px
+  font-size: 20px
+  line-height: 1.4
+  font-weight: 600
+  overflow-wrap: anywhere
+  color: var(--scholar-text-1)
 
-.basic-grid
-  flex: 1
+.profile-contact
+  margin: 0 0 16px
+  font-size: 13px
+  line-height: 1.6
+  dt
+    color: var(--scholar-text-desc)
+    margin-bottom: 4px
+  dd
+    margin: 0
+    color: var(--scholar-text-2)
+    overflow-wrap: anywhere
+
+.profile-form
+  :deep(.arco-form-item)
+    margin-bottom: 0
+    min-width: 0
+  :deep(.arco-form-item-label-col)
+    padding-bottom: 8px
+  :deep(.arco-form-item-label)
+    color: var(--scholar-text-2)
+    font-size: 13px
+  :deep(.arco-input-wrapper), :deep(.arco-select-view-single)
+    min-height: 38px
+  :deep(.arco-select-view-single)
+    border-color: var(--scholar-border-input)
+    border-radius: var(--scholar-radius-sm)
+    &:hover, &:focus-within
+      border-color: var(--scholar-primary)
 
 .grid-row
   display: grid
   grid-template-columns: repeat(2, minmax(0, 1fr))
-  gap: 16px
+  gap: 20px 24px
+
+.grid-full
+  grid-column: 1 / -1
 
 .list-editor
   display: flex
   flex-direction: column
-  gap: 10px
+  gap: 12px
 
 .list-row
-  display: flex
-  align-items: center
-  gap: 10px
+  display: grid
+  gap: 12px
+  align-items: end
+  padding: 16px
+  border: 1px solid var(--scholar-border-medium)
+  border-radius: var(--scholar-radius-sm)
+  background: var(--scholar-bg-sidebar)
 
-.list-row-title
-  flex: 1
+.project-row
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.6fr) auto
 
-.list-row-period
-  width: 220px
+.publication-row
+  grid-template-columns: minmax(0, 1fr) auto
 
-.institution-identity-meta, .institution-identity-hint, .institution-paper-meta
-  color: var(--scholar-text-3)
+.editor-field
+  min-width: 0
+  label
+    display: block
+    margin-bottom: 8px
+    font-size: 13px
+    color: var(--scholar-text-2)
+
+.compact-empty
+  margin: 0
+  padding: 20px
+  border: 1px dashed var(--scholar-border-input)
+  border-radius: var(--scholar-radius-sm)
+  background: var(--scholar-bg-sidebar)
+  color: var(--scholar-text-desc)
   font-size: 13px
-
-.institution-identity-hint
-  margin: 0 0 14px
+  line-height: 1.6
+  text-align: center
 
 .identity-link
   color: var(--scholar-primary)
-  font-weight: 600
+  font-size: 13px
+  line-height: 1.6
+  font-weight: 500
   text-decoration: none
+  &:hover
+    text-decoration: underline
 
 .institution-paper-list
   display: flex
   flex-direction: column
-  gap: 8px
 
 .institution-paper-item
   display: flex
   flex-direction: column
-  gap: 4px
-  padding: 12px 14px
-  border: 1px solid var(--scholar-border-light)
-  border-radius: 10px
-  color: var(--scholar-text-1)
+  gap: 6px
+  padding: 14px 12px
+  border-bottom: 1px solid var(--scholar-border-light)
+  border-radius: 6px
   text-decoration: none
+  &:last-child
+    border-bottom: none
+  &:hover
+    background: var(--scholar-primary-light)
 
-.institution-paper-item:hover
-  border-color: var(--scholar-primary)
+.institution-paper-title
+  color: var(--scholar-text-1)
+  font-size: 14px
+  line-height: 1.65
+  overflow-wrap: anywhere
 
-.security-card
-  background: transparent
-  border: none
-  border-radius: 0
-  padding: 0
-  margin-top: 8px
-  margin-bottom: 0
-  border-top: 1px solid var(--scholar-border-light)
+.institution-paper-meta
+  color: var(--scholar-text-desc)
+  font-size: 12px
+  line-height: 1.6
+  overflow-wrap: anywhere
+
+.paper-toggle
+  margin-top: 12px
 
 .security-item
   display: flex
   align-items: center
   justify-content: space-between
   gap: 24px
-  min-height: 98px
-  padding: 18px 0
-  border-bottom: 1px solid var(--scholar-border-light)
-
-.security-item--last
-  border-bottom: none
+  padding: 24px 0
+  border-top: 1px solid var(--scholar-border-medium)
+  > .arco-btn
+    flex-shrink: 0
+  &:last-child
+    padding-bottom: 0
 
 .security-item-main
-  display: flex
-  flex-direction: column
-  gap: 4px
+  min-width: 0
 
 .security-item-title
-  font-size: 16px
+  margin: 0 0 6px
+  font-size: 14px
   font-weight: 600
   color: var(--scholar-text-1)
 
 .security-item-desc
-  font-size: 14px
-  color: var(--scholar-text-3)
-
-.security-link
-  border: none
-  background: transparent
-  color: var(--scholar-primary)
-  font-size: 14px
-  font-weight: 600
-  cursor: pointer
-  padding: 0
-  flex-shrink: 0
-
-.security-link:hover
-  color: var(--scholar-primary-hover)
+  margin: 0
+  font-size: 13px
+  line-height: 1.6
+  color: var(--scholar-text-desc)
+  overflow-wrap: anywhere
 
 .password-modal-actions
   display: flex
@@ -680,44 +844,97 @@ onMounted(() => {
   margin-top: 8px
 
 .action-row
-  margin-top: 20px
-
-.mask-loading
-  position: absolute
-  inset: 0
-  background: rgba(255, 255, 255, 0.6)
+  position: sticky
+  bottom: 16px
+  z-index: 5
   display: flex
+  justify-content: space-between
+  align-items: center
+  gap: 20px
+  margin-top: 20px
+  padding: 16px 24px
+  background: var(--scholar-bg-white)
+  border: 1px solid var(--scholar-border-medium)
+  border-radius: var(--scholar-radius-md)
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06)
+  p
+    margin: 0
+    font-size: 13px
+    line-height: 1.6
+    color: var(--scholar-text-desc)
+  > .arco-btn
+    flex-shrink: 0
+
+.profile-state
+  display: flex
+  flex-direction: column
   align-items: center
   justify-content: center
+  gap: 16px
+  min-height: 280px
+  color: var(--scholar-text-desc)
+  font-size: 14px
+
+.identity-link:focus-visible, .institution-paper-item:focus-visible
+  outline: 2px solid var(--scholar-primary)
+  outline-offset: 3px
 
 @media (max-width: 900px)
-  .profile-top
-    flex-direction: column
+  .profile-overview
+    grid-template-columns: minmax(0, 1fr)
+    gap: 24px
+  .profile-summary
+    display: flex
+    align-items: center
+    gap: 20px
+    padding: 0 0 24px
+    border-right: 0
+    border-bottom: 1px solid var(--scholar-border-medium)
+  .avatar-circle
+    margin-bottom: 0
+  .profile-contact
+    margin-bottom: 12px
 
-  .avatar-box
-    width: 100%
-    flex-direction: row
-    justify-content: flex-start
-
+@media (max-width: 640px)
+  .settings-page
+    padding: 24px 16px 32px
+  .settings-title
+    font-size: 24px
+  .profile-content
+    gap: 16px
+  .section-card
+    padding: 20px 16px
+  .section-header
+    flex-wrap: wrap
+    gap: 12px
+    margin-bottom: 16px
+  .grid-row, .project-row, .publication-row
+    grid-template-columns: minmax(0, 1fr)
   .grid-row
-    grid-template-columns: 1fr
-
+    gap: 18px
   .list-row
-    flex-direction: column
-    align-items: stretch
-
-  .list-row-period
-    width: 100%
-
-  .security-item
+    padding: 12px
+  .remove-item
+    justify-self: end
+  .profile-summary
     align-items: flex-start
-    min-height: unset
-    padding: 16px 0
-
-  .security-item-title
-    font-size: 15px
-
-  .security-item-desc,
-  .security-link
-    font-size: 14px
+    gap: 16px
+  .avatar-circle
+    width: 56px
+    height: 56px
+    font-size: 24px
+  .profile-name
+    font-size: 18px
+    margin-bottom: 8px
+  .action-row
+    bottom: 8px
+    flex-wrap: wrap
+    gap: 10px
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px))
+    > .arco-btn
+      width: 100%
+  .security-item
+    flex-wrap: wrap
+    gap: 12px
+    padding: 20px 0
 </style>

@@ -31,6 +31,13 @@ import {
 } from '../../utils/institution-org-structure'
 import { lockMutationScope } from '../../utils/advisory-lock'
 import { resolveInstitutionPerson, upsertInstitutionPerson } from '../../utils/institution-people'
+import {
+  assertPermissionManager,
+  assertActiveTarget,
+  assertOtherActiveOwner,
+  permissionContext,
+} from '../../administrators/access'
+import { normalizeInstitutionInternalId } from '../../utils/institution-identifiers'
 
 interface InstitutionRecord {
   id: string
@@ -120,14 +127,14 @@ const assertCanManageInstitutionRole = (
     return
   }
 
-  if (access.institution_role === 'admin' && targetRole !== 'owner') {
+  if (access.institution_role === 'admin' && targetRole === 'member') {
     return
   }
 
   const actionLabel = action === 'provision' ? 'provision' : action
 
   throw fastify.httpErrors.forbidden(
-    `You do not have permission to ${actionLabel} institution owners`,
+    `You do not have permission to ${actionLabel} institution administrators`,
   )
 }
 
@@ -828,6 +835,18 @@ export const upsertInstitutionMembership = async (
   await fastify.prisma.$transaction(async (tx) => {
     await lockMutationScope(tx, 'institution', institution.id)
     await lockMutationScope(tx, 'institution-identity', institution.id)
+    const before = await tx.institution_memberships.findUnique({
+      where: { institutionId_userId: { institutionId: institution.id, userId: body.userId } },
+    })
+    await assertPermissionManager(fastify, tx, institution.id, currentUserId, [
+      before?.role ?? 'member',
+      body.role,
+    ])
+    await permissionContext(tx, {
+      actorUserId: currentUserId,
+      source: 'membership_update',
+      reason: body.reason?.trim() || 'Membership permission update (legacy client)',
+    })
     const existingPerson = await tx.institution_people.findUnique({
       where: {
         institutionId_userId: {
@@ -837,6 +856,22 @@ export const upsertInstitutionMembership = async (
       },
     })
     const institutionInternalId = body.internalId?.trim() || existingPerson?.internalId
+    if (
+      existingPerson &&
+      (!existingPerson.is_active ||
+        existingPerson.lifecycle_status !== 'active' ||
+        existingPerson.manually_suspended)
+    )
+      throw fastify.httpErrors.conflict('Cannot grant permissions to an inactive person')
+    if (
+      existingPerson &&
+      body.internalId &&
+      normalizeInstitutionInternalId(body.internalId) !== existingPerson.normalizedInternalId
+    ) {
+      throw fastify.httpErrors.conflict(
+        'Use the verified identifier workflow to add an alias; an account cannot be reassigned to another person',
+      )
+    }
     if (!institutionInternalId) {
       throw fastify.httpErrors.badRequest(
         'internalId is required when assigning a user who has no institution person record',
@@ -853,6 +888,7 @@ export const upsertInstitutionMembership = async (
         actorUserId: currentUserId,
       })
     }
+    await assertActiveTarget(fastify, tx, institution.id, body.userId)
     const currentMembership = await tx.institution_memberships.findUnique({
       where: {
         institutionId_userId: {
@@ -866,12 +902,7 @@ export const upsertInstitutionMembership = async (
       normalizeInstitutionRole(currentMembership.role) === 'owner' &&
       body.role !== 'owner'
     ) {
-      const ownerCount = await tx.institution_memberships.count({
-        where: { institutionId: institution.id, role: 'owner' },
-      })
-      if (ownerCount <= 1) {
-        throw fastify.httpErrors.badRequest('At least one owner must remain for the institution')
-      }
+      await assertOtherActiveOwner(fastify, tx, institution.id, body.userId)
     }
 
     await tx.institution_memberships.upsert({
@@ -899,7 +930,10 @@ export const upsertInstitutionMembership = async (
     })
   })
 
-  return listInstitutionMemberships(fastify, slug, currentUserId)
+  const remainingAccess = await getInstitutionAccessById(fastify, currentUserId, institution.id)
+  return remainingAccess.can_manage_members
+    ? listInstitutionMemberships(fastify, slug, currentUserId)
+    : { items: [] }
 }
 
 export const upsertInstitutionProvision = async (
@@ -932,6 +966,59 @@ export const upsertInstitutionProvision = async (
   assertCanManageInstitutionRole(fastify, access, body.role, 'provision')
   await fastify.prisma.$transaction(async (tx) => {
     await lockMutationScope(tx, 'institution-identity', institution.id)
+    const existingProvision = await tx.institution_user_provisions.findUnique({
+      where: { institutionId_email: { institutionId: institution.id, email: normalizedEmail } },
+    })
+    await assertPermissionManager(fastify, tx, institution.id, currentUserId, [
+      existingProvision?.role ?? 'member',
+      body.role,
+    ])
+    if (existingProvision?.claimedUserId)
+      throw fastify.httpErrors.conflict(
+        'This provision is already claimed; change permissions through its membership',
+      )
+    const reservedIdentifier = await tx.institution_person_identifiers.findUnique({
+      where: {
+        institutionId_normalizedValue: {
+          institutionId: institution.id,
+          normalizedValue: normalizeInstitutionInternalId(body.internalId),
+        },
+      },
+      include: { person: true },
+    })
+    if (
+      reservedIdentifier &&
+      (reservedIdentifier.revokedAt ||
+        reservedIdentifier.person.userId ||
+        !existingProvision ||
+        reservedIdentifier.person.provisionId !== existingProvision.id)
+    )
+      throw fastify.httpErrors.conflict(
+        'This identifier is reserved; use verified identity management rather than a new invitation',
+      )
+    const existingPerson = existingProvision
+      ? await tx.institution_people.findUnique({
+          where: {
+            institutionId_provisionId: {
+              institutionId: institution.id,
+              provisionId: existingProvision.id,
+            },
+          },
+        })
+      : null
+    if (
+      existingPerson &&
+      (existingPerson.normalizedInternalId !== normalizeInstitutionInternalId(body.internalId) ||
+        !existingPerson.is_active ||
+        existingPerson.lifecycle_status !== 'active' ||
+        existingPerson.manually_suspended)
+    )
+      throw fastify.httpErrors.conflict('Cannot rebind or reprovision an inactive identity')
+    await permissionContext(tx, {
+      actorUserId: currentUserId,
+      source: 'provision_update',
+      reason: body.reason?.trim() || 'Provision permission update (legacy client)',
+    })
     const provision = await tx.institution_user_provisions.upsert({
       where: {
         institutionId_email: {
@@ -999,6 +1086,7 @@ export const removeInstitutionMembership = async (
   slug: string,
   currentUserId: string,
   targetUserId: string,
+  reason = 'Membership removed (legacy client)',
 ) => {
   const institution = await getInstitutionBySlug(fastify, slug)
   const access = await assertCanManageInstitutionMembers(fastify, currentUserId, institution.id)
@@ -1081,6 +1169,7 @@ export const removeInstitutionMembership = async (
 
   await fastify.prisma.$transaction(async (tx) => {
     await lockMutationScope(tx, 'institution', institution.id)
+    await lockMutationScope(tx, 'institution-identity', institution.id)
     for (const labId of [...institutionLabIds].sort()) {
       await lockMutationScope(tx, 'lab', labId)
     }
@@ -1096,13 +1185,12 @@ export const removeInstitutionMembership = async (
     if (!currentMembership) {
       throw fastify.httpErrors.notFound('Membership not found')
     }
+    await assertPermissionManager(fastify, tx, institution.id, currentUserId, [
+      currentMembership.role,
+    ])
+    await permissionContext(tx, { actorUserId: currentUserId, source: 'membership_remove', reason })
     if (normalizeInstitutionRole(currentMembership.role) === 'owner') {
-      const ownerCount = await tx.institution_memberships.count({
-        where: { institutionId: institution.id, role: 'owner' },
-      })
-      if (ownerCount <= 1) {
-        throw fastify.httpErrors.badRequest('At least one owner must remain for the institution')
-      }
+      await assertOtherActiveOwner(fastify, tx, institution.id, targetUserId)
     }
 
     const currentOwnedLabs = await tx.lab_memberships.findMany({
@@ -1139,7 +1227,10 @@ export const removeInstitutionMembership = async (
     })
   })
 
-  return listInstitutionMemberships(fastify, slug, currentUserId)
+  const remainingAccess = await getInstitutionAccessById(fastify, currentUserId, institution.id)
+  return remainingAccess.can_manage_members
+    ? listInstitutionMemberships(fastify, slug, currentUserId)
+    : { items: [] }
 }
 
 export const disableInstitutionProvision = async (
@@ -1147,6 +1238,7 @@ export const disableInstitutionProvision = async (
   slug: string,
   currentUserId: string,
   provisionId: string,
+  reason = 'Provision disabled (legacy client)',
 ) => {
   const institution = await getInstitutionBySlug(fastify, slug)
   const access = await assertCanManageInstitutionMembers(fastify, currentUserId, institution.id)
@@ -1166,12 +1258,20 @@ export const disableInstitutionProvision = async (
     'provision',
   )
 
-  await fastify.prisma.institution_user_provisions.update({
-    where: { id: provision.id },
-    data: {
-      status: 'disabled',
-      updatedAt: new Date(),
-    },
+  await fastify.prisma.$transaction(async (tx) => {
+    await lockMutationScope(tx, 'institution-identity', institution.id)
+    const current = await tx.institution_user_provisions.findUniqueOrThrow({
+      where: { id: provision.id },
+    })
+    await assertPermissionManager(fastify, tx, institution.id, currentUserId, [current.role])
+    await permissionContext(tx, { actorUserId: currentUserId, source: 'provision_disable', reason })
+    await tx.institution_user_provisions.update({
+      where: { id: provision.id },
+      data: {
+        status: 'disabled',
+        updatedAt: new Date(),
+      },
+    })
   })
 
   return listInstitutionProvisions(fastify, slug, currentUserId)

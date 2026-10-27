@@ -4,6 +4,47 @@ Chinese version: [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)
 
 ## [Unreleased]
 
+## [5.1.0] - 2026-10-27
+
+### Added
+
+- Administrator authorization boundaries, transactional append-only permission audits, preview-bound departure handoff preserving personal identities, and a host-only four-hour emergency recovery account with explicit revocation. Includes concurrency, rollback, expiry and UI regression tests and bilingual maintenance runbooks.
+- Unified review progress for papers, degree theses and change requests, with read-only Vue Flow/Dagre diagrams, mobile lists, task drawers, historical rounds and paginated activity. Routing simulation reuses the same view without creating tasks.
+- Scoped progress APIs and immutable reviewer display-name snapshots; administrator-only live candidate lists remain distinct from assignment and actual decisions. Approval and repository application states are displayed separately.
+
+- Versioned personnel identities and supervisor/responsible-person relationships, observed organization and appointment history, and a backward-compatible v2 directory contract.
+- Conditional, versioned review routing with published-rule simulation, conflict tasks, explicit supervisor grants and audited new-round restarts. Rules use verified material participants rather than upload operators.
+- Independently approved, expiring name corrections and temporary login exceptions, source reconciliation, administrative history/correction panels, and bilingual library operating handbooks.
+- Bilingual personnel integration contracts and field dictionaries, a downloadable synthetic six-record-type example, recovery and acceptance checklists, and tests checking examples and required fields against API schemas.
+
+- Source-bound personnel synchronization with staged full/incremental snapshots, completeness and sequence checks, preview baselines, audited application, deactivation safeguards and an optional periodic standard-JSON client.
+- Optional directory-only admission with restricted SSO verification requests, just-in-time ordinary accounts, live personnel checks on existing sessions and files, and manual suspension. Personnel facts never grant review permissions.
+- Explicit, scoped and time-bounded reviewer grants; versioned shared paper/thesis review rounds, parallel author/unit tasks, CC-only notifications, exception reassignment, and bilingual administration and personal task pages.
+- Immutable correction, attribution, full-text restriction and institutional withdrawal proposals, atomic approved-effect execution, failed-execution recovery, and a signed, ordered, retryable external-inbox outbox. External systems cannot approve content.
+
+### Changed
+
+- Refined personal-profile layout with read-only primary IDs, expandable lists of other bound IDs, and institution roles. Signing in through another bound ID does not change the primary ID; examples and tests use fictional identifiers.
+- Standardized the new personnel, conditional review-route and upload-preflight contracts on camelCase, with explicit review response mapping and naming regression checks. Existing upload/import and token-exchange contracts remain unchanged.
+
+- Paper upload checks institution duplicates before sending a PDF and reuses submission keys on retries. Governed intake takes precedence over legacy node routing; legacy import approval cannot bypass enabled governance.
+
+- Institutions opting into governed workflows submit imported updates for human review without replacing published metadata early; duplicate uploads cannot hide an approved claim or replace another submitter's pending material. Departures revoke permissions; later admission or reappointment does not restore old grants.
+- Added PostgreSQL governance/SSO regression and legacy-review migration verification to delivery checks. Existing institutions retain their admission policy and review configuration until administrators opt in.
+
+### Database and Deployment
+
+- Identifier classification is independent of primary selection and login eligibility. Existing IDs default to unclassified; the migration preserves account bindings, primary IDs, historical data and permissions.
+- Apply the administrator-governance migration with the matching API image. Existing institutions are marked initialized; bootstrap can no longer restore revoked ownership or adopt existing accounts. Use the audited `scholarctl recover-admin` workflow for lockout, and verify password sign-in configuration before recovery.
+- The personnel/routing migration is additive and captures observed history without inventing prior effective dates. Directory v1 full snapshots cannot retire v2 identity/relationship records. Existing policies remain opt-in; no new environment variables are required.
+
+- Apply the additive directory/review migration before starting the matching Web/API build. It preserves old decisions as legacy rounds and retains personnel, accounts, papers and files. Back up persistent data first; application rollback does not undo schema changes.
+- External inbox delivery remains off unless `REVIEW_INBOX_URL`, `REVIEW_INBOX_SECRET` and `REVIEW_PUBLIC_ORIGIN` are configured. Institution-specific directory/inbox adapters and live campus credentials remain outside this repository.
+
+### Security
+
+- Updated DOMPurify and the OpenAI SDK's Zod peer dependency to compatible patched versions required by the production dependency audit.
+
 ## [5.0.1] - 2026-10-08
 
 ### Fixed

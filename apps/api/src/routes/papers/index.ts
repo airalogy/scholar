@@ -1,4 +1,5 @@
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
+import { Type } from 'typebox'
 import {
   CreatePaperBodySchema,
   UpdatePaperBodySchema,
@@ -36,6 +37,14 @@ const paperRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
       schema: {
         tags: ['papers'],
         body: CreatePaperBodySchema,
+        headers: Type.Object(
+          {
+            'idempotency-key': Type.Optional(
+              Type.String({ minLength: 1, maxLength: 128, pattern: '\\S' }),
+            ),
+          },
+          { additionalProperties: true },
+        ),
         response: {
           200: PaperResponseSchema,
         },
@@ -47,7 +56,12 @@ const paperRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
         'paperUpload',
         'Paper upload is not available in this deployment',
       )
-      return createPaper(fastify, request.body, request.user.userId)
+      return createPaper(
+        fastify,
+        request.body,
+        request.user.userId,
+        request.headers['idempotency-key'],
+      )
     },
   )
 

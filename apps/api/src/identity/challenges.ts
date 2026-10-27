@@ -14,7 +14,10 @@ export interface VerifiedSsoProfile {
 
 export class InstitutionIdentityLinkRequired extends Error {
   readonly statusCode = 409
-  constructor(readonly profile: VerifiedSsoProfile) {
+  constructor(
+    readonly profile: VerifiedSsoProfile,
+    readonly purpose: 'account_link' | 'directory_admission' = 'account_link',
+  ) {
     super('Institution identity verification is required')
   }
 }
@@ -41,6 +44,7 @@ const hashProof = (token: string): string => crypto.createHash('sha256').update(
 export const createIdentityChallenge = async (
   fastify: FastifyInstance,
   profile: VerifiedSsoProfile,
+  purpose: 'account_link' | 'directory_admission' = 'account_link',
 ): Promise<Static<typeof IdentityConflictResponse>> => {
   const institution = await getConfiguredInstitution(fastify)
   const token = crypto.randomBytes(32).toString('base64url')
@@ -53,6 +57,7 @@ export const createIdentityChallenge = async (
     data: {
       institutionId: institution.id,
       tokenHash: hashProof(token),
+      purpose,
       provider: fastify.deployment.institutionSso.providerId,
       internalId: profile.internalId,
       normalizedId: normalizeInstitutionInternalId(profile.internalId),
@@ -65,7 +70,10 @@ export const createIdentityChallenge = async (
     code: 409 as const,
     message: 'Institution identity verification is required',
     data: {
-      reason: 'institution_identity_conflict' as const,
+      reason:
+        purpose === 'directory_admission'
+          ? 'institution_directory_admission'
+          : 'institution_identity_conflict',
       proofToken: token,
       expiresAt: expiresAt.toISOString(),
     },
@@ -97,9 +105,16 @@ export const readIdentityChallenge = async (
         normalizedValue: challenge.normalizedId,
       },
     },
-    include: { person: { select: { is_active: true } } },
+    include: {
+      person: { select: { is_active: true, manually_suspended: true, lifecycle_status: true } },
+    },
   })
-  if (identifier?.revokedAt || identifier?.person.is_active === false)
+  if (
+    identifier?.revokedAt ||
+    identifier?.person.is_active === false ||
+    identifier?.person.manually_suspended ||
+    (identifier && identifier.person.lifecycle_status !== 'active')
+  )
     throw fastify.httpErrors.forbidden('Institution identity is inactive')
   return challenge
 }

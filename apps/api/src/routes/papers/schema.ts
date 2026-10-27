@@ -178,6 +178,8 @@ export const ReviewQueueQuerySchema = Type.Object({
 export type ReviewQueueQuery = Static<typeof ReviewQueueQuerySchema>
 
 export const ReviewPaperBodySchema = Type.Object({
+  taskId: Type.Optional(Type.String({ format: 'uuid' })),
+  expectedVersionId: Type.Optional(Type.String({ format: 'uuid' })),
   decision: Type.Union([Type.Literal('approve'), Type.Literal('request_changes')]),
   notes: Type.Optional(Type.String({ maxLength: 2000 })),
 })

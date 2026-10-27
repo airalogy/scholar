@@ -167,14 +167,52 @@ export interface UploadPaperFields {
   lab_id?: string
 }
 
-export async function uploadPaper(file: File, fields: UploadPaperFields, signal?: AbortSignal): Promise<PaperResponse> {
-  const uploadedFile = await uploadFile(file, 'paper', fields.institution_id, signal)
+const submissionAttempts = new WeakMap<File, Map<string, { key: string; fileId?: string }>>()
+export class PaperSubmissionConflict extends Error {
+  constructor (readonly action: string, readonly paperId: string | null) {
+    super('Paper already exists in this institution')
+  }
+}
+
+export const uploadPaper = async (
+  file: File,
+  fields: UploadPaperFields,
+  signal?: AbortSignal
+): Promise<PaperResponse> => {
+  const fingerprint = JSON.stringify(fields)
+  let attempts = submissionAttempts.get(file)
+  if (!attempts) {
+    attempts = new Map()
+    submissionAttempts.set(file, attempts)
+  }
+  let attempt = attempts.get(fingerprint)
+  if (!attempt) {
+    attempt = { key: crypto.randomUUID() }
+    attempts.set(fingerprint, attempt)
+  }
+  if (!attempt.fileId) {
+    const check = await apiClient.post<{
+      code: number
+      data: { action: string; paperId: string | null }
+    }>(
+      '/v1/papers/submission-check',
+      { doi: fields.doi, institutionId: fields.institution_id, labId: fields.lab_id },
+      { signal }
+    )
+    if (!['new', 'resubmit'].includes(check.data.data.action)) {
+      throw new PaperSubmissionConflict(check.data.data.action, check.data.data.paperId)
+    }
+    attempt.fileId = (await uploadFile(file, 'paper', fields.institution_id, signal)).id
+  }
 
   const payload = {
     ...fields,
-    oss_file_id: uploadedFile.id,
+    oss_file_id: attempt.fileId,
   }
 
-  const paperRes = await apiClient.post<PaperResponse>('/papers/create', payload, { signal })
+  const paperRes = await apiClient.post<PaperResponse>('/papers/create', payload, {
+    signal,
+    headers: { 'Idempotency-Key': attempt.key }
+  })
   return paperRes.data
 }

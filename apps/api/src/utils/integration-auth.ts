@@ -3,7 +3,12 @@ import { assertCanImportInstitutionData } from './permissions'
 
 export const INTEGRATION_TOKEN_TYPE = 'integration'
 
-export const INTEGRATION_SCOPES = ['papers:import', 'scholars:import', 'imports:read'] as const
+export const INTEGRATION_SCOPES = [
+  'papers:import',
+  'scholars:import',
+  'imports:read',
+  'directory:sync',
+] as const
 
 export type IntegrationScope = (typeof INTEGRATION_SCOPES)[number]
 

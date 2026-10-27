@@ -44,6 +44,7 @@
     />
     <div v-if="detail" class="identity-review-detail">
       <h3>{{ $t('identity.reviewTitle') }} · {{ detail.request.internalId }}</h3>
+      <p v-if="detail.request.purpose === 'directory_admission'">{{ $t('governance.admissionAdminHint') }}</p>
       <dl>
         <dt>{{ $t('identity.ssoName') }}</dt>
         <dd>{{ detail.request.name }}</dd>
@@ -61,7 +62,7 @@
           :slug="slug"
           :selected-id="target?.id"
           :disabled="saving"
-          require-account
+          :require-account="detail.request.purpose !== 'directory_admission'"
           @select="target = $event"
         />
         <p v-if="target" class="selected-person">
@@ -147,7 +148,7 @@ const canApprove = computed(
     !saving.value &&
     Boolean(notes.value.trim()) &&
     confirmed.value &&
-    Boolean(target.value?.userId),
+    Boolean(detail.value?.request.purpose === 'directory_admission' ? target.value?.id : target.value?.userId),
 )
 const canRespond = computed(
   () =>

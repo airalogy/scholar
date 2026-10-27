@@ -235,6 +235,7 @@ const verifySnapshot = (targetRoot) => {
     ['pnpm', ['db:audit:integrity']],
     ['pnpm', ['db:verify:upgrade']],
     ['pnpm', ['db:verify:identity']],
+    ['pnpm', ['db:verify:governance']],
     ['pnpm', ['db:verify:bibliography']],
   ]
 

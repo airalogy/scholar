@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { addDirectoryMocks } from './helpers/directory-mocks'
 import test from 'node:test'
 import Fastify from 'fastify'
 import sensible from '@fastify/sensible'
@@ -156,6 +157,7 @@ test('subject catalog routes separate platform and institution administration', 
       findMany: async () => [],
     },
   } as never)
+  addDirectoryMocks(app)
   await app.register(jwtPlugin)
   await app.register(academicSubjectRoutes, { prefix: '/v1/academic-subjects' })
   await app.ready()

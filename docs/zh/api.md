@@ -25,6 +25,16 @@
 - **日志相关**
   - `pino-pretty`: `^13.1.3`
 
+## 字段命名与兼容性
+
+- 新增自定义业务 API 的 JSON 字段、查询参数和 TypeScript 属性统一使用 `camelCase`，例如 `externalId`、`institutionId`、`createdAt`。请求、响应、TypeBox Schema、前端类型、文档和示例必须一致。
+- 缩写按普通单词处理：使用 `personId`、`sourceUrl`，不使用 `personID`、`sourceURL`。字段区分大小写，不自动接受另一种拼写。
+- 新增数据库表名和列名优先使用 `snake_case`；Prisma 可用 `@map` / `@@map` 保持代码属性为 camelCase。既有列不为纯风格调整而迁移；API 用明确的字段映射，不直接返回数据库模型来定义接口。
+- 已发布接口保留原契约，包括旧论文上传、论文/学者导入中的 `institution_id`、`external_id` 等。改名必须通过兼容过渡或新接口版本进行；不能以产品补丁升级为由静默改名。兼容期若接受两个拼写，必须拒绝冲突输入，并在文档中明确唯一的标准拼写。
+- 认证交换字段 `client_id`、`client_secret`、`access_token`、`token_type`、`expires_in` 保持既有契约；HTTP 头（如 `Idempotency-Key`）也不属于 JSON 字段命名规则。
+- 枚举值（如 `doctoral_student`、`needs_confirmation`）、权限范围（如 `directory:sync`）、机构自定义字典键和原始来源数据不是可自动改名的字段。禁止递归转换任意 JSON 的键或值。
+- 本轮人员同步、条件审核路由和上传预检查接口采用 camelCase。`test/api-naming.test.ts` 检查这些路由的 Schema 和实际响应；扩展接口时同步补充覆盖，不将检查通过误认为全仓库旧接口已完成迁移。
+
 ## 官方文档链接
 
 - **Fastify**

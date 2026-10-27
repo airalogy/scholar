@@ -49,10 +49,13 @@ export const resolveAccessTokenUserId = (fastify: FastifyInstance, payload: JwtP
 export const assertUserExists = async (fastify: FastifyInstance, userId: string): Promise<void> => {
   const user = await fastify.prisma.users.findUnique({
     where: { id: userId },
-    select: { id: true },
+    select: { id: true, administratorAccessExpiresAt: true },
   })
 
-  if (!user) {
+  if (
+    !user ||
+    (user.administratorAccessExpiresAt && user.administratorAccessExpiresAt <= new Date())
+  ) {
     throw fastify.httpErrors.unauthorized('Unauthorized')
   }
 }

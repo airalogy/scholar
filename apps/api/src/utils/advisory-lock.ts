@@ -10,8 +10,10 @@ export const lockMutationScope = async (
     | 'download'
     | 'upload'
     | 'paper-claim'
+    | 'paper-submission-request'
     | 'degree-thesis-create'
-    | 'degree-thesis',
+    | 'degree-thesis'
+    | 'review-change',
   id: string,
 ): Promise<void> => {
   await tx.$queryRawUnsafe(

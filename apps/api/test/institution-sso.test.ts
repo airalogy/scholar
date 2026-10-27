@@ -77,6 +77,7 @@ test('institution SSO links a verified identity through the canonical institutio
   let membershipUpserted = false
   let linkedPersonUserId: string | null = USER_ID
   const prisma = {
+    institution_directory_policies: { findUnique: async () => null },
     $queryRawUnsafe: async () => [],
     institution_person_identifiers: {
       findUnique: async () => ({
@@ -147,10 +148,13 @@ test('institution SSO links a verified identity through the canonical institutio
         scholarId: null,
         provisionId: null,
         is_active: true,
+        manually_suspended: false,
+        lifecycle_status: 'active',
         userLinkedAt: new Date('2026-08-26T00:00:00.000Z'),
         scholarLinkedAt: null,
       }),
-      findFirst: async () => null,
+      findFirst: async ({ where }: { where: { id?: string | { not: string } } }) =>
+        typeof where.id === 'string' ? prisma.institution_people.findUnique() : null,
       update: async ({ data }: { data: { userId?: string | null } }) => {
         linkedPersonUserId = data.userId ?? linkedPersonUserId
         return {

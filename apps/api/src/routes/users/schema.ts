@@ -1,4 +1,5 @@
 import { Type, type Static } from 'typebox'
+import { IdentityIdentifierKind } from '../../identity/schema'
 
 export const ProjectExperienceSchema = Type.Object({
   id: Type.String(),
@@ -48,6 +49,14 @@ export const UserInstitutionIdentitySchema = Type.Object({
   institutionName: Type.String(),
   internalId: Type.String(),
   scholarId: Type.Union([Type.String({ format: 'uuid' }), Type.Null()]),
+  identifiers: Type.Array(
+    Type.Object({
+      id: Type.String({ format: 'uuid' }),
+      value: Type.String(),
+      isPrimary: Type.Boolean(),
+      kind: IdentityIdentifierKind,
+    }),
+  ),
 })
 
 export const UserInstitutionPaperSchema = Type.Object({

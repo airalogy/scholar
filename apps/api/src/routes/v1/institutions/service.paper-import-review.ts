@@ -3,6 +3,8 @@ import type { ReviewImportBody } from './schema'
 import { writePaperBibliography } from '../../../bibliography/write'
 import { BibliographyConflict } from '../../../bibliography/identity'
 import { finalizeImportRecord, formatImportItem, getFormattedImport } from './service.shared'
+import { hasGovernedReview } from '../../../review/configuration'
+import { lockMutationScope } from '../../../utils/advisory-lock'
 
 // Only v1 metadata refreshes of an existing claim are reviewed here. Newly
 // claimed papers continue through the ordinary content-review workflow.
@@ -16,6 +18,11 @@ export const reviewLegacyPaperImport = async (
   if (!body.notes?.trim()) throw fastify.httpErrors.badRequest('A review note is required')
   await fastify.prisma.$transaction(
     async (tx) => {
+      await lockMutationScope(tx, 'institution-identity', institutionId)
+      if (await hasGovernedReview(tx, institutionId, 'paper'))
+        throw fastify.httpErrors.conflict(
+          'Governed imports require a versioned change request; resubmit through the current import workflow',
+        )
       await tx.$queryRawUnsafe(
         'SELECT id FROM institution_data_imports WHERE id = $1::uuid FOR UPDATE',
         importId,

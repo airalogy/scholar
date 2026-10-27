@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import type { institution_identity_requests } from '../../prisma/generated/client'
 import { lockMutationScope } from '../utils/advisory-lock'
 import { readIdentityChallenge } from './challenges'
+import { personAdmitted } from '../directory/policy'
 import { requireIdentityPerson, verifyIdentifier, type IdentityAdmin } from './service'
 import type { Static } from 'typebox'
 import type {
@@ -28,6 +29,7 @@ export const applicantRequest = (
   request
     ? {
         id: request.id,
+        purpose: request.purpose ?? 'account_link',
         status: requestStatus(request.status),
         previousInternalId: request.previousInternalId,
         explanation: request.explanation,
@@ -41,6 +43,7 @@ export const adminRequest = (
   request: institution_identity_requests,
 ): Static<typeof AdminRequestSchema> => ({
   id: request.id,
+  purpose: request.purpose ?? 'account_link',
   status: requestStatus(request.status),
   previousInternalId: request.previousInternalId,
   explanation: request.explanation,
@@ -83,6 +86,8 @@ export const submitIdentityRequest = async (
   },
 ): Promise<Static<typeof ApplicantResponse>> => {
   const proof = await readIdentityChallenge(fastify, body.proofToken)
+  if (proof.purpose !== 'directory_admission' && !body.previousInternalId.trim())
+    throw fastify.httpErrors.badRequest('The previous institutional identifier is required')
   const request = await fastify.prisma.$transaction(async (tx) => {
     await lockMutationScope(tx, 'institution-identity', proof.institutionId)
     if (proof.expiresAt.getTime() <= Date.now())
@@ -94,9 +99,16 @@ export const submitIdentityRequest = async (
           normalizedValue: proof.normalizedId,
         },
       },
-      include: { person: { select: { is_active: true } } },
+      include: {
+        person: { select: { is_active: true, manually_suspended: true, lifecycle_status: true } },
+      },
     })
-    if (identifier?.revokedAt || identifier?.person.is_active === false)
+    if (
+      identifier?.revokedAt ||
+      identifier?.person.is_active === false ||
+      identifier?.person.manually_suspended ||
+      (identifier && identifier.person.lifecycle_status !== 'active')
+    )
       throw fastify.httpErrors.forbidden('Institution identity is inactive')
     const where = {
       institutionId: proof.institutionId,
@@ -143,6 +155,7 @@ export const submitIdentityRequest = async (
       data: {
         ...where,
         internalId: proof.internalId,
+        purpose: proof.purpose ?? 'account_link',
         email: proof.email,
         name: proof.name,
         previousInternalId: body.previousInternalId.trim(),
@@ -195,7 +208,15 @@ export const decideIdentityRequest = async (
       if (!decision.personId)
         throw fastify.httpErrors.badRequest('Select the verified existing person')
       const person = await requireIdentityPerson(fastify, tx, admin, decision.personId)
-      if (!person.userId)
+      if (request.purpose === 'directory_admission') {
+        const owned = await tx.institution_directory_people.findUnique({
+          where: { personId: person.id },
+        })
+        if (!owned || !(await personAdmitted(tx, admin.institutionId, person.id)))
+          throw fastify.httpErrors.conflict(
+            'Correct the authoritative directory record before admitting this person',
+          )
+      } else if (!person.userId)
         throw fastify.httpErrors.conflict('The selected person has no existing login account')
       if (person.userId === admin.userId)
         throw fastify.httpErrors.forbidden(

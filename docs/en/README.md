@@ -19,4 +19,5 @@ Product users, institution administrators, and system integrators should use the
 ## Operations
 
 - [Deployment](./deployment.md)
+- [Administrator access, offboarding, and emergency recovery](./administrator-governance.md)
 - [Release process](./releasing.md)

@@ -17,6 +17,7 @@ import {
   submitDegreeThesis,
 } from '../src/routes/v1/theses/service'
 import { createDegreeThesisRecordCode } from '../src/routes/v1/theses/record-code'
+import { addDirectoryMocks } from './helpers/directory-mocks'
 
 const INSTITUTION_ID = '11111111-1111-4111-8111-111111111111'
 const CASE_ID = '22222222-2222-4222-8222-222222222222'
@@ -208,6 +209,7 @@ test('published thesis responses hide active draft state and private submitter m
     },
   } as never)
 
+  addDirectoryMocks(app)
   const response = await getDegreeThesis(app, CLAIM_ID, FIRST_REVIEWER_ID)
   assert.equal(response.data.status, 'approved')
   assert.equal(response.data.institution_reference, null)
@@ -322,6 +324,7 @@ test('an approved degree thesis requires a new draft before it can be resubmitte
 })
 
 interface StoredReviewCase {
+  currentRound?: number
   id: string
   institutionId: string
   content_type: string
@@ -341,6 +344,7 @@ interface StoredReviewCase {
 }
 
 interface StoredStep {
+  roundNumber: number
   id: string
   caseId: string
   institutionId: string
@@ -386,6 +390,17 @@ test('papers use the shared multi-stage review state machine and audit trail', a
   const steps: StoredStep[] = []
   const actions: Array<Record<string, unknown>> = []
   const prisma = {
+    $queryRawUnsafe: async () => [],
+    institution_directory_policies: { findUnique: async () => null },
+    paper_submissions: {
+      findUnique: async () => ({ id: VERSION_ID, metadata_snapshot: { title: 'Fixture' } }),
+    },
+    content_review_rounds: {
+      aggregate: async () => ({ _max: { number: reviewCase.currentRound ?? 0 } }),
+      create: async ({ data }: { data: object }) => data,
+      updateMany: async () => ({ count: 1 }),
+    },
+    content_review_tasks: { findMany: async () => [] },
     users: {
       findUnique: async ({ where }: { where: { id: string } }) => ({
         id: where.id,
@@ -401,10 +416,11 @@ test('papers use the shared multi-stage review state machine and audit trail', a
     },
     institution_org_nodes: { findMany: async () => [] },
     institution_org_edges: { findMany: async () => [] },
-    institution_people: { findMany: async () => [] },
+    institution_people: { findMany: async () => [], findUnique: async () => null },
     institution_org_positions: { findMany: async () => [] },
     institution_org_appointments: { findMany: async () => [] },
     institution_review_workflows: {
+      count: async () => 0,
       findMany: async () => [{ id: WORKFLOW_ID, key: 'paper-review', name: 'Paper Review' }],
     },
     institution_review_workflow_bindings: {
@@ -452,6 +468,7 @@ test('papers use the shared multi-stage review state machine and audit trail', a
       ],
     },
     content_review_cases: {
+      findUniqueOrThrow: async () => ({ ...reviewCase }),
       findUnique: async ({ include }: { include?: unknown }) => {
         return include
           ? { ...reviewCase, steps: steps.map((step) => ({ ...step })) }
@@ -463,13 +480,18 @@ test('papers use the shared multi-stage review state machine and audit trail', a
       },
     },
     content_review_step_instances: {
+      findMany: async ({ where }: { where: { roundNumber: number } }) =>
+        steps.filter((step) => step.roundNumber === where.roundNumber),
       deleteMany: async () => {
         steps.splice(0)
         return { count: 0 }
       },
       createMany: async ({ data }: { data: Array<Omit<StoredStep, 'id'>> }) => {
         data.forEach((step, index) => {
-          steps.push({ ...step, id: `00000000-0000-4000-8000-00000000000${index}` })
+          steps.push({
+            ...step,
+            id: `00000000-0000-4000-8000-${step.roundNumber.toString().padStart(6, '0')}${index.toString().padStart(6, '0')}`,
+          })
         })
         return { count: data.length }
       },
@@ -483,11 +505,15 @@ test('papers use the shared multi-stage review state machine and audit trail', a
         where,
         data,
       }: {
-        where: { status: string }
+        where: { status: string | { in: string[] } }
         data: Partial<StoredStep>
       }) => {
         steps
-          .filter((step) => step.status === where.status)
+          .filter((step) =>
+            typeof where.status === 'string'
+              ? step.status === where.status
+              : where.status.in.includes(step.status),
+          )
           .forEach((step) => Object.assign(step, data))
         return { count: steps.length }
       },

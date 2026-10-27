@@ -1,4 +1,5 @@
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
+import { Type } from 'typebox'
 import {
   BindInstitutionPaperAuthorBodySchema,
   CreateInstitutionApiCredentialBodySchema,
@@ -357,6 +358,9 @@ const institutionRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
       schema: {
         tags: ['institutions'],
         params: InstitutionMemberParamsSchema,
+        querystring: Type.Object({
+          reason: Type.Optional(Type.String({ minLength: 3, maxLength: 1000, pattern: '\\S' })),
+        }),
         response: {
           200: InstitutionMembershipListResponseSchema,
         },
@@ -368,6 +372,7 @@ const institutionRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
         request.params.slug,
         request.user.userId,
         request.params.userId,
+        request.query.reason,
       )
     },
   )
@@ -378,6 +383,9 @@ const institutionRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
       schema: {
         tags: ['institutions'],
         params: InstitutionProvisionParamsSchema,
+        querystring: Type.Object({
+          reason: Type.Optional(Type.String({ minLength: 3, maxLength: 1000, pattern: '\\S' })),
+        }),
         response: {
           200: InstitutionProvisionListResponseSchema,
         },
@@ -389,6 +397,7 @@ const institutionRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
         request.params.slug,
         request.user.userId,
         request.params.provisionId,
+        request.query.reason,
       )
     },
   )

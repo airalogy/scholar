@@ -5,6 +5,11 @@ import type { PaperMetadataInput } from './schema'
 import type { ImportActor } from '../utils/integration-auth'
 import type { PaperScope } from '../routes/papers/service.shared'
 import { ensureBibliographyClaim } from './claims'
+import { hasGovernedReview } from '../review/configuration'
+import { normalizePaperMetadata, fingerprint } from './normalize'
+import { resolveBibliographyIdentity } from './identity'
+import { loadBibliographySnapshot } from './snapshot'
+import { proposeImportedBibliography } from '../review/import-proposals'
 
 export interface DirectPaperImportResult {
   paperId: string
@@ -45,6 +50,67 @@ export const applyPaperBibliography = async (
   options: BibliographyApplyOptions = {},
 ): Promise<DirectPaperImportResult> => {
   const now = new Date()
+  if (await hasGovernedReview(tx, institutionId, 'paper')) {
+    const normalized = normalizePaperMetadata(item)
+    if (!normalized.item) throw fastify.httpErrors.badRequest('Invalid bibliographic metadata')
+    const existingId = await resolveBibliographyIdentity(tx, normalized.item)
+    if (existingId) {
+      const before = await loadBibliographySnapshot(tx, existingId, institutionId)
+      const fieldDefinitions = await tx.institution_paper_field_definitions.findMany({
+        where: { institutionId },
+        orderBy: { key: 'asc' },
+      })
+      const expectedFingerprint = fingerprint({ paper: before, fieldDefinitions })
+      if (options.expectedFingerprint && options.expectedFingerprint !== expectedFingerprint)
+        throw fastify.httpErrors.conflict('Published data changed after import preview')
+      const userId = options.claimSubmittedBy ?? actor.userId
+      const { claim, created } = await ensureBibliographyClaim(
+        tx,
+        {
+          paperId: existingId,
+          institutionId,
+          userId,
+          scope,
+          reviewRequired: true,
+          snapshot: {
+            source: 'governed_bibliography_import',
+            metadata: { ...item },
+            expectedFingerprint,
+          },
+        },
+        fastify,
+      )
+      if (!created)
+        await proposeImportedBibliography(fastify, tx, {
+          institutionId,
+          claimId: claim.id,
+          userId,
+          metadata: item,
+          expectedFingerprint,
+          key: `bibliography:${importItemId ?? fingerprint({ existingId, item })}`,
+        })
+      if (importItemId)
+        await tx.institution_data_import_items.update({
+          where: { id: importItemId },
+          data: {
+            action: 'updated',
+            status: 'pending',
+            targetId: claim.id,
+            resolvedPaperId: existingId,
+            message:
+              'Submitted to the institutional review workflow; published metadata is unchanged',
+            updatedAt: now,
+          },
+        })
+      return {
+        paperId: existingId,
+        action: 'updated',
+        status: 'pending',
+        targetId: claim.id,
+        message: 'Pending institutional review',
+      }
+    }
+  }
   const write = await writePaperBibliography(tx, item, {
     institutionId,
     actorUserId: actor.userId,

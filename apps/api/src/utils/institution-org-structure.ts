@@ -3,6 +3,8 @@ import type { FastifyInstance } from 'fastify'
 import { Prisma } from '../../prisma/generated/client'
 import type { UpsertInstitutionOrgStructureBody } from '../routes/institutions/schema'
 import { lockMutationScope } from './advisory-lock'
+import { assertPermissionManager, permissionContext } from '../administrators/access'
+import { suspendPersonPrivileges } from '../directory/records'
 import {
   assertInstitutionInternalId,
   normalizeInstitutionInternalId,
@@ -496,7 +498,7 @@ const resolvePositionReviewers = (
 export const resolveWorkflowStepReviewers = (
   ctx: ReviewResolutionContext,
   reviewNodeId: string | null,
-  step: WorkflowStepRecord,
+  step: Pick<WorkflowStepRecord, 'resolver_type' | 'resolver_config'>,
 ): { eligibleUserIds: string[]; resolutionNotes: string | null } => {
   const resolverType = step.resolver_type as WorkflowResolverType
   const config = readRecord(step.resolver_config)
@@ -993,6 +995,25 @@ export const upsertInstitutionOrgStructure = async (
 
   await fastify.prisma.$transaction(async (tx) => {
     await lockMutationScope(tx, 'institution-identity', institutionId)
+    await assertPermissionManager(fastify, tx, institutionId, actorId)
+    await permissionContext(tx, {
+      actorUserId: actorId,
+      institutionId,
+      source: 'organization_structure',
+      reason: 'Legacy organization structure maintenance',
+    })
+    if (await tx.institution_directory_sources.count({ where: { institutionId } }))
+      throw fastify.httpErrors.conflict(
+        'Directory-managed institutions use source synchronization for personnel and organization changes',
+      )
+    if (
+      await tx.institution_review_workflows.count({
+        where: { institutionId, is_active: true, steps: { some: { resolver_type: 'governance' } } },
+      })
+    )
+      throw fastify.httpErrors.conflict(
+        "Use review governance to edit this institution's versioned workflow",
+      )
     for (const node of body.nodes) {
       await tx.institution_org_nodes.upsert({
         where: {
@@ -1089,12 +1110,14 @@ export const upsertInstitutionOrgStructure = async (
         provisionId: provision.provisionId,
         source: 'organization_structure',
         actorUserId: actorId,
+        allowInactivePerson: true,
       })
       await tx.institution_people.update({
         where: { id: persistedPerson.id },
         data: {
           is_provisioning_enabled: person.createProvision === true,
           is_active: person.isActive !== false,
+          lifecycle_status: person.isActive !== false ? 'active' : 'departed',
           metadata: toNullableJsonInput(person.metadata),
           updatedAt: now,
         },
@@ -1112,10 +1135,17 @@ export const upsertInstitutionOrgStructure = async (
         },
         data: {
           is_active: false,
+          lifecycle_status: 'departed',
           updatedAt: now,
         },
       })
     }
+
+    const inactivePeople = await tx.institution_people.findMany({
+      where: { institutionId, is_active: false },
+      select: { id: true },
+    })
+    for (const person of inactivePeople) await suspendPersonPrivileges(tx, institutionId, person.id)
 
     const allPeople = await tx.institution_people.findMany({
       where: { institutionId },
@@ -1335,10 +1365,9 @@ export const isUserEligibleForClaimReview = async (
     where: { id: claim.reviewCaseId },
     include: { steps: true },
   })
-  const currentStep = reviewCase?.steps.find(
-    (step) => step.step_order === reviewCase.currentStep && step.status === 'pending',
-  )
-  return currentStep?.eligible_reviewer_user_ids.includes(userId) === true
+  if (!reviewCase || reviewCase.status !== 'pending_review') return false
+  const { canReviewContentCase } = await import('../review/service')
+  return canReviewContentCase(fastify, userId, reviewCase)
 }
 
 export const getUserWorkflowReviewableClaimIds = async (

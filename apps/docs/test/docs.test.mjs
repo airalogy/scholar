@@ -51,3 +51,25 @@ test('administration guides document server-derived and delegated access', async
     assert.match(source, /server|API|服务器/u)
   }
 })
+
+test('personnel integration docs expose both languages, a downloadable example and recovery guidance', async () => {
+  const config = await readFile(path.join(docsRoot, '.vitepress/config.mts'), 'utf8')
+  for (const locale of ['zh', 'en']) {
+    const source = await readFile(path.join(docsRoot, locale, 'integration/personnel-sync.md'), 'utf8')
+    const fields = await readFile(path.join(docsRoot, locale, 'integration/personnel-fields.md'), 'utf8')
+    for (const page of ['personnel-sync', 'personnel-fields']) {
+      assert.ok(config.includes(`/${locale}/integration/${page}`))
+    }
+    for (const term of ['directory:sync', 'Idempotency-Key', 'expectedPages', 'expectedRows', 'needs_confirmation', 'endedIdentityCount', 'endedRelationshipCount', '401', '403', '409', '413', '429', 'Retry-After']) {
+      assert.ok(source.includes(term), `${locale}: missing ${term}`)
+    }
+    assert.ok(source.includes('/examples/personnel-sync-v2.json'))
+    assert.ok(source.includes(`/${locale}/integration/personnel-fields`))
+    assert.ok(fields.includes(`/${locale}/integration/personnel-sync`))
+    assert.ok(source.includes('- [ ]'), 'A handover acceptance checklist is required')
+  }
+  const fixture = JSON.parse(await readFile(path.join(docsRoot, 'public/examples/personnel-sync-v2.json'), 'utf8'))
+  assert.equal(fixture.mode, 'incremental', 'A downloadable demo must never deactivate omitted real personnel')
+  assert.equal(fixture.schemaVersion, 2)
+  assert.equal(new Set(fixture.rows.map(row => row.kind)).size, 6)
+})

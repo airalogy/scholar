@@ -101,7 +101,10 @@ export const applyBibliographyImport = async (
       : { institutionId: record.institutionId, labId: null, reviewNodeId: null }
   const token = await acquireBibliographyLease(fastify, importId)
   if (!token) throw fastify.httpErrors.conflict('This import is already being processed')
-  const managed = fastify.deployment.managementMode !== 'self_hosted'
+  const { hasGovernedReview } = await import('../review/configuration')
+  const managed =
+    fastify.deployment.managementMode !== 'self_hosted' ||
+    (await hasGovernedReview(fastify.prisma, record.institutionId, 'paper'))
   try {
     for (const selected of eligible) {
       try {

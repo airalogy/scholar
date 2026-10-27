@@ -1,6 +1,6 @@
 {
   "name": "@airalogy/scholar-server",
-  "version": "5.0.1",
+  "version": "5.1.0",
   "private": true,
   "description": "Airalogy Scholar server",
   "license": "Apache-2.0",

@@ -11,6 +11,7 @@ import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '../prisma/generated/client'
 import jwtPlugin from '../src/plugins/global/jwt'
 import authRoutes from '../src/routes/auth'
+import usersRoutes from '../src/routes/users'
 import { identityAdminRoutes } from '../src/routes/v1/institutions/routes.identity'
 import { createInstitutionSsoAuthorization } from '../src/routes/auth/oauth/institution-sso'
 import { resolveInstitutionPerson, upsertInstitutionPerson } from '../src/utils/institution-people'
@@ -183,6 +184,7 @@ const fixture = async (t: TestContext) => {
   })
   await app.register(jwtPlugin)
   await app.register(authRoutes, { prefix: '/auth' })
+  await app.register(usersRoutes, { prefix: '/users' })
   await app.register(identityAdminRoutes, { prefix: '/v1/institutions' })
   app.get('/protected-test', async (request) => ({ userId: request.user.userId }))
   await app.ready()
@@ -270,7 +272,7 @@ describe(
   'PostgreSQL institution identity verification',
   { skip: !databaseUrl, concurrency: false },
   () => {
-    before(() => {
+    before(async () => {
       assert.ok(databaseUrl)
       const url = new URL(databaseUrl)
       assert.ok(
@@ -286,14 +288,159 @@ describe(
         .map((name) => readFileSync(path.join(directory, name, 'migration.sql'), 'utf8'))
         .join('\n')
       executeSql(`CREATE SCHEMA "${schema}"; SET search_path TO "${schema}", public;\n${sql}`)
+      // Connection-string options override pool options, including the raw SQL search path.
+      const isolatedDatabaseUrl = new URL(databaseUrl)
+      isolatedDatabaseUrl.searchParams.set('schema', schema)
+      isolatedDatabaseUrl.searchParams.set('options', `-c search_path=${schema},public`)
       prisma = new PrismaClient({
-        adapter: new PrismaPg({ connectionString: databaseUrl }, { schema }),
+        adapter: new PrismaPg({ connectionString: isolatedDatabaseUrl.toString() }, { schema }),
       })
+      const [connection] = await prisma.$queryRaw<Array<{ schema: string }>>`
+        SELECT current_schema() AS schema
+      `
+      assert.equal(connection.schema, schema, 'Raw SQL must use the isolated test schema')
     })
     after(async () => {
       await prisma?.$disconnect()
       if (databaseUrl && /^scholar_identity_test_[0-9a-f]{16}$/.test(schema))
         executeSql(`DROP SCHEMA IF EXISTS "${schema}" CASCADE;`)
+    })
+
+    test('directory admission keeps unknown SSO identities restricted until verified, then creates only a member', async (t) => {
+      const f = await fixture(t)
+      await prisma.institution_directory_policies.create({
+        data: {
+          institutionId: f.institution.id,
+          admissionMode: 'directory',
+          updatedBy: f.platform.id,
+        },
+      })
+      const internalId = `ENTRY-${randomUUID()}`
+      const email = `entry-${randomUUID()}@example.invalid`
+      f.setProfile({ internalId, email, name: 'New Person' })
+      const beforeCount = await prisma.users.count()
+      const response = await f.login()
+      assert.equal(response.statusCode, 409, response.body)
+      assert.equal(response.json().data.reason, 'institution_directory_admission')
+      assert.equal(await prisma.users.count(), beforeCount)
+      const proofToken = response.json().data.proofToken
+      assert.equal(
+        (
+          await f.app.inject({
+            url: '/protected-test',
+            headers: { authorization: `Bearer ${proofToken}` },
+          })
+        ).statusCode,
+        401,
+      )
+      const submission = await f.app.inject({
+        method: 'POST',
+        url: '/auth/institution-identity-requests',
+        payload: {
+          proofToken,
+          previousInternalId: '',
+          explanation: 'Please verify my current appointment',
+          confirmsOwnAccount: true,
+        },
+      })
+      assert.equal(submission.statusCode, 200, submission.body)
+      const requestId = submission.json().data.request.id
+      const source = await prisma.institution_directory_sources.create({
+        data: {
+          institutionId: f.institution.id,
+          key: 'registry',
+          name: 'Authoritative registry',
+          authoritative: true,
+        },
+      })
+      const person = await prisma.institution_people.create({
+        data: {
+          institutionId: f.institution.id,
+          key: internalId,
+          name: 'New Person',
+          internalId,
+          normalizedInternalId: internalId.toLowerCase(),
+        },
+      })
+      // A hand-created identity alone is not authoritative directory admission.
+      assert.equal((await f.login()).json().data.reason, 'institution_directory_admission')
+      assert.equal(await prisma.users.count(), beforeCount)
+      // The identity trigger already reserves the canonical identifier.
+      await prisma.institution_directory_people.create({
+        data: {
+          institutionId: f.institution.id,
+          sourceId: source.id,
+          personId: person.id,
+          externalId: internalId,
+          lastSeenSequence: 1,
+        },
+      })
+      assert.equal((await f.login()).json().data.reason, 'institution_directory_admission')
+      const approval = await f.decision(requestId, 'approve', person.id, f.platform.id)
+      assert.equal(approval.statusCode, 200, approval.body)
+      const login = await f.login()
+      assert.equal(login.statusCode, 200, login.body)
+      const linked = await prisma.institution_people.findUniqueOrThrow({ where: { id: person.id } })
+      assert.ok(linked.userId)
+      const membership = await prisma.institution_memberships.findUniqueOrThrow({
+        where: { institutionId_userId: { institutionId: f.institution.id, userId: linked.userId } },
+      })
+      assert.equal(membership.role, 'member')
+      assert.equal(membership.can_review_content, false)
+      assert.equal(
+        await prisma.institution_reviewer_grants.count({ where: { personId: person.id } }),
+        0,
+      )
+      const token = login.json().access_token
+      assert.equal(
+        (
+          await f.app.inject({
+            url: '/protected-test',
+            headers: { authorization: `Bearer ${token}` },
+          })
+        ).statusCode,
+        200,
+      )
+      await prisma.institution_people.update({
+        where: { id: person.id },
+        data: { manually_suspended: true },
+      })
+      assert.equal(
+        (
+          await f.app.inject({
+            url: '/protected-test',
+            headers: { authorization: `Bearer ${token}` },
+          })
+        ).statusCode,
+        403,
+      )
+      assert.equal((await f.login()).statusCode, 403)
+      const suspendedProof = await f.app.inject({
+        method: 'POST',
+        url: '/auth/institution-identity-requests',
+        payload: {
+          proofToken,
+          previousInternalId: '',
+          explanation: 'A suspended identity must not reuse an earlier verification proof',
+          confirmsOwnAccount: true,
+        },
+      })
+      assert.equal(suspendedProof.statusCode, 403, suspendedProof.body)
+      await prisma.institution_people.update({
+        where: { id: person.id },
+        data: { manually_suspended: false, lifecycle_status: 'departed' },
+      })
+      const departedProof = await f.app.inject({
+        method: 'POST',
+        url: '/auth/institution-identity-requests',
+        payload: {
+          proofToken,
+          previousInternalId: '',
+          explanation: 'A departed identity must not reuse an earlier verification proof',
+          confirmsOwnAccount: true,
+        },
+      })
+      assert.equal(departedProof.statusCode, 403, departedProof.body)
     })
 
     test('SSO email conflicts issue only a limited proof; names do not link accounts', async (t) => {
@@ -394,6 +541,222 @@ describe(
         (await prisma.institution_people.findUniqueOrThrow({ where: { id: person.id } }))
           .internalId,
         'OLD-001',
+      )
+    })
+
+    test('profile lists classified IDs on the original account without changing primary ID, bindings or permissions', async (t) => {
+      const f = await fixture(t)
+      assert.equal((await f.add('NEW-001')).statusCode, 200)
+      assert.equal((await f.add('OTHER-ALIAS')).statusCode, 200)
+      assert.equal((await f.add('REVOKED-ALIAS')).statusCode, 200)
+      await prisma.institution_person_identifiers.updateMany({
+        where: { personId: f.person.id, value: 'REVOKED-ALIAS' },
+        data: { revokedAt: new Date() },
+      })
+      await prisma.institution_person_identifiers.create({
+        data: {
+          institutionId: f.institution.id,
+          personId: f.person.id,
+          value: `legacy-user:${f.original.id}`,
+          normalizedValue: `legacy-user:${f.original.id}`,
+          source: 'test',
+        },
+      })
+      await prisma.institution_memberships.update({
+        where: { institutionId_userId: { institutionId: f.institution.id, userId: f.original.id } },
+        data: { role: 'admin' },
+      })
+      const before = await prisma.institution_people.findUniqueOrThrow({
+        where: { id: f.person.id },
+      })
+      const aliasesBefore = await prisma.institution_person_identifiers.findMany({
+        where: { personId: f.person.id },
+        orderBy: { id: 'asc' },
+      })
+      const membershipsBefore = await prisma.institution_memberships.findMany({
+        where: { userId: f.original.id },
+      })
+      const signedIn = await f.login()
+      assert.equal(signedIn.statusCode, 200, signedIn.body)
+      const loginHeaders = { authorization: `Bearer ${signedIn.json().access_token}` }
+      for (const [value, kind] of [
+        ['OLD-001', 'formal'],
+        ['NEW-001', 'temporary'],
+      ] as const) {
+        const response = await f.app.inject({
+          method: 'POST',
+          url: `${f.base}/people/${f.person.id}/identifiers`,
+          headers: f.headers(f.owner.id),
+          payload: { value, kind, notes: 'Verified identifier classification' },
+        })
+        assert.equal(response.statusCode, 200, response.body)
+      }
+      // Reclassification must not invalidate existing login sessions.
+      const profile = await f.app.inject({ url: '/users/me', headers: loginHeaders })
+      assert.equal(profile.statusCode, 200, profile.body)
+      const data = profile.json().data
+      assert.equal(data.id, f.original.id)
+      assert.equal(data.institution_identity.id, f.person.id)
+      assert.equal(data.institution_identity.internalId, 'OLD-001')
+      assert.deepEqual(
+        data.institution_identity.identifiers.map(
+          (item: { value: string; isPrimary: boolean; kind: string }) => ({
+            value: item.value,
+            isPrimary: item.isPrimary,
+            kind: item.kind,
+          }),
+        ),
+        [
+          { value: 'OLD-001', isPrimary: true, kind: 'formal' },
+          { value: 'NEW-001', isPrimary: false, kind: 'temporary' },
+          { value: 'OTHER-ALIAS', isPrimary: false, kind: 'unknown' },
+        ],
+      )
+      assert.equal(data.institution_memberships[0].role, 'admin')
+      assert.equal(data.admin_access.manage_institutions, true)
+      assert.equal(data.institution_papers[0].id, f.paper.id)
+      assert.ok(!profile.body.includes('REVOKED-ALIAS'))
+      assert.ok(!profile.body.includes('legacy-user:'))
+      assert.ok(!profile.body.includes('OTHER-001'))
+      assert.ok(!profile.body.includes('Verified identifier classification'))
+      for (const internalId of ['NEW-001', 'OLD-001', 'NEW-001']) {
+        f.setProfile({ internalId })
+        const login = await f.login()
+        assert.equal(login.statusCode, 200, login.body)
+        assert.equal(
+          f.app.jwt.verify<{ userId: string }>(login.json().access_token).userId,
+          f.original.id,
+        )
+      }
+      const after = await prisma.institution_people.findUniqueOrThrow({
+        where: { id: f.person.id },
+      })
+      for (const key of [
+        'id',
+        'userId',
+        'scholarId',
+        'key',
+        'internalId',
+        'normalizedInternalId',
+      ] as const) {
+        assert.equal(after[key], before[key])
+      }
+      const aliasesAfter = await prisma.institution_person_identifiers.findMany({
+        where: { personId: f.person.id },
+        orderBy: { id: 'asc' },
+      })
+      const stableFields = (items: typeof aliasesBefore): unknown =>
+        items.map(({ kind: _kind, updatedAt: _updatedAt, ...item }) => item)
+      assert.deepEqual(stableFields(aliasesAfter), stableFields(aliasesBefore))
+      // SSO refreshes the membership timestamp but must preserve every permission and binding.
+      const stableMemberships = (items: typeof membershipsBefore): unknown =>
+        items.map(({ updatedAt: _updatedAt, ...item }) => item)
+      assert.deepEqual(
+        stableMemberships(
+          await prisma.institution_memberships.findMany({ where: { userId: f.original.id } }),
+        ),
+        stableMemberships(membershipsBefore),
+      )
+      assert.equal(
+        (
+          await prisma.institution_paper_author_bindings.findUniqueOrThrow({
+            where: { id: f.binding.id },
+          })
+        ).personId,
+        f.person.id,
+      )
+      assert.equal(
+        await prisma.scholar_papers.count({
+          where: { scholarId: f.scholar.id, paperId: f.paper.id },
+        }),
+        1,
+      )
+      const events = await prisma.institution_identity_events.findMany({
+        where: { personId: f.person.id, action: 'identifier_kind_changed' },
+      })
+      assert.equal(events.length, 2)
+      assert.ok(events.every((event) => event.actorUserId === f.owner.id))
+      // Older clients omit kind; retries must neither reset it nor produce extra events.
+      assert.equal((await f.add('NEW-001')).statusCode, 200)
+      const retry = await f.app.inject({
+        method: 'POST',
+        url: `${f.base}/people/${f.person.id}/identifiers`,
+        headers: f.headers(f.owner.id),
+        payload: { value: 'NEW-001', kind: 'temporary', notes: 'Retry classification' },
+      })
+      assert.equal(retry.statusCode, 200, retry.body)
+      assert.deepEqual(
+        await prisma.institution_person_identifiers.findMany({
+          where: { personId: f.person.id },
+          orderBy: { id: 'asc' },
+        }),
+        aliasesAfter,
+      )
+      assert.equal(
+        await prisma.institution_identity_events.count({
+          where: { personId: f.person.id, action: 'identifier_kind_changed' },
+        }),
+        2,
+      )
+    })
+
+    test('profile updates cannot write institution IDs or roles; classification keeps existing verification controls', async (t) => {
+      const f = await fixture(t)
+      const before = await prisma.institution_person_identifiers.findMany({
+        where: { personId: f.person.id },
+      })
+      const update = await f.app.inject({
+        method: 'PUT',
+        url: '/users/me',
+        headers: f.headers(f.original.id),
+        payload: {
+          name: 'Updated display name',
+          internalId: 'FORGED',
+          identifiers: [{ value: 'FORGED', kind: 'temporary', isPrimary: true }],
+          institution_identity: { internalId: 'FORGED' },
+          institution_memberships: [{ role: 'owner' }],
+          platform_role: 'platform_admin',
+        },
+      })
+      assert.equal(update.statusCode, 200, update.body)
+      assert.deepEqual(
+        await prisma.institution_person_identifiers.findMany({ where: { personId: f.person.id } }),
+        before,
+      )
+      assert.equal(
+        (await prisma.users.findUniqueOrThrow({ where: { id: f.original.id } })).platform_role,
+        'member',
+      )
+      assert.equal(
+        (
+          await prisma.institution_memberships.findUniqueOrThrow({
+            where: {
+              institutionId_userId: { institutionId: f.institution.id, userId: f.original.id },
+            },
+          })
+        ).role,
+        'member',
+      )
+      const classify = async (actor: string, kind: string): Promise<number> =>
+        (
+          await f.app.inject({
+            method: 'POST',
+            url: `${f.base}/people/${f.person.id}/identifiers`,
+            headers: f.headers(actor),
+            payload: { value: 'OLD-001', kind, notes: 'Verified classification' },
+          })
+        ).statusCode
+      assert.equal(await classify(f.member.id, 'formal'), 403)
+      assert.equal(await classify(f.admin.id, 'formal'), 403)
+      assert.equal(await classify(f.owner.id, 'invalid'), 400)
+      await prisma.users.update({
+        where: { id: f.original.id },
+        data: { platform_role: 'platform_admin' },
+      })
+      assert.equal(await classify(f.original.id, 'formal'), 403)
+      assert.deepEqual(
+        await prisma.institution_person_identifiers.findMany({ where: { personId: f.person.id } }),
+        before,
       )
     })
 

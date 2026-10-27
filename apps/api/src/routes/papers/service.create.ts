@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import type { CreatePaperBody } from './schema'
 import { ensureReviewCase, submitReviewCase } from '../../review/service'
@@ -9,6 +9,8 @@ import { buildClaimScopeWhere, buildSubmissionSnapshot, toClaimRecord } from './
 import { formatPaper, resolvePaperScope } from './service.paper'
 import { ensureSubmittedPaper, legacyPaperMetadata } from '../../bibliography/legacy'
 import { enqueuePaperIndex } from '../../bibliography/index-queue'
+import { hasGovernedReview } from '../../review/configuration'
+import { stableStringify } from '../../bibliography/normalize'
 
 const assertCanUseUploadedFile = async (
   fastify: FastifyInstance,
@@ -55,7 +57,12 @@ const assertCanUseUploadedFile = async (
   }
 }
 
-export async function createPaper(fastify: FastifyInstance, body: CreatePaperBody, userId: string) {
+export async function createPaper(
+  fastify: FastifyInstance,
+  body: CreatePaperBody,
+  userId: string,
+  idempotencyKey?: string,
+) {
   const now = new Date()
   const normalizedDoi = requireNormalizedDoi(body.doi)
   const scope = await resolvePaperScope(
@@ -70,7 +77,24 @@ export async function createPaper(fastify: FastifyInstance, body: CreatePaperBod
     throw fastify.httpErrors.badRequest('An institution is required for paper review')
   }
   const institutionId = scope.institutionId
+  const requestDigest = createHash('sha256')
+    .update(stableStringify({ ...body, doi: normalizedDoi }))
+    .digest('hex')
   const result = await fastify.prisma.$transaction(async (tx) => {
+    if (idempotencyKey) {
+      await lockMutationScope(tx, 'paper-submission-request', `${userId}:${idempotencyKey}`)
+      const previous = await tx.paper_submissions.findUnique({
+        where: { userId_idempotencyKey: { userId, idempotencyKey } },
+        include: { paper: true, claim: { include: { review_case: true } } },
+      })
+      if (previous) {
+        if (previous.requestDigest !== requestDigest || !previous.claim)
+          throw fastify.httpErrors.conflict(
+            'Idempotency key was used with different submission data',
+          )
+        return { paper: previous.paper, claim: toClaimRecord(previous.claim), submission: previous }
+      }
+    }
     await lockMutationScope(tx, 'paper-claim', `${institutionId}:${normalizedDoi}`)
     const paper = await ensureSubmittedPaper(
       tx,
@@ -84,9 +108,22 @@ export async function createPaper(fastify: FastifyInstance, body: CreatePaperBod
 
     const existingClaim = await tx.paper_claims.findFirst({
       where: buildClaimScopeWhere(paper.id, scope),
+      include: { review_case: true },
     })
+    if (existingClaim && (await hasGovernedReview(tx, institutionId, 'paper'))) {
+      if (['approved', 'archived'].includes(existingClaim.review_case.status))
+        throw fastify.httpErrors.conflict(
+          'Published or archived papers must be updated through a change request',
+        )
+      if (existingClaim.submittedBy !== userId)
+        throw fastify.httpErrors.forbidden(
+          'Only the original submitter can replace a pending submission',
+        )
+    }
     const submission = await tx.paper_submissions.create({
       data: {
+        idempotencyKey,
+        requestDigest: idempotencyKey ? requestDigest : null,
         paperId: paper.id,
         claimId: existingClaim?.id ?? null,
         userId,

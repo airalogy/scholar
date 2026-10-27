@@ -83,6 +83,7 @@
 
             <!-- 论文摘要正文 -->
             <div class="detail-body">
+              <ReviewChangeForm v-if="paper.claimId" subject-type="paper" :subject-id="paper.claimId" />
               <section v-if="paper.abstract" class="detail-section">
                 <h2 class="section-heading">{{ $t('paperDetail.abstractTitle') }}</h2>
                 <p class="section-paragraph">{{ paper.abstract }}</p>
@@ -225,6 +226,7 @@
 <script setup lang="ts">
 import { ref, computed, onBeforeUnmount, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import ReviewChangeForm from '@/components/ReviewChangeForm.vue'
 import { Message } from '@arco-design/web-vue'
 import { useI18n } from 'vue-i18n'
 import {

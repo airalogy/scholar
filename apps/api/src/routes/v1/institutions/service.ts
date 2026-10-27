@@ -224,7 +224,10 @@ export const importPapers = async (
   context: ImportRequestContext,
 ) => {
   const institution = await loadImportInstitution(fastify, slug)
-  const appliesDirectly = fastify.deployment.managementMode === 'self_hosted'
+  const { hasGovernedReview } = await import('../../../review/configuration')
+  const appliesDirectly =
+    fastify.deployment.managementMode === 'self_hosted' &&
+    !(await hasGovernedReview(fastify.prisma, institution.id, 'paper'))
 
   return executeImport(fastify, {
     slug,

@@ -8,6 +8,7 @@ import type {
 import { getInstitutionAccessById, type InstitutionAccess } from '../../utils/permissions'
 import { INTEGRATION_SCOPES, type IntegrationScope } from '../../utils/integration-auth'
 import { lockMutationScope } from '../../utils/advisory-lock'
+import { assertPermissionManager, permissionContext } from '../../administrators/access'
 
 const SECRET_SALT_ROUNDS = 12
 const DEFAULT_EXPIRY_DAYS = 90
@@ -19,6 +20,7 @@ interface InstitutionRecord {
 }
 
 interface CredentialRecord {
+  directorySourceId?: string | null
   id: string
   name: string
   clientId: string
@@ -84,6 +86,7 @@ const formatCredential = (credential: CredentialRecord) => {
       : 'active'
 
   return {
+    directorySourceId: credential.directorySourceId ?? null,
     id: credential.id,
     name: credential.name,
     clientId: credential.clientId,
@@ -143,6 +146,18 @@ export const createInstitutionApiCredential = async (
   await assertCanManageCredentials(fastify, currentUserId, institution.id)
 
   const scopes = normalizeScopes(body.scopes)
+  if (scopes.includes('directory:sync')) {
+    if (scopes.length !== 1 || !body.directorySourceId)
+      throw fastify.httpErrors.badRequest(
+        'Directory credentials require exactly directory:sync and a bound source',
+      )
+    const source = await fastify.prisma.institution_directory_sources.findFirst({
+      where: { id: body.directorySourceId, institutionId: institution.id },
+    })
+    if (!source)
+      throw fastify.httpErrors.badRequest('Directory source does not belong to this institution')
+  } else if (body.directorySourceId)
+    throw fastify.httpErrors.badRequest('Only directory credentials may bind a source')
   if (scopes.length !== body.scopes.length) {
     throw fastify.httpErrors.badRequest(
       'Credential scopes contain unsupported or duplicated values',
@@ -153,6 +168,13 @@ export const createInstitutionApiCredential = async (
   const now = new Date()
   const secretHash = await bcrypt.hash(clientSecret, SECRET_SALT_ROUNDS)
   const credential = await fastify.prisma.$transaction(async (tx) => {
+    await lockMutationScope(tx, 'institution-identity', institution.id)
+    await assertPermissionManager(fastify, tx, institution.id, currentUserId)
+    await permissionContext(tx, {
+      actorUserId: currentUserId,
+      source: 'credential_create',
+      reason: `Create integration credential: ${body.name}`,
+    })
     await lockMutationScope(tx, 'credentials', institution.id)
     const activeCount = await tx.institution_api_credentials.count({
       where: {
@@ -174,6 +196,7 @@ export const createInstitutionApiCredential = async (
         clientId: `sch_inst_${crypto.randomBytes(12).toString('hex')}`,
         secretHash,
         scopes,
+        directorySourceId: body.directorySourceId ?? null,
         expiresAt: buildExpiry(body.expiresInDays),
         createdBy: currentUserId,
         createdAt: now,
@@ -207,14 +230,29 @@ export const rotateInstitutionApiCredential = async (
 
   const clientSecret = buildSecret()
   const now = new Date()
-  const credential = await fastify.prisma.institution_api_credentials.update({
-    where: { id: credentialId },
-    data: {
-      secretHash: await bcrypt.hash(clientSecret, SECRET_SALT_ROUNDS),
-      secretVersion: { increment: 1 },
-      expiresAt: body.expiresInDays ? buildExpiry(body.expiresInDays) : existing.expiresAt,
-      updatedAt: now,
-    },
+  const secretHash = await bcrypt.hash(clientSecret, SECRET_SALT_ROUNDS)
+  const credential = await fastify.prisma.$transaction(async (tx) => {
+    await lockMutationScope(tx, 'institution-identity', institution.id)
+    await assertPermissionManager(fastify, tx, institution.id, currentUserId)
+    const current = await tx.institution_api_credentials.findUniqueOrThrow({
+      where: { id: credentialId },
+    })
+    if (current.revokedAt)
+      throw fastify.httpErrors.conflict('Revoked credentials cannot be rotated')
+    await permissionContext(tx, {
+      actorUserId: currentUserId,
+      source: 'credential_rotate',
+      reason: `Rotate integration credential: ${current.name}`,
+    })
+    return tx.institution_api_credentials.update({
+      where: { id: credentialId },
+      data: {
+        secretHash,
+        secretVersion: { increment: 1 },
+        expiresAt: body.expiresInDays ? buildExpiry(body.expiresInDays) : current.expiresAt,
+        updatedAt: now,
+      },
+    })
   })
 
   return {
@@ -238,13 +276,22 @@ export const revokeInstitutionApiCredential = async (
   const now = new Date()
 
   if (!existing.revokedAt) {
-    await fastify.prisma.institution_api_credentials.update({
-      where: { id: credentialId },
-      data: {
-        revokedAt: now,
-        secretVersion: { increment: 1 },
-        updatedAt: now,
-      },
+    await fastify.prisma.$transaction(async (tx) => {
+      await lockMutationScope(tx, 'institution-identity', institution.id)
+      await assertPermissionManager(fastify, tx, institution.id, currentUserId)
+      await permissionContext(tx, {
+        actorUserId: currentUserId,
+        source: 'credential_revoke',
+        reason: `Revoke integration credential: ${existing.name}`,
+      })
+      await tx.institution_api_credentials.update({
+        where: { id: credentialId },
+        data: {
+          revokedAt: now,
+          secretVersion: { increment: 1 },
+          updatedAt: now,
+        },
+      })
     })
   }
 

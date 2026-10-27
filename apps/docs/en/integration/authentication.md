@@ -22,6 +22,9 @@ Available scopes are:
 | `papers:import` | Import papers |
 | `scholars:import` | Import scholar profiles |
 | `imports:read` | Read import jobs and row-level results |
+| `directory:sync` | Stage, validate and apply personnel facts for one bound directory source |
+
+Directory credentials cannot combine content-import scopes, change admission policy, grant permissions or approve anything. Large deactivation requires a human owner/platform administrator.
 
 Credentials expire after 90 days by default, and an institution can have at most 10 active credentials. The `client_secret` is shown only after creation or rotation. Store it in a secret manager and never put it in source code, logs, or support tickets.
 

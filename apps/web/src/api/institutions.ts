@@ -188,6 +188,7 @@ export interface UpdateInstitutionBody {
 }
 
 export interface UpsertInstitutionProvisionBody {
+  reason?: string
   email: string
   name: string
   internalId: string
@@ -311,9 +312,11 @@ export type InstitutionApiCredentialScope =
   | 'papers:import'
   | 'scholars:import'
   | 'imports:read'
+  | 'directory:sync'
 
 export interface InstitutionApiCredential {
   id: string
+  directorySourceId?: string | null
   name: string
   clientId: string
   scopes: InstitutionApiCredentialScope[]
@@ -371,6 +374,7 @@ export const upsertInstitutionMembership = (
     userId: string
     internalId?: string
     role: InstitutionRole
+    reason?: string
     can_review_content?: boolean
     can_import_data?: boolean
   },
@@ -384,9 +388,11 @@ export const upsertInstitutionMembership = (
 export const removeInstitutionMembership = (
   slug: string,
   userId: string,
+  reason?: string,
 ): Promise<InstitutionMembershipItem[]> => {
   return apiClient.delete<InstitutionMembershipListResponse>(
     `/institutions/${encodeURIComponent(slug)}/memberships/${encodeURIComponent(userId)}`,
+    { params: { reason } },
   ).then((r) => r.data.items)
 }
 
@@ -498,6 +504,7 @@ export const createInstitutionApiCredential = async (
   payload: {
     name: string
     scopes: InstitutionApiCredentialScope[]
+    directorySourceId?: string
     expiresInDays?: number
   },
 ): Promise<{ credential: InstitutionApiCredential, clientSecret: string }> => {
@@ -555,8 +562,10 @@ export const upsertInstitutionProvision = (
 export const disableInstitutionProvision = (
   slug: string,
   provisionId: string,
+  reason?: string,
 ): Promise<InstitutionProvisionItem[]> => {
   return apiClient.delete<InstitutionProvisionListResponse>(
     `/institutions/${encodeURIComponent(slug)}/provisions/${encodeURIComponent(provisionId)}`,
+    { params: { reason } },
   ).then((r) => r.data.items)
 }

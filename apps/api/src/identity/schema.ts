@@ -11,7 +11,7 @@ export const IdentityProofBody = Type.Object(
 export const SubmitIdentityRequestBody = Type.Object(
   {
     ...IdentityProofBody.properties,
-    previousInternalId: Text(100),
+    previousInternalId: Type.String({ maxLength: 100 }),
     explanation: Text(2000),
     confirmsOwnAccount: Type.Literal(true),
   },
@@ -22,7 +22,10 @@ export const IdentityConflictResponse = Type.Object({
   message: Type.String(),
   data: Type.Optional(
     Type.Object({
-      reason: Type.Literal('institution_identity_conflict'),
+      reason: Type.Union([
+        Type.Literal('institution_identity_conflict'),
+        Type.Literal('institution_directory_admission'),
+      ]),
       proofToken: Type.String(),
       expiresAt: Type.String(),
     }),
@@ -36,6 +39,7 @@ export const RequestStatus = Type.Union([
 ])
 export const ApplicantRequestSchema = Type.Object({
   id: Uuid,
+  purpose: Type.String(),
   status: RequestStatus,
   previousInternalId: Type.String(),
   explanation: Type.String(),
@@ -72,8 +76,13 @@ export const IdentityRequestsQuery = Type.Object({
   offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 100000 })),
 })
 export const IdentityNoteBody = Type.Object({ notes: Text(2000) }, { additionalProperties: false })
+export const IdentityIdentifierKind = Type.Union([
+  Type.Literal('unknown'),
+  Type.Literal('formal'),
+  Type.Literal('temporary'),
+])
 export const IdentityIdentifierBody = Type.Object(
-  { value: Text(100), notes: Text(2000) },
+  { value: Text(100), notes: Text(2000), kind: Type.Optional(IdentityIdentifierKind) },
   { additionalProperties: false },
 )
 export const IdentityDecisionBody = Type.Object(
@@ -101,6 +110,7 @@ const Identifier = Type.Object({
   id: Uuid,
   value: Type.String(),
   isPrimary: Type.Boolean(),
+  kind: IdentityIdentifierKind,
   source: Type.String(),
   version: Type.Integer(),
   revokedAt: NullableText,

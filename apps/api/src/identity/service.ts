@@ -8,12 +8,21 @@ import {
   normalizeInstitutionInternalId,
 } from '../utils/institution-identifiers'
 import type { Static } from 'typebox'
-import type { IdentityPeopleResponse } from './schema'
+import type { IdentityIdentifierKind, IdentityPeopleResponse } from './schema'
+import { assertPermissionManager } from '../administrators/access'
 
 export interface IdentityAdmin {
   institutionId: string
   userId: string
   isPlatformAdmin: boolean
+}
+
+interface VerifyIdentifierInput {
+  personId: string
+  value: string
+  notes: string
+  requestId?: string
+  kind?: Static<typeof IdentityIdentifierKind>
 }
 
 export const requireIdentityAdmin = async (
@@ -44,6 +53,7 @@ export const requireIdentityPerson = async (
 ): Promise<
   Prisma.institution_peopleGetPayload<{ include: { user: { select: { platform_role: true } } } }>
 > => {
+  await assertPermissionManager(fastify, tx, admin.institutionId, admin.userId)
   const person = await tx.institution_people.findFirst({
     where: { id: personId, institutionId: admin.institutionId },
     include: { user: { select: { platform_role: true } } },
@@ -62,7 +72,7 @@ export const verifyIdentifier = async (
   fastify: FastifyInstance,
   tx: Prisma.TransactionClient,
   admin: IdentityAdmin,
-  input: { personId: string; value: string; notes: string; requestId?: string },
+  input: VerifyIdentifierInput,
 ): Promise<institution_person_identifiers> => {
   const person = await requireIdentityPerson(fastify, tx, admin, input.personId)
   if (person.userId === admin.userId)
@@ -92,7 +102,25 @@ export const verifyIdentifier = async (
       'This SSO identity belongs to another account; manual investigation is required',
     )
   }
-  if (existing && !existing.revokedAt) return existing
+  if (existing && !existing.revokedAt) {
+    if (input.kind === undefined || input.kind === existing.kind) return existing
+    // Metadata only: never change the canonical ID, binding or session version.
+    const identifier = await tx.institution_person_identifiers.update({
+      where: { id: existing.id },
+      data: { kind: input.kind, updatedAt: new Date() },
+    })
+    await tx.institution_identity_events.create({
+      data: {
+        institutionId: admin.institutionId,
+        personId: person.id,
+        identifierId: identifier.id,
+        actorUserId: admin.userId,
+        action: 'identifier_kind_changed',
+        notes: `${existing.kind} -> ${input.kind}: ${input.notes.trim()}`.slice(0, 2000),
+      },
+    })
+    return identifier
+  }
   const identifier = existing
     ? await tx.institution_person_identifiers.update({
         where: { id: existing.id },
@@ -101,6 +129,7 @@ export const verifyIdentifier = async (
           version: { increment: 1 },
           updatedAt: new Date(),
           source: 'admin_verified',
+          ...(input.kind !== undefined ? { kind: input.kind } : {}),
         },
       })
     : await tx.institution_person_identifiers.create({
@@ -110,6 +139,7 @@ export const verifyIdentifier = async (
           value,
           normalizedValue,
           source: 'admin_verified',
+          kind: input.kind ?? 'unknown',
         },
       })
   await tx.institution_identity_events.create({
@@ -129,7 +159,7 @@ export const verifyIdentifier = async (
 export const addIdentityIdentifier = async (
   fastify: FastifyInstance,
   admin: IdentityAdmin,
-  input: { personId: string; value: string; notes: string },
+  input: VerifyIdentifierInput,
 ): Promise<institution_person_identifiers> => {
   return fastify.prisma.$transaction(async (tx) => {
     await lockMutationScope(tx, 'institution-identity', admin.institutionId)

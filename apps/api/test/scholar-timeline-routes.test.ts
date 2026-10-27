@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { addDirectoryMocks } from './helpers/directory-mocks'
 import test from 'node:test'
 import Fastify, { type FastifyInstance } from 'fastify'
 import sensible from '@fastify/sensible'
@@ -359,6 +360,7 @@ const buildApp = async (
     scholarTimeline: { generationMode: mode },
   } as never)
   app.decorate('prisma', buildPrismaMock(state) as never)
+  addDirectoryMocks(app)
   await app.register(jwtPlugin)
   await app.register(scholarTimelineRoutes, { prefix: '/v1/scholars' })
   await app.register(scholarTimelineAdminRoutes, { prefix: '/v1/scholar-timeline' })
