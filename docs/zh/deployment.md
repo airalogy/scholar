@@ -50,6 +50,10 @@ SCHOLAR_STATE_DIR=/srv/scholar-data/state
 
 二者将 Scholar 产品版本、Git Tag、完整 Git 提交、最新数据库迁移和 API/Web/PostgreSQL 镜像 SHA-256 摘要绑定为一个发布集合。正式部署使用 `镜像:版本@sha256:摘要`，不是只有版本标签。发布包不能使用另一版本的 Web、API 或离线镜像替换其中任一组件。
 
+发布构建在 AMD64 和 ARM64 原生运行器上并行完成 API/Web 四项构建，各自通过运行检查后才合成双架构镜像索引。整套镜像还需通过安装、健康、版本和文档检查，才打包发布；依赖安全审计、完整代码检查、隔离源码验证及数据库升级与身份权限回归均保留。
+
+主分支 CI 为两种架构分别更新构建缓存；合并请求使用独立缓存范围，不覆盖正式发布读取的主分支缓存。Release 只读取可信缓存，不再导出每个标签的独立缓存。缓存读写各设三分钟上限，只有缓存导出失败允许忽略，构建与检查失败仍会阻止发布。缓存未命中时正常重建，不跳过检查。Docker 依赖下载层仅依赖锁文件和工作区配置；API 运行依赖与程序产物分层，减少代码更新时重复下载和传输依赖。实际耗时取决于缓存命中、网络与运行器资源，不承诺固定发布时长。
+
 Web 默认监听 `127.0.0.1:8080`。生产环境应由机构现有的 Nginx、网关或负载均衡器终止 HTTPS，再转发到该端口。不要在 API 容器上直接暴露公网端口。
 
 文档不是单独的容器或可自由选择的组件。Web 镜像同时包含应用前端和对应版本的面向用户文档站，`/docs/` 默认进入中文版，中英文路径分别为 `/docs/zh/` 和 `/docs/en/`。API 镜像继续在 `/docs` 提供 Swagger，经过 Web 网关后的公开路径为 `/api/docs`，OpenAPI JSON 为 `/api/docs/json`。离线镜像包包含同一个 Web 镜像，因此断网环境仍可查阅产品使用和系统接入文档。本文档所属的部署与运维资料仅保留在仓库和发布包中，不构建到面向用户的文档站。
@@ -153,7 +157,7 @@ deploy/scholarctl status
 
 `install` 会依次验证发布清单、拉取固定摘要镜像（离线模式只检查本地镜像）、核对 API/Web 镜像标签、等待数据库就绪、执行全部数据库迁移、启动 API 和 Web、运行数据完整性审计，并确认 `/version` 的版本、Tag 和 Git 提交与清单完全一致。完成后会在 `SCHOLAR_STATE_DIR` 保存当前发布身份，不保存密码或其他密钥。
 
-`install`、`upgrade`、`backup`、`bootstrap` 和 `recover-admin` 使用同一个部署操作锁，同一实例不能并发执行这些写操作。
+`prepare`、`install`、`upgrade`、`backup`、`bootstrap` 和 `recover-admin` 使用同一个部署操作锁，同一实例不能并发执行这些操作。
 
 随后交互式创建首个机构和 owner：
 
@@ -197,10 +201,15 @@ node dist/src/scripts/generate-paper-embeddings.js
 1. 记录当前 `deploy/scholarctl status` 与 `/version`；
 2. 备份 PostgreSQL、上传文件及对象存储；
 3. 解压目标 Scholar 发布包并迁移原 `.env` 中的机构配置与密钥；不要仅手工替换某一个镜像；
-4. 执行 `deploy/scholarctl upgrade`；
-5. 核对新的 `/version`、`/docs/`、`/api/docs/json`、服务健康、登录、论文访问和后台功能。
+4. 可提前执行 `deploy/scholarctl prepare`，在旧服务仍运行时下载并核验目标镜像；
+5. 在维护窗口执行 `deploy/scholarctl upgrade`；
+6. 核对新的 `/version`、`/docs/`、`/api/docs/json`、服务健康、登录、论文访问和后台功能。
 
-`upgrade` 会先校验清单、拉取并检查整套目标镜像，再记录旧版本、旧镜像和目标版本，随后停止旧 Web/API，在无新增写入的窗口内备份数据并执行迁移。bundled 模式会生成 PostgreSQL custom-format 备份；本地文件存储会通过一次性容器生成同一时间戳的上传目录 `.tar.gz`。若备份失败，脚本会重新启动原有 API/Web，且不执行迁移。external 模式不会擅自操作学校数据库备份；数据库管理员完成快照后，需要显式执行 `SCHOLAR_EXTERNAL_BACKUP_CONFIRMED=true deploy/scholarctl upgrade`。使用 OSS 时必须先完成服务商侧备份，并以 `SCHOLAR_OBJECT_STORAGE_BACKUP_CONFIRMED=true` 显式确认。
+`prepare` 只进行配置预检、镜像下载和校验，不停止服务、不执行迁移、不修改 `.env`、账号绑定、主工号规则或权限。它不是备份，也不会记录可绕过升级检查的“已准备”标记。仅当本机已有同一摘要且架构匹配的镜像时才复用；缺失或架构不符时重新下载。离线模式只检查已加载的镜像，缺失或架构不符直接失败，绝不联网补拉。API/Web 版本与提交身份在每次准备和升级时重新核验。
+
+`upgrade` 会先校验清单、准备并检查整套目标镜像，再记录旧版本、旧镜像和目标版本，随后停止旧 Web/API，在无新增写入的窗口内重新备份数据并执行迁移。提前准备镜像或已有旧备份都不能跳过本次备份。bundled 模式会生成 PostgreSQL custom-format 备份；本地文件存储会通过一次性容器生成同一时间戳的上传目录 `.tar.gz`。备份容器和启动步骤禁止临时拉取镜像；镜像准备失败在停服务前终止。若备份失败，脚本会重新启动原有 API/Web，且不执行迁移。external 模式不会擅自操作学校数据库备份；数据库管理员完成快照后，需要显式执行 `SCHOLAR_EXTERNAL_BACKUP_CONFIRMED=true deploy/scholarctl upgrade`。使用 OSS 时必须先完成服务商侧备份，并以 `SCHOLAR_OBJECT_STORAGE_BACKUP_CONFIRMED=true` 显式确认。
+
+准备、安装和升级会输出各阶段耗时与退出状态，便于区分预检、镜像准备、镜像核验、停服务、备份、迁移启动、完整性审计和运行版本核验。迁移与启动共用 Compose 启动阶段；阶段耗时不包含人工完成外部数据库或 OSS 备份的时间。加速流程不改变已有数据卷、账号绑定和授权逻辑，也不需要重新部署已运行的旧版本；随后续经批准的新版本交付。
 
 如果迁移、启动、完整性审计或发布身份核验失败，脚本不会冒险把旧 API 自动接回可能已经迁移的数据库，而会保留失败阶段、旧/新镜像、数据库备份和上传备份的对应记录。执行以下命令查看最新恢复依据：
 

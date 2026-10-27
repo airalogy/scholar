@@ -50,6 +50,10 @@ Release automation generates:
 
 The manifests bind the product version, Git tag and commit, latest database migration, and API, Web, and PostgreSQL SHA-256 image digests. Production uses `image:version@sha256:digest`. Never replace one component with a different release.
 
+Release builds API and Web concurrently on native AMD64 and ARM64 runners. All four builds and their runtime smoke checks must pass before combining the two-architecture image indexes. The complete image set then passes installation, health, version, and documentation checks before packaging. Dependency security audits, full code checks, isolated source verification, and database upgrade and identity/authorization regressions remain mandatory.
+
+Main-branch CI maintains a separate cache for each component and architecture. Pull requests use isolated cache scopes and cannot overwrite the main scopes consumed by Release. Release reads these trusted caches without exporting per-tag caches. Cache imports and exports each have a three-minute timeout; only cache export failures may be ignored, never build or check failures. Cache misses rebuild normally without skipping checks. Dependency downloads depend only on the lockfile and workspace configuration, while API runtime dependencies and application output use separate layers to reduce repeated downloads and transfers on code changes. Actual duration depends on cache hits, networking, and runner resources; there is no fixed release-time guarantee.
+
 Web listens on `127.0.0.1:8080` by default. Terminate HTTPS at the institution's Nginx, gateway, or load balancer and forward to Web. Do not expose the API container directly.
 
 Documentation is not a separate selectable service. The Web image includes the application and matching user documentation. `/docs/` selects a language landing page; `/docs/en/` and `/docs/zh/` are available offline. The API serves Swagger internally at `/docs`, exposed by the Web gateway as `/api/docs`, with JSON at `/api/docs/json`. Repository operations documents such as this guide are not included in the user-facing documentation site.
@@ -136,7 +140,7 @@ deploy/scholarctl status
 
 Installation verifies the release manifest, obtains or checks pinned images, waits for the database, runs all migrations, starts API and Web, executes the integrity audit, and verifies that `/version` matches the manifest's version, tag, and commit. It records the release identity in `SCHOLAR_STATE_DIR` without storing secrets.
 
-`install`, `upgrade`, `backup`, `bootstrap`, and `recover-admin` share one operation lock so two administrators cannot mutate the same instance concurrently.
+`prepare`, `install`, `upgrade`, `backup`, `bootstrap`, and `recover-admin` share one operation lock so two administrators cannot run these operations concurrently on the same instance.
 
 Create the first institution and owner interactively:
 
@@ -180,10 +184,15 @@ Read both changelogs and confirm migration and rollback constraints. Then:
 1. record `deploy/scholarctl status` and `/version`;
 2. back up PostgreSQL, uploads, and object storage;
 3. extract the complete target release and transfer the private `.env`; do not replace one image manually;
-4. run `deploy/scholarctl upgrade`;
-5. verify `/version`, `/docs/`, `/api/docs/json`, health, login, paper access, and administration.
+4. optionally run `deploy/scholarctl prepare` ahead of the maintenance window to download and verify target images while the old service keeps running;
+5. run `deploy/scholarctl upgrade` during the maintenance window;
+6. verify `/version`, `/docs/`, `/api/docs/json`, health, login, paper access, and administration.
 
-Upgrade validates the target release, checks all images, records old and target identities, stops Web and API to create a no-new-write backup window, then migrates. Bundled PostgreSQL produces a custom-format dump. Local storage produces a same-timestamp upload archive. A failed backup restarts the original application without running migrations.
+`prepare` only validates configuration and downloads/verifies images. It does not stop services, migrate data, or change `.env`, account bindings, primary employee-number rules, or permissions. It is not a backup and does not create a marker that bypasses upgrade checks. Only locally available digest-pinned images matching the Docker server architecture are reused; missing or mismatched online images are downloaded. Offline mode only checks loaded images and fails without network access if they are absent or use the wrong architecture. API/Web version and commit labels are checked on every preparation and upgrade.
+
+Upgrade validates the target release, prepares and checks all images, records old and target identities, stops Web and API to create a no-new-write backup window, takes fresh backups, then migrates. Neither image preparation nor an earlier backup skips this backup. Bundled PostgreSQL produces a custom-format dump. Local storage produces a same-timestamp upload archive. Backup containers and startup are forbidden from pulling images; preparation failures abort before stopping services. A failed backup restarts the original application without running migrations.
+
+Preparation, installation, and upgrade report stage durations and exit statuses for preflight, image preparation/verification, shutdown, backup, migration/startup, integrity audit, and running-release verification. Migration and startup share the Compose startup stage. These timings exclude manual external-database and object-storage backups. The optimization does not change existing volumes, account bindings, or authorization logic and does not require redeploying an already running version; it ships with a subsequent approved release.
 
 For external PostgreSQL, the database administrator must complete a snapshot and then set `SCHOLAR_EXTERNAL_BACKUP_CONFIRMED=true`. For object storage, confirm the provider backup with `SCHOLAR_OBJECT_STORAGE_BACKUP_CONFIRMED=true`.
 

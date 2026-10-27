@@ -14,6 +14,16 @@ fail() {
   exit 1
 }
 
+# Run each phase in its own shell so timing variables cannot overwrite operation state.
+timed_stage() (
+  stage_name=$1
+  shift
+  stage_started=$(date +%s)
+  printf 'Stage %s started.\n' "$stage_name"
+  trap 'stage_status=$?; printf "Stage %s finished in %ss (exit %s).\n" "$stage_name" "$(($(date +%s) - stage_started))" "$stage_status"' EXIT
+  "$@"
+)
+
 read_env_value() {
   key=$1
   if [ ! -f "$env_file" ]; then
@@ -81,7 +91,7 @@ acquire_operation_lock() {
   mkdir -p "$state_dir"
   OPERATION_LOCK_DIRECTORY=$state_dir/operation.lock
   if ! mkdir "$OPERATION_LOCK_DIRECTORY" 2>/dev/null; then
-    fail "Another Scholar install, upgrade, backup, bootstrap, or recovery operation is already running ($OPERATION_LOCK_DIRECTORY)"
+    fail "Another Scholar prepare, install, upgrade, backup, bootstrap, or recovery operation is already running ($OPERATION_LOCK_DIRECTORY)"
   fi
   trap 'release_operation_lock' EXIT INT TERM
   printf 'Acquired Scholar deployment lock for %s.\n' "$operation"
@@ -477,16 +487,35 @@ preflight() {
   printf 'Preflight passed for Scholar %s in %s database mode.\n' "$(configured_value SCHOLAR_VERSION)" "$(database_mode)"
 }
 
+native_image_platform() {
+  platform=$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')
+  case "$platform" in
+    linux/amd64|linux/arm64) printf '%s\n' "$platform" ;;
+    *) fail "Unsupported Docker server platform: $platform" ;;
+  esac
+}
+
 pull_images() {
   offline=$(configured_value SCHOLAR_OFFLINE)
   offline=${offline:-false}
-  if [ "$offline" = 'true' ]; then
-    for image in $(compose config --images | sort -u); do
+  target_platform=$(native_image_platform)
+  # Resolve first: do not hide Compose errors behind a pipeline or command substitution.
+  required_images=$(compose config --images) || fail 'Cannot resolve deployment images'
+  required_images=$(printf '%s\n' "$required_images" | sort -u)
+  for image in $required_images; do
+    if [ "$offline" = 'true' ]; then
       docker image inspect "$image" >/dev/null 2>&1 || fail "Offline image is not loaded: $image"
-    done
+    elif [ -n "$(image_digest "$image")" ] && \
+      [ "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image" 2>/dev/null || true)" = "$target_platform" ]; then
+      printf 'Reusing pinned local image: %s\n' "$image"
+    else
+      docker pull --platform "$target_platform" "$image" || fail "Image download failed: $image"
+    fi
+    actual_platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image")
+    [ "$actual_platform" = "$target_platform" ] || fail "Image platform $actual_platform does not match Docker server $target_platform: $image"
+  done
+  if [ "$offline" = 'true' ]; then
     printf '%s\n' 'Using verified locally loaded images in offline mode.'
-  else
-    compose pull
   fi
 }
 
@@ -596,7 +625,7 @@ backup() {
   storage_provider=${storage_provider:-local}
   if [ "$storage_provider" = 'local' ]; then
     uploads_output=$backup_dir/scholar-uploads-$timestamp.tar.gz
-    if ! compose run --rm --no-deps --entrypoint sh api -c 'tar -C "$LOCAL_STORAGE_DIR" -czf - .' >"$uploads_output"; then
+    if ! compose run --rm --no-deps --pull never --entrypoint sh api -c 'tar -C "$LOCAL_STORAGE_DIR" -czf - .' >"$uploads_output"; then
       rm -f "$uploads_output"
       fail 'Local upload backup failed'
     fi
@@ -802,8 +831,9 @@ usage() {
     '' \
     'Commands:' \
     '  preflight  Validate environment, image tags, and Compose configuration' \
-    '  install    Pull pinned images, migrate the database, and start Scholar' \
-    '  upgrade    Back up the bundled database, pull, migrate, and restart' \
+    '  prepare    Download and verify target images without stopping services or changing data' \
+    '  install    Prepare pinned images, migrate the database, and start Scholar' \
+    '  upgrade    Prepare images, back up data, migrate, and restart' \
     '  backup     Back up the bundled database and local upload storage' \
     '  audit      Audit database relationships and migration constraints' \
     '  bootstrap  Initialize the first institution owner (never restore authority)' \
@@ -820,34 +850,42 @@ case "$command" in
   preflight)
     preflight
     ;;
+  prepare)
+    ensure_env_file
+    acquire_operation_lock prepare
+    timed_stage preflight preflight
+    timed_stage images pull_images
+    timed_stage image-verification verify_local_images
+    printf '%s\n' 'Target images prepared. No services stopped, no migrations run. Upgrade still requires a fresh backup.'
+    ;;
   install)
     ensure_env_file
     acquire_operation_lock install
-    preflight
-    pull_images
-    verify_local_images
-    compose up -d --wait
-    audit_integrity
-    verify_running_release
+    timed_stage preflight preflight
+    timed_stage images pull_images
+    timed_stage image-verification verify_local_images
+    timed_stage start compose up -d --wait --pull never
+    timed_stage integrity-audit audit_integrity
+    timed_stage release-verification verify_running_release
     write_current_release install
     show_version
     ;;
   upgrade)
     ensure_env_file
     acquire_operation_lock upgrade
-    preflight
+    timed_stage preflight preflight
     if [ "${STORAGE_PROVIDER:-$(read_env_value STORAGE_PROVIDER)}" = 'oss' ]; then
       [ "${SCHOLAR_OBJECT_STORAGE_BACKUP_CONFIRMED:-false}" = 'true' ] || fail 'Set SCHOLAR_OBJECT_STORAGE_BACKUP_CONFIRMED=true after the object storage backup is complete'
     fi
     if [ "$(database_mode)" != 'bundled' ]; then
       [ "${SCHOLAR_EXTERNAL_BACKUP_CONFIRMED:-false}" = 'true' ] || fail 'Set SCHOLAR_EXTERNAL_BACKUP_CONFIRMED=true after the institution database backup is complete'
     fi
-    pull_images
-    verify_local_images
+    timed_stage images pull_images
+    timed_stage image-verification verify_local_images
     upgrade_id=$(date -u '+%Y%m%dT%H%M%SZ')
     create_upgrade_record "$upgrade_id"
-    compose stop web api
-    if ! (backup "$upgrade_id"); then
+    timed_stage stop compose stop web api
+    if ! timed_stage backup backup "$upgrade_id"; then
       mark_upgrade_status backup_failed
       compose start api web || true
       fail "Upgrade backup failed; the previous API and Web containers were restarted. Recovery record: $UPGRADE_RECORD"
@@ -864,15 +902,15 @@ case "$command" in
     append_upgrade_record SCHOLAR_DATABASE_BACKUP "$database_backup"
     append_upgrade_record SCHOLAR_UPLOADS_BACKUP "$uploads_backup"
     mark_upgrade_status backed_up
-    if ! compose up -d --wait; then
+    if ! timed_stage start compose up -d --wait --pull never; then
       mark_upgrade_status deployment_failed
       fail "Upgrade failed while starting the target release. Do not run an older API against a possibly migrated database; inspect $UPGRADE_RECORD and restore the matching backup if required"
     fi
-    if ! audit_integrity; then
+    if ! timed_stage integrity-audit audit_integrity; then
       mark_upgrade_status integrity_audit_failed
       fail "Upgrade started but the integrity audit failed. Inspect $UPGRADE_RECORD before restoring or retrying"
     fi
-    if ! verify_running_release; then
+    if ! timed_stage release-verification verify_running_release; then
       mark_upgrade_status release_verification_failed
       fail "Upgrade started but the running release identity is incorrect. Inspect $UPGRADE_RECORD before restoring or retrying"
     fi
