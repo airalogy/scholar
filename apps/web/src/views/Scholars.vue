@@ -1,594 +1,552 @@
 <template>
-  <div class="scholars-page">
-    <div class="scholars-container">
-      <h1 class="scholars-title">{{ $t('scholars.title') }}</h1>
-
-      <div class="scholars-search">
-        <a-input
+  <main class="scholars-page">
+    <header class="directory-header">
+      <p class="directory-kicker">{{ t('scholars.kicker') }}</p>
+      <h1>{{ t('scholars.title') }}</h1>
+      <p class="directory-intro">{{ t('scholars.intro') }}</p>
+      <form class="directory-search" role="search" @submit.prevent="search">
+        <label for="scholar-search" class="sr-only">{{ t('scholars.searchPlaceholder') }}</label>
+        <input
+          id="scholar-search"
           v-model="query"
-          class="scholars-search-input"
-          :placeholder="$t('scholars.searchPlaceholder')"
-          allow-clear
-          @press-enter="onSearch"
+          type="search"
+          maxlength="200"
+          :placeholder="t('scholars.searchPlaceholder')"
+          @compositionstart="composing = true"
+          @compositionend="compositionEnd"
         />
-        <button class="scholars-search-btn" type="button" @click="onSearch">
-          {{ $t('common.search') }}
-        </button>
-      </div>
+        <button type="submit" class="search-button">{{ t('common.search') }}</button>
+      </form>
+    </header>
 
-      <div class="scholars-filters">
-        <div v-if="subjectOptions.length" class="filter-row">
-          <div class="filter-label">{{ $t('scholars.subjectFilter') }}</div>
-          <div class="filter-content">
-            <div class="filter-pills">
-              <button
-                class="filter-pill"
-                :class="{ 'filter-pill--active': selectedSubject === '' }"
-                type="button"
-                @click="selectedSubject = ''"
-              >
-                {{ $t('common.all') }}
-              </button>
-              <button
-                v-for="item in rootSubjectOptions"
-                :key="item.id"
-                class="filter-pill"
-                :class="{ 'filter-pill--active': activeRootSubjectId === item.id }"
-                type="button"
-                @click="selectedSubject = item.id"
-              >
-                <span>{{ subjectLabel(item) }}</span>
-                <small>{{ item.count }}</small>
-              </button>
-            </div>
+    <div class="directory-layout">
+      <aside :aria-label="t('scholars.filters')">
+        <ScholarDirectoryFilters
+          :units="data?.facets.units ?? []"
+          :subjects="data?.facets.subjects ?? []"
+          :unit="state.unit"
+          :subject="state.subject"
+          @select="selectFilter"
+        />
+      </aside>
+      <section class="directory-results" :aria-label="t('scholars.results')" :aria-busy="loading">
+        <nav class="alphabet-nav" :aria-label="t('scholars.letterFilter')">
+          <span class="alphabet-label">{{ t('scholars.letterFilter') }}</span>
+          <div class="alphabet-options">
+            <button
+              type="button"
+              :class="{ active: !state.letter }"
+              :aria-pressed="!state.letter"
+              @click="update({ letter: '' })"
+            >
+              {{ t('common.all') }}
+            </button>
+            <button
+              v-for="letter in alphabet"
+              :key="letter"
+              type="button"
+              :class="{ active: state.letter === letter }"
+              :aria-pressed="state.letter === letter"
+              :aria-label="
+                t('scholars.letterCount', {
+                  letter: letter === '#' ? t('scholars.otherLetters') : letter,
+                  count: letterCounts.get(letter) ?? 0,
+                })
+              "
+              @click="update({ letter })"
+            >
+              {{ letter === '#' ? t('scholars.otherLetters') : letter }}
+            </button>
           </div>
+          <p>{{ t('scholars.letterHelp') }}</p>
+        </nav>
+
+        <div ref="resultsToolbar" class="results-toolbar" tabindex="-1">
+          <p class="result-count" role="status" aria-live="polite">
+            {{
+              loading
+                ? t('common.loading')
+                : failed
+                  ? t('scholars.loadFailed')
+                  : t('scholars.resultCount', { count: data?.total ?? 0 })
+            }}
+          </p>
+          <label class="sort-control"
+            >{{ t('scholars.sortLabel') }}
+            <select :value="state.sort" @change="changeSort">
+              <option value="relevance">{{ t('scholars.sortRelevance') }}</option>
+              <option value="name">
+                {{ t(data?.nameOrder === 'pinyin' ? 'scholars.sortName' : 'scholars.sortUnicode') }}
+              </option>
+            </select>
+          </label>
+        </div>
+        <div v-if="hasFilters" class="active-filters" :aria-label="t('scholars.activeFilters')">
+          <button
+            v-for="chip in chips"
+            :key="chip.key"
+            type="button"
+            :aria-label="t('scholars.removeFilter', { label: chip.label })"
+            @click="update({ [chip.key]: '' })"
+          >
+            {{ chip.label }} <span aria-hidden="true">×</span>
+          </button>
+          <button type="button" class="clear-filters" @click="reset">
+            {{ t('scholars.resetFilters') }}
+          </button>
         </div>
 
-        <div
-          v-if="selectedSubject && (subjectNavigationOptions.length || subjectBreadcrumb.length > 1)"
-          class="filter-row"
+        <div v-if="failed" class="directory-state" role="alert">
+          <h2>{{ t('scholars.loadFailed') }}</h2>
+          <p>{{ t('scholars.loadFailedHint') }}</p>
+          <button type="button" @click="refresh">{{ t('scholars.retry') }}</button>
+        </div>
+        <div v-else-if="loading" class="scholars-grid skeleton-grid" aria-hidden="true">
+          <div v-for="item in 6" :key="item" class="skeleton-card"><span /><i /><i /><i /></div>
+        </div>
+        <div v-else-if="!data?.items.length" class="directory-state">
+          <h2>{{ t(hasFilters ? 'scholars.noMatches' : 'scholars.empty') }}</h2>
+          <p>{{ t(hasFilters ? 'scholars.noMatchesHint' : 'scholars.emptyHint') }}</p>
+          <button v-if="hasFilters" type="button" @click="reset">
+            {{ t('scholars.resetFilters') }}
+          </button>
+        </div>
+        <div v-else class="scholars-grid">
+          <ScholarDirectoryCard
+            v-for="scholar in data.items"
+            :key="scholar.id"
+            :scholar="scholar"
+          />
+        </div>
+
+        <nav
+          v-if="!failed && data && data.total > data.limit"
+          class="pagination"
+          :aria-label="t('scholars.pagination')"
         >
-          <div class="filter-label">{{ $t('scholars.subSubjectFilter') }}</div>
-          <div class="filter-content filter-content--subject-navigation">
-            <nav v-if="subjectBreadcrumb.length" class="subject-breadcrumb" :aria-label="$t('scholars.subjectBreadcrumb')">
-              <template v-for="(item, index) in subjectBreadcrumb" :key="item.id">
-                <span v-if="index" aria-hidden="true">/</span>
-                <button type="button" @click="selectedSubject = item.id">
-                  {{ subjectLabel(item) }}
-                </button>
-              </template>
-            </nav>
-            <div v-if="subjectNavigationOptions.length" class="filter-pills">
-              <button
-                v-for="item in subjectNavigationOptions"
-                :key="item.id"
-                class="filter-pill"
-                type="button"
-                @click="selectedSubject = item.id"
-              >
-                <span>{{ subjectLabel(item) }}</span>
-                <small>{{ item.count }}</small>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div v-if="collegeOptions.length" class="filter-row">
-          <div class="filter-label">{{ $t('scholars.collegeFilter') }}</div>
-          <div class="filter-content">
-            <div class="filter-pills">
-              <button
-                class="filter-pill"
-                :class="{ 'filter-pill--active': selectedCollege === '' }"
-                type="button"
-                @click="selectedCollege = ''"
-              >
-                {{ $t('common.all') }}
-              </button>
-              <button
-                v-for="item in collegeOptions"
-                :key="item"
-                class="filter-pill filter-pill--text"
-                :class="{ 'filter-pill--active': selectedCollege === item }"
-                type="button"
-                @click="selectedCollege = item"
-              >
-                {{ item }}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div v-if="letters.length" class="filter-row">
-          <div class="filter-label">{{ $t('scholars.letterFilter') }}</div>
-          <div class="filter-content">
-            <div class="filter-pills filter-pills--letters">
-              <button
-                class="filter-pill"
-                :class="{ 'filter-pill--active': selectedLetter === '' }"
-                type="button"
-                @click="selectedLetter = ''"
-              >
-                {{ $t('common.all') }}
-              </button>
-              <button
-                v-for="letter in letters"
-                :key="letter"
-                class="filter-pill filter-pill--letter"
-                :class="{ 'filter-pill--active': selectedLetter === letter }"
-                type="button"
-                @click="selectedLetter = letter"
-              >
-                {{ letter }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div v-if="isLoading" class="scholars-loading">{{ $t('common.loading') }}</div>
-
-      <div v-else-if="!scholars.length" class="scholars-empty">
-        <span>{{ $t('scholars.empty') }}</span>
-        <button
-          v-if="hasActiveFilters"
-          class="scholars-empty-reset"
-          type="button"
-          @click="resetFilters"
-        >
-          {{ $t('scholars.resetFilters') }}
-        </button>
-      </div>
-
-      <div v-else class="scholars-grid">
-        <div
-          v-for="prof in scholars"
-          :key="prof.id"
-          class="scholar-card"
-        >
-          <div class="scholar-avatar-wrapper">
-            <img
-              v-if="prof.avatar"
-              class="scholar-avatar"
-              :src="prof.avatar"
-              :alt="prof.name"
-            />
-            <div v-else class="scholar-avatar-placeholder">
-              {{ prof.name.charAt(0) }}
-            </div>
-          </div>
-          <div class="scholar-name">{{ prof.name }}</div>
-          <div class="scholar-college">{{ formatScholarCollege(prof.college, '—') }}</div>
-          <div class="scholar-year">{{ prof.join_year ? $t('scholars.joinedInYear', { year: prof.join_year }) : '' }}</div>
-          <div class="scholar-research">{{ prof.bio ?? (prof.research_directions[0]?.name ?? '') }}</div>
-          <router-link :to="`/scholars/${prof.id}`" class="scholar-more">{{ $t('scholars.viewMore') }}</router-link>
-        </div>
-      </div>
+          <button
+            type="button"
+            :disabled="loading || data.page <= 1"
+            @click="changePage(data.page - 1)"
+          >
+            {{ t('scholars.previousPage') }}
+          </button>
+          <template v-for="(page, index) in pages" :key="page">
+            <span v-if="index && page - (pages[index - 1] ?? 0) > 1" aria-hidden="true">…</span>
+            <button
+              type="button"
+              :disabled="loading"
+              :aria-current="page === data.page ? 'page' : undefined"
+              :aria-label="t('scholars.pageNumber', { page })"
+              :class="{ active: page === data.page }"
+              @click="changePage(page)"
+            >
+              {{ page }}
+            </button>
+          </template>
+          <button
+            type="button"
+            :disabled="loading || data.page >= pageCount"
+            @click="changePage(data.page + 1)"
+          >
+            {{ t('scholars.nextPage') }}
+          </button>
+        </nav>
+      </section>
     </div>
-  </div>
-
-  <!-- Floating RAG chat -->
+  </main>
   <RagChatFloat v-if="features.aiChat && isLoggedIn" />
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import {
-  getScholarFacets,
-  listScholars,
-  type ScholarResponse,
-  type ScholarSubjectFacet,
-} from '@/api/scholars'
 import RagChatFloat from '@/components/RagChatFloat.vue'
+import ScholarDirectoryCard from '@/components/scholars/ScholarDirectoryCard.vue'
+import ScholarDirectoryFilters from '@/components/scholars/ScholarDirectoryFilters.vue'
 import { usePublicConfig } from '@/composables/usePublicConfig'
 import { useAuth } from '@/composables/useAuth'
-import { formatScholarCollege } from '@/utils/scholars'
+import { useScholarDirectory, type DirectoryState } from '@/composables/useScholarDirectory'
 
-const query = ref('')
-const selectedSubject = ref('')
-const selectedCollege = ref('')
-const selectedLetter = ref('')
-const isLoading = ref(false)
-const scholars = ref<ScholarResponse[]>([])
-const subjectOptions = ref<ScholarSubjectFacet[]>([])
-const collegeOptions = ref<string[]>([])
-const letters = ref<string[]>([])
-const { locale } = useI18n()
+const { t, locale } = useI18n()
 const { features, paperLibrary } = usePublicConfig()
 const { isLoggedIn } = useAuth()
-
-const subjectLabel = (subject: ScholarSubjectFacet): string => {
-  return locale.value.startsWith('en') ? (subject.nameEn || subject.nameZh) : subject.nameZh
-}
-
-const subjectById = computed(() => {
-  return new Map(subjectOptions.value.map((subject) => [subject.id, subject]))
-})
-
-const rootSubjectOptions = computed(() => {
-  return subjectOptions.value.filter((subject) => {
-    return !subject.parentId || !subjectById.value.has(subject.parentId)
-  })
-})
-
-const subjectBreadcrumb = computed(() => {
-  const result: ScholarSubjectFacet[] = []
-  const visited = new Set<string>()
-  let current = subjectById.value.get(selectedSubject.value)
-  while (current && !visited.has(current.id)) {
-    visited.add(current.id)
-    result.unshift(current)
-    current = current.parentId ? subjectById.value.get(current.parentId) : undefined
+const institutionSlug = computed(() => paperLibrary.value.fixedInstitutionSlug)
+const {
+  state,
+  query,
+  data,
+  loading,
+  failed,
+  composing,
+  compositionEnd,
+  hasFilters,
+  pageCount,
+  pages,
+  refresh,
+  update,
+  search,
+  reset,
+} = useScholarDirectory(institutionSlug)
+const alphabet = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ', '#']
+const resultsToolbar = ref<HTMLElement | null>(null)
+const letterCounts = computed(
+  () => new Map(data.value?.facets.letters.map((item) => [item.letter, item.count]) ?? []),
+)
+const chips = computed(() => {
+  const result: Array<{
+    key: keyof Pick<DirectoryState, 'q' | 'unit' | 'subject' | 'letter'>
+    label: string
+  }> = []
+  if (state.value.q) result.push({ key: 'q', label: state.value.q })
+  if (state.value.unit) {
+    const unit = data.value?.facets.units.find((item) => item.id === state.value.unit)
+    result.push({
+      key: 'unit',
+      label:
+        unit?.id === 'unassigned'
+          ? t('scholars.unassigned')
+          : unit?.name || t('scholars.unitFilter'),
+    })
   }
+  if (state.value.subject) {
+    const subject = data.value?.facets.subjects.find((item) => item.id === state.value.subject)
+    result.push({
+      key: 'subject',
+      label: subject
+        ? locale.value.startsWith('en')
+          ? subject.nameEn || subject.nameZh
+          : subject.nameZh
+        : t('scholars.subjectFilter'),
+    })
+  }
+  if (state.value.letter)
+    result.push({
+      key: 'letter',
+      label: state.value.letter === '#' ? t('scholars.otherLetters') : state.value.letter,
+    })
   return result
 })
-
-const activeRootSubjectId = computed(() => subjectBreadcrumb.value[0]?.id ?? '')
-
-const subjectNavigationOptions = computed(() => {
-  return subjectOptions.value.filter((subject) => subject.parentId === selectedSubject.value)
-})
-
-const hasActiveFilters = computed(() => {
-  return Boolean(
-    query.value.trim() ||
-    selectedSubject.value ||
-    selectedCollege.value ||
-    selectedLetter.value,
-  )
-})
-
-let searchTimer: ReturnType<typeof setTimeout> | null = null
-let scholarRequestId = 0
-let facetRequestId = 0
-
-async function load(): Promise<void> {
-  const requestId = ++scholarRequestId
-  isLoading.value = true
-  try {
-    const res = await listScholars({
-      q: query.value.trim() || undefined,
-      college: selectedCollege.value || undefined,
-      subject_id: selectedSubject.value || undefined,
-      letter: selectedLetter.value || undefined,
-      institution_slug: paperLibrary.value.fixedInstitutionSlug,
-      limit: 100,
-    })
-    if (requestId === scholarRequestId) {
-      scholars.value = res.items
-    }
-  } finally {
-    if (requestId === scholarRequestId) {
-      isLoading.value = false
-    }
-  }
+const selectFilter = (key: 'unit' | 'subject', value: string): void => {
+  void update({ [key]: value })
 }
-
-async function loadFacets(): Promise<void> {
-  const requestId = ++facetRequestId
-  try {
-    const facets = await getScholarFacets({
-      q: query.value.trim() || undefined,
-      college: selectedCollege.value || undefined,
-      subject_id: selectedSubject.value || undefined,
-      letter: selectedLetter.value || undefined,
-      institution_slug: paperLibrary.value.fixedInstitutionSlug,
-    })
-    if (requestId === facetRequestId) {
-      subjectOptions.value = facets.subjects
-      collegeOptions.value = facets.colleges
-      letters.value = facets.letters
-    }
-  } catch {
-    if (requestId === facetRequestId) {
-      subjectOptions.value = []
-      collegeOptions.value = []
-      letters.value = []
-    }
-  }
+const changeSort = (event: Event): void => {
+  void update({ sort: (event.target as HTMLSelectElement).value === 'name' ? 'name' : 'relevance' })
 }
-
-const refresh = async (): Promise<void> => {
-  await Promise.all([loadFacets(), load()])
-}
-
-const resetFilters = (): void => {
-  query.value = ''
-  selectedSubject.value = ''
-  selectedCollege.value = ''
-  selectedLetter.value = ''
-}
-
-watch([selectedSubject, selectedCollege, selectedLetter], () => {
-  void refresh()
-})
-watch(query, () => {
-  if (searchTimer) clearTimeout(searchTimer)
-  searchTimer = setTimeout(() => {
-    void refresh()
-  }, 300)
-})
-
-void refresh()
-
-const onSearch = (): void => {
-  if (searchTimer) clearTimeout(searchTimer)
-  void refresh()
+const changePage = async (page: number): Promise<void> => {
+  await update({ page })
+  resultsToolbar.value?.focus({ preventScroll: true })
+  resultsToolbar.value?.scrollIntoView?.({ block: 'start' })
 }
 </script>
 
-<style lang="sass" scoped>
-.scholars-page
-  display: flex
-  justify-content: center
-  padding: 24px 0 40px
-
-.scholars-container
-  width: 1060px
-  max-width: 100%
-  padding: 0 30px
-
-.scholars-title
-  font-size: 28px
-  font-weight: 600
-  color: var(--scholar-text-1)
-  text-align: center
-  margin: 0 0 24px
-  letter-spacing: -0.5px
-
-.scholars-search
-  width: 720px
-  position: relative
-  height: 52px
-  margin: 0 auto 22px
-
-.scholars-search-input
-  height: 52px
-  border: 1px solid var(--scholar-border-input)
-  border-radius: 14px
-  padding-left: 14px
-  padding-right: 86px
-  box-sizing: border-box
-  background-color: #fff !important
-
-.scholars-search-btn
-  position: absolute
-  right: 6px
-  top: 50%
-  transform: translateY(-50%)
-  width: 68px
-  height: 40px
-  border-radius: 10px
-  border: none
-  background: var(--scholar-primary)
-  color: #fff
-  font-size: 14px
-  font-weight: 400
-  cursor: pointer
-  letter-spacing: -0.15px
-
-.scholars-search-btn:hover
-  background: var(--scholar-primary-hover)
-
-.scholars-filters
-  border: 1px solid var(--scholar-border-light)
-  background: #fcfdfd
-  border-radius: 16px
-  padding: 18px 22px
-
-.filter-row
-  display: flex
-  gap: 22px
-  padding: 14px 0
-
-.filter-row + .filter-row
-  border-top: 1px solid var(--scholar-border-light)
-
-.filter-label
-  width: 68px
-  flex-shrink: 0
-  font-size: 14px
-  font-weight: 500
-  color: var(--scholar-text-2)
-  padding-top: 5px
-  letter-spacing: -0.15px
-
-.filter-content
-  flex: 1
-  display: flex
-  align-items: flex-start
-  gap: 12px
-  flex-wrap: wrap
-
-.filter-content--subject-navigation
-  flex-direction: column
-  align-items: stretch
-
-.subject-breadcrumb
-  display: flex
-  align-items: center
-  gap: 8px
-  color: var(--scholar-text-3)
-  font-size: 12px
-
-.subject-breadcrumb button
-  padding: 0
-  border: 0
-  background: transparent
-  color: var(--scholar-primary)
-  cursor: pointer
-
-.filter-pills
-  display: flex
-  align-items: center
-  flex-wrap: wrap
-  gap: 8px
-
-.filter-pills--letters
-  gap: 6px 10px
-
-.filter-pill
-  height: 30px
-  padding: 0 12px
-  border-radius: 999px
-  border: 1px solid transparent
-  background: transparent
-  font-size: 14px
-  color: var(--scholar-text-2)
-  cursor: pointer
-  letter-spacing: -0.15px
-
-.filter-pill small
-  margin-left: 5px
-  color: var(--scholar-text-3)
-  font-size: 11px
-
-.filter-pill--active small
-  color: rgba(255, 255, 255, 0.8)
-
-.filter-pill:hover
-  background: var(--scholar-primary-light)
-
-.filter-pill--active
-  background: var(--scholar-primary)
-  color: #fff
-
-.filter-pill--active:hover
-  background: var(--scholar-primary)
-
-.filter-pill--text
-  padding: 0 8px
-  border: none
-  border-radius: 0
-  color: var(--scholar-text-2)
-
-.filter-pill--text:hover
-  background: transparent
-  color: var(--scholar-primary)
-
-.filter-pill--text.filter-pill--active
-  background: transparent
-  color: var(--scholar-primary)
-  font-weight: 500
-
-.filter-pill--letter
-  width: 36px
-  height: 30px
-  padding: 0
-  display: flex
-  align-items: center
-  justify-content: center
-  border-radius: 999px
-
-.scholars-loading,
-.scholars-empty
-  margin-top: 40px
-  text-align: center
-  font-size: 14px
-  color: var(--scholar-text-3)
-
-.scholars-empty-reset
-  display: block
-  margin: 14px auto 0
-  padding: 7px 16px
-  border: 1px solid var(--scholar-primary)
-  border-radius: 6px
-  background: transparent
-  color: var(--scholar-primary)
-  cursor: pointer
-
-.scholars-empty-reset:hover
-  background: var(--scholar-primary-light)
-
-.scholars-grid
-  display: grid
-  grid-template-columns: repeat(4, 1fr)
-  gap: 22px
-  margin-top: 30px
-
-.scholar-card
-  background: #fff
-  border: 1px solid var(--scholar-border-light)
-  border-radius: 16px
-  padding: 24px 20px
-  display: flex
-  flex-direction: column
-  align-items: center
-  text-align: center
-
-.scholar-avatar-wrapper
-  width: 83px
-  height: 83px
-  border-radius: 50%
-  overflow: hidden
-  margin-bottom: 12px
-
-.scholar-avatar
-  width: 100%
-  height: 100%
-  object-fit: cover
-  border-radius: 50%
-
-.scholar-avatar-placeholder
-  width: 100%
-  height: 100%
-  border-radius: 50%
-  background: var(--scholar-primary-light)
-  color: var(--scholar-primary)
-  font-size: 32px
-  font-weight: 600
-  display: flex
-  align-items: center
-  justify-content: center
-
-.scholar-name
-  font-size: 20px
-  font-weight: 500
-  color: #364153
-  margin-bottom: 6px
-
-.scholar-college
-  font-size: 14px
-  font-weight: 500
-  color: var(--scholar-primary)
-  letter-spacing: -0.15px
-  margin-bottom: 4px
-
-.scholar-year
-  font-size: 12px
-  color: var(--scholar-text-2)
-  letter-spacing: -0.15px
-  margin-bottom: 8px
-  min-height: 16px
-
-.scholar-research
-  font-size: 12px
-  color: var(--scholar-text-2)
-  letter-spacing: -0.15px
-  line-height: 1.6
-  margin-bottom: 16px
-  min-height: 38px
-  overflow: hidden
-  display: -webkit-box
-  -webkit-line-clamp: 3
-  -webkit-box-orient: vertical
-
-.scholar-more
-  width: 80%
-  height: 40px
-  border-radius: 10px
-  border: none
-  background: rgba(0, 73, 143, 0.05)
-  color: var(--scholar-text-2)
-  font-size: 14px
-  cursor: pointer
-  letter-spacing: -0.15px
-  display: flex
-  align-items: center
-  justify-content: center
-  text-decoration: none
-
-.scholar-more:hover
-  background: rgba(0, 73, 143, 0.1)
+<style scoped>
+.scholars-page {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 42px 32px 64px;
+  color: var(--scholar-text-1);
+}
+.directory-header {
+  margin-bottom: 32px;
+}
+.directory-kicker {
+  margin: 0 0 10px;
+  color: var(--scholar-primary);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+h1 {
+  margin: 0;
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.5px;
+}
+.directory-intro {
+  margin: 12px 0 24px;
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--scholar-text-2);
+}
+.directory-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 720px;
+  padding: 6px;
+  border: 1px solid var(--scholar-border-input);
+  border-radius: 14px;
+  background: var(--scholar-bg-white);
+}
+.directory-search:focus-within {
+  border-color: var(--scholar-primary);
+  box-shadow: 0 0 0 3px var(--scholar-primary-light);
+}
+.directory-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: none;
+  background: transparent;
+  padding: 10px 12px;
+  color: var(--scholar-text-1);
+  font: inherit;
+  font-size: 15px;
+}
+.search-button {
+  border: 0;
+  border-radius: 9px;
+  background: var(--scholar-primary);
+  color: #fff;
+  padding: 12px 24px;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.search-button:hover {
+  background: var(--scholar-primary-hover);
+}
+.directory-layout {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  align-items: start;
+  gap: 28px;
+}
+.directory-results {
+  min-width: 0;
+}
+.alphabet-nav {
+  padding: 18px 20px;
+  border: 1px solid var(--scholar-border-light);
+  border-radius: 14px;
+  background: var(--scholar-bg-white);
+}
+.alphabet-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--scholar-text-2);
+  margin-bottom: 10px;
+}
+.alphabet-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.alphabet-options button {
+  min-width: 32px;
+  min-height: 34px;
+  padding: 5px 8px;
+  border: 0;
+  background: transparent;
+  border-radius: 6px;
+  color: var(--scholar-text-2);
+  cursor: pointer;
+  font-size: 12px;
+}
+.alphabet-options button:hover {
+  background: var(--scholar-primary-light);
+}
+.alphabet-options button.active,
+.pagination button.active {
+  background: var(--scholar-primary);
+  color: #fff;
+}
+.alphabet-nav p {
+  margin: 10px 0 0;
+  color: var(--scholar-text-desc);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.results-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 24px 0 18px;
+  scroll-margin-top: 90px;
+}
+.result-count {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+}
+.sort-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--scholar-text-2);
+}
+.sort-control select {
+  max-width: 180px;
+  padding: 8px 10px;
+  border: 1px solid var(--scholar-border-input);
+  border-radius: 8px;
+  background: var(--scholar-bg-white);
+  color: var(--scholar-text-1);
+  font: inherit;
+  cursor: pointer;
+}
+.active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.active-filters button {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  max-width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--scholar-border-light);
+  border-radius: 6px;
+  background: var(--scholar-primary-light);
+  color: var(--scholar-primary);
+  font-size: 12px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.active-filters .clear-filters {
+  background: transparent;
+  border-color: transparent;
+}
+.scholars-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.directory-state {
+  padding: 60px 20px;
+  text-align: center;
+  border: 1px dashed var(--scholar-border-input);
+  border-radius: 14px;
+}
+.directory-state h2 {
+  font-size: 18px;
+  margin: 0 0 12px;
+}
+.directory-state p {
+  color: var(--scholar-text-2);
+  font-size: 14px;
+  line-height: 1.8;
+}
+.directory-state button {
+  margin-top: 12px;
+  padding: 10px 20px;
+  border: 1px solid var(--scholar-primary);
+  background: transparent;
+  color: var(--scholar-primary);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.pagination {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 28px;
+}
+.pagination button {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--scholar-border-light);
+  border-radius: 8px;
+  background: var(--scholar-bg-white);
+  color: var(--scholar-text-2);
+  cursor: pointer;
+}
+.pagination button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.skeleton-card {
+  min-height: 232px;
+  border: 1px solid var(--scholar-border-light);
+  border-radius: 16px;
+  padding: 24px;
+}
+.skeleton-card span {
+  display: block;
+  height: 56px;
+  width: 56px;
+  border-radius: 50%;
+  background: var(--scholar-primary-light);
+}
+.skeleton-card i {
+  display: block;
+  height: 14px;
+  margin-top: 20px;
+  border-radius: 4px;
+  background: var(--scholar-primary-light);
+}
+.skeleton-card i:last-child {
+  width: 60%;
+}
+button:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--scholar-primary);
+  outline-offset: 3px;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+@media (max-width: 1150px) {
+  .scholars-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .directory-layout {
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 20px;
+  }
+}
+@media (max-width: 760px) {
+  .scholars-page {
+    padding: 28px 18px 40px;
+  }
+  h1 {
+    font-size: 27px;
+  }
+  .directory-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+  .directory-header {
+    margin-bottom: 22px;
+  }
+  .alphabet-options button {
+    min-height: 40px;
+    min-width: 36px;
+  }
+  .search-button {
+    padding: 12px 18px;
+  }
+}
+@media (max-width: 480px) {
+  .scholars-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .alphabet-nav {
+    padding: 14px;
+  }
+  .sort-control select {
+    max-width: 150px;
+  }
+}
 </style>
