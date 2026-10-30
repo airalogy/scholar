@@ -21,7 +21,7 @@
     "marked": "^17.0.3",
     "pdfjs-dist": "^5.5.207",
     "vue": "^3.5.42",
-    "vue-i18n": "^11.4.8",
+    "vue-i18n": "^11.4.14",
     "vue-router": "^4.2.0"
   },
   "devDependencies": {
