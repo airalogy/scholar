@@ -136,6 +136,7 @@ describe('scholar directory isolated PostgreSQL integration', { skip: !databaseU
     subjectId = (
       await prisma.academic_subjects.create({
         data: {
+          id: 'abcdef01-2345-4678-9abc-def012345678',
           code: 'fixture-science',
           nameZh: '示例科学',
           nameEn: 'Example science',
@@ -146,6 +147,7 @@ describe('scholar directory isolated PostgreSQL integration', { skip: !databaseU
     childSubjectId = (
       await prisma.academic_subjects.create({
         data: {
+          id: 'fedcba98-7654-4321-8fed-cba987654321',
           code: 'fixture-physics',
           nameZh: '示例物理学',
           nameEn: 'Example physics',
@@ -334,6 +336,29 @@ describe('scholar directory isolated PostgreSQL integration', { skip: !databaseU
     assert.equal(alice.items[0].units.length, 2)
     assert.equal(alice.facets.units.find((unit) => unit.id === college.id)?.count, 1)
     assert.equal(alice.facets.subjects.find((subject) => subject.id === subjectId)?.count, 1)
+  })
+
+  test('subject UUID filtering accepts uppercase and mixed-case identifiers', async () => {
+    const queries: Array<Record<string, string | number>> = [
+      {},
+      { q: 'Alice', unit: `org:${departmentId}`, letter: 'A', sort: 'name', limit: 1 },
+    ]
+    for (const id of [subjectId, childSubjectId]) {
+      const variants = [id.toUpperCase(), id.slice(0, 8).toUpperCase() + id.slice(8)]
+      for (const query of queries) {
+        const expected = await directory({ ...query, subject_id: id })
+        assert.equal(expected.total, 1)
+        assert.equal(expected.items[0].id, aliceId)
+        for (const subject_id of variants) {
+          assert.notEqual(subject_id, id)
+          assert.deepEqual(await directory({ ...query, subject_id }), expected)
+        }
+      }
+    }
+    assert.equal((await directory()).total, ids.length)
+    assert.equal((await directory({ subject_id: foreignSubjectId.toUpperCase() })).total, 0)
+    assert.equal((await directory({ subject_id: 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA' })).total, 0)
+    assert.equal((await app.inject('/v1/scholars/directory?subject_id=not-a-uuid')).statusCode, 400)
   })
 
   test('initials, empty results and contextual counts remain consistent', async () => {

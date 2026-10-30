@@ -96,7 +96,7 @@ export const getScholarDirectory = async (
     searched AS MATERIALIZED (
       SELECT s.*,
         (${unit} = '' OR EXISTS (SELECT 1 FROM unit_members m WHERE m.scholar_id = s.id AND m.id = ${unit})) AS unit_match,
-        (${subject} = '' OR EXISTS (SELECT 1 FROM subject_members m WHERE m.scholar_id = s.id AND m.id::text = ${subject})) AS subject_match,
+        (${subject} = '' OR EXISTS (SELECT 1 FROM subject_members m WHERE m.scholar_id = s.id AND m.id = NULLIF(${subject}, '')::uuid)) AS subject_match,
         (${letter} = '' OR s.letter = ${letter}) AS letter_match
       FROM scoped s
       WHERE ${keyword} = '' OR s.name ILIKE ${pattern} OR s.title ILIKE ${pattern} OR s.bio ILIKE ${pattern}
