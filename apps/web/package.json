@@ -19,7 +19,7 @@
     "@vue-flow/core": "1.48.2",
     "dompurify": "^3.4.17",
     "marked": "^17.0.3",
-    "pdfjs-dist": "^5.5.207",
+    "pdfjs-dist": "5.5.207",
     "vue": "^3.5.42",
     "vue-i18n": "^11.4.14",
     "vue-router": "^4.2.0"
