@@ -99,6 +99,7 @@ const selectedMatch = ref(0)
 const readyPages = ref(new Set<number>())
 const pageText = new Map<number, TextContent>()
 let highlightedPage: number | null = null
+let navigationScrollTop: number | null = null
 
 // zoom: 100% = fit to container width
 const zoom = ref(100)
@@ -240,6 +241,7 @@ const resetDocument = (): void => {
   highlightedPage = null
   matches.value = []
   searchQuery.value = ''
+  navigationScrollTop = null
   if (loadingTask) void loadingTask.destroy().catch(() => undefined)
   loadingTask = null
   pdfDoc.value = null
@@ -424,6 +426,16 @@ const setupResizeObserver = (): void => {
 const updateCurrentPage = (): void => {
   const container = pagesRef.value
   if (!container) return
+  // Several short pages can share a clamped scroll position. Keep an explicit
+  // selection until vertical scrolling actually moves away from that position.
+  if (navigationScrollTop !== null && container.scrollTop === navigationScrollTop) return
+  navigationScrollTop = null
+  const maxScrollTop = container.scrollHeight - container.clientHeight
+  if (maxScrollTop <= 0) return
+  if (container.scrollTop > 0 && maxScrollTop - container.scrollTop <= 1) {
+    currentPage.value = totalPages.value
+    return
+  }
   const top = container.getBoundingClientRect().top + 32
   let nearest = currentPage.value
   let distance = Infinity
@@ -439,8 +451,10 @@ const goPage = (page: number): void => {
   if (page < 1 || page > totalPages.value) return
   currentPage.value = page
   void renderPage(page)
-  const el = pagesRef.value?.querySelector(`[data-page="${page}"]`)
-  el?.scrollIntoView({ block: 'start', inline: 'nearest' })
+  const container = pagesRef.value
+  const el = container?.querySelector(`[data-page="${page}"]`)
+  el?.scrollIntoView({ behavior: 'instant', block: 'start', inline: 'nearest' })
+  navigationScrollTop = el && container ? container.scrollTop : null
 }
 
 const changeZoom = (delta: number): void => {

@@ -81,6 +81,32 @@ const click = async (key: string): Promise<void> => {
   await settle()
 }
 
+const mockScrollLayout = (heights: number[], viewportHeight: number): HTMLElement => {
+  const container = document.querySelector<HTMLElement>('.pdf-pages')!
+  const offsets: number[] = []
+  let height = 16
+  heights.forEach(pageHeight => { offsets.push(height); height += pageHeight + 12 })
+  Object.defineProperties(container, {
+    clientHeight: { value: viewportHeight, configurable: true },
+    scrollHeight: { value: Math.max(viewportHeight, height + 16), configurable: true },
+  })
+  vi.spyOn(container, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 632, viewportHeight))
+  container.querySelectorAll<HTMLElement>('[data-page]').forEach((el, index) => {
+    vi.spyOn(el, 'getBoundingClientRect').mockImplementation(() => new DOMRect(16, offsets[index]! - container.scrollTop, 600, heights[index]!))
+  })
+  vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement): void {
+    const page = Number(this.closest<HTMLElement>('[data-page]')?.dataset.page)
+    if (page) container.scrollTop = Math.max(0, Math.min(offsets[page - 1]!, container.scrollHeight - container.clientHeight))
+  })
+  return container
+}
+
+const scrollPages = async (container: HTMLElement, top = container.scrollTop): Promise<void> => {
+  container.scrollTop = top
+  container.dispatchEvent(new Event('scroll'))
+  await settle()
+}
+
 beforeEach(() => {
   vi.resetAllMocks()
   fileId.value = 'file-1'
@@ -225,6 +251,102 @@ describe('PDF reader', () => {
     expect(doc.getPage.mock.calls.every(([page]) => page === 1 || page === 2)).toBe(true)
     await click('previousPage')
     expect(document.querySelector('.pdf-match-count')?.textContent).toBe('1 / 1')
+  })
+
+  it.each([800, 1200])('keeps a short final page selected and searchable after clamped navigation in a %i px viewport', async (viewportHeight: number) => {
+    mockDocument([['First page'], ['Final target']])
+    await mount()
+    const container = mockScrollLayout([800, 600], viewportHeight)
+    await click('nextPage')
+    await scrollPages(container)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('2 / 2')
+    await search('Final target')
+    expect(document.querySelector('[data-page="2"] .highlight.selected')?.textContent).toBe('Final target')
+    expect(document.querySelector('.pdf-match-count')?.textContent).toBe('1 / 1')
+    await click('previousPage')
+    await scrollPages(container)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('1 / 2')
+    expect(document.querySelectorAll('[data-page="2"] .highlight')).toHaveLength(0)
+  })
+
+  it.each([0, 0.5])('selects the final page when manually scrolled within %s px of the bottom', async (remaining: number) => {
+    mockDocument([['First page'], ['Final target']])
+    await mount()
+    const container = mockScrollLayout([800, 600], 800)
+    await scrollPages(container, container.scrollHeight - container.clientHeight - remaining)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('2 / 2')
+    await scrollPages(container, 100)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('1 / 2')
+  })
+
+  it('preserves explicit previous and next navigation among short pages sharing the same bottom position', async () => {
+    mockDocument([['First page'], ['Middle target'], ['Final target']])
+    await mount()
+    const container = mockScrollLayout([800, 100, 100], 800)
+    await click('nextPage')
+    const bottom = container.scrollTop
+    expect(bottom).toBe(container.scrollHeight - container.clientHeight)
+    await scrollPages(container)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('2 / 3')
+    await click('nextPage')
+    expect(container.scrollTop).toBe(bottom)
+    await scrollPages(container)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('3 / 3')
+    await click('previousPage')
+    await scrollPages(container)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('2 / 3')
+    await search('Middle target')
+    expect(document.querySelector('[data-page="2"] .highlight.selected')?.textContent).toBe('Middle target')
+    await scrollPages(container, 100)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('1 / 3')
+    await scrollPages(container, bottom)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('3 / 3')
+  })
+
+  it('preserves explicit page selection when the entire document fits without vertical scrolling', async () => {
+    mockDocument([['First page'], ['Final target']])
+    await mount()
+    const container = mockScrollLayout([200, 200], 800)
+    await scrollPages(container)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('1 / 2')
+    await click('nextPage')
+    container.scrollLeft = 20
+    await scrollPages(container)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('2 / 2')
+    await click('previousPage')
+    await scrollPages(container)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('1 / 2')
+  })
+
+  it('keeps the final page searchable after zooming out changes the clamped position', async () => {
+    vi.useFakeTimers()
+    mockDocument([['First page'], ['Final target']])
+    await mount()
+    const container = mockScrollLayout([800, 600], 800)
+    await click('nextPage')
+    await search('Final target')
+    await click('zoomOut')
+    mockScrollLayout([640, 480], 800)
+    await vi.advanceTimersByTimeAsync(200)
+    await scrollPages(container)
+    expect(document.querySelector('.pdf-scale-info')?.textContent).toBe('80%')
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('2 / 2')
+    expect(document.querySelector('[data-page="2"] .highlight.selected')?.textContent).toBe('Final target')
+    expect(document.querySelector('.pdf-match-count')?.textContent).toBe('1 / 1')
+  })
+
+  it('clears the explicit navigation position when switching documents', async () => {
+    mockDocument([['First page'], ['Final target']])
+    await mount()
+    const previousContainer = mockScrollLayout([800, 600], 800)
+    await click('nextPage')
+    const previousBottom = previousContainer.scrollTop
+    fileId.value = 'file-2'
+    await settle()
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('1 / 2')
+    const container = mockScrollLayout([800, 600], 800)
+    await scrollPages(container, previousBottom)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('2 / 2')
   })
 
   it('matches Latin and CJK phrases across separate empty line-break items', async () => {
