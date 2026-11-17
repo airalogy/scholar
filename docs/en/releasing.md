@@ -4,9 +4,24 @@ English | [简体中文](../zh/releasing.md)
 
 Scholar is released as one product made up of independently running Web, API, migration, and optional PostgreSQL services. A release must bind these components to one tested product version and immutable image digests.
 
+## Daily updates versus releases
+
+Maintainers with write access normally update `main` directly after confirming the change scope and receiving authorization to commit and push. Feature size or complexity does not determine the route; use a pull request for external contributions, explicitly requested reviews, or collaboration that requires another person's review. This policy grants no new repository access.
+
+Use the following sequence for daily updates:
+
+1. Check the remote `main`, preserve existing local work, and list and confirm the files in scope. Stop and report conflicts, failed checks, or scope changes.
+2. Complete full local validation, regenerate the source manifest when needed, and then commit and push by fast-forward only. Do not skip the pre-push hook, force-push, or delete the branch. The default hook alone does not prove that all database checks ran; see the isolated database requirements below.
+3. Wait for and verify the complete main-branch CI run for that exact commit, including code, database, source-snapshot, and Docker checks. Do not substitute a previous commit's result. If a newer push cancels the run, validate the new target commit.
+4. The code update is verified only after all checks pass. Versioning, tagging, release, and deployment still require their corresponding explicit authorization, and the existing pre-deployment backup procedure remains mandatory.
+
+The repository no longer requires a pull request or successful remote checks before writing to `main`. Full CI remains a post-push check, and Release still independently runs all validation. The branch can therefore temporarily contain an unverified or failing commit; pending, failed, cancelled, or unknown results must block release tags, releases, and deployment. Removing the PR requirement alone does not remove the previous status-check prerequisite: repository settings must match this policy. It does not mean deleting workflows or reducing checks.
+
+Keep linear history and disable force pushes and branch deletion. Release tags must remain protected against movement and deletion. Do not relax other security settings as part of this policy. When using a PR, verify its complete checks and resolve review discussions before merging. One approval may cover a clearly listed sequence but never unlisted actions; account bindings, canonical identifiers, permissions, and data changes still need explicit scope approval and validation. Pushing code does not authorize production data operations.
+
 ## Release requirements
 
-- Use a clean `main` commit with all required checks passing.
+- Use a clean `main` commit whose complete CI run has passed. Being on `main` or having a green result for a different commit is insufficient.
 - Sign off commits with `git commit -s` to certify the Developer Certificate of Origin.
 - Keep `VERSION`, package versions, and the English and Chinese changelogs aligned.
 - Review database migrations, compatibility notes, storage requirements, and rollback conditions.
@@ -40,7 +55,7 @@ CI verifies both an empty database and an upgrade fixture containing existing in
 ## Create a release
 
 1. Set the final version and date in `VERSION`, package metadata, `CHANGELOG.md`, and `CHANGELOG.zh-CN.md`.
-2. Run `pnpm release:check` on the clean release commit.
+2. Push the final version commit, wait for and verify its complete main-branch CI run, and then run `pnpm release:check` on the clean release commit. This command validates local version, tag, and worktree metadata; it does not query or replace remote CI.
 3. Create an annotated `vX.Y.Z` tag that exactly matches `VERSION`.
 4. Push the tag and wait for the Release workflow to complete.
 
@@ -69,5 +84,5 @@ Release tags are immutable. If a published release is defective, fix the issue o
 - Confirm the GitHub Release is published and contains the deployment archive, checksum, JSON manifest, and environment manifest.
 - Confirm `ghcr.io/airalogy/scholar-api:X.Y.Z` and `ghcr.io/airalogy/scholar-web:X.Y.Z` are publicly readable and match the recorded digests.
 - Install the release into an empty environment and verify `/healthz`, `/api/version`, `/docs/en/`, `/docs/zh/`, and `/api/docs/json`.
-- Keep `main` protected by required checks, review, linear history, and disabled force pushes and deletions.
+- Keep complete post-push CI, linear history, and disabled force pushes and deletions on `main`; PRs are no longer mandatory for daily maintainer updates. Release tags must remain protected against movement and deletion.
 - Keep Dependabot alerts, secret scanning, push protection, and private vulnerability reporting enabled.
