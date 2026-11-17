@@ -4,6 +4,26 @@ Chinese version: [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)
 
 ## [Unreleased]
 
+## [5.2.0] - 2026-11-17
+
+### Changed
+
+- Unified the sidebar under Paper Library, with Publications and Degree Theses sections, accessible search/filter controls, URL-restorable filters and pagination, retry/empty states and responsive layouts. Existing thesis submission, personal workspace and detail routes remain available. Historical thesis bibliography records remain in Publications; records are not automatically moved or merged.
+- Single-institution administration now groups existing tools into a workspace while preserving their permission checks. Scholar discovery supports search, alphabetic browsing and institution-configured organization structures rather than assuming a fixed college/department hierarchy.
+- Improved PDF reader compatibility, text selection, zoom and current-page search with regression coverage; AI citation-to-PDF positioning is not introduced in this release.
+- Clarified bilingual user-facing review guidance: local permission maintenance, SSO boundaries, route configuration and publication scope, and the recommended library final-review step. Existing routes and grants are not changed automatically.
+- Improved Docker release builds with parallel architecture jobs and reusable build caches, retaining complete checks, immutable release artifacts and deployment backup requirements. Authorized maintainer updates can use fast-forward main pushes; publishing still requires the exact commit's complete CI to pass.
+
+### Fixed
+
+- Corrected case-sensitive academic-subject filtering in the scholar directory, and updated compatible dependency patches and development tooling without a major-version upgrade.
+- Prevented stale list responses from replacing a newer search and preserved applied filters during pagination.
+
+### Database and Deployment
+
+- No new database migrations relative to 5.1.0. Preserve existing data, account bindings, primary identifier selection and permissions. Library navigation changes do not alter review, confidentiality or file-access rules.
+- Release publication does not deploy to an existing installation. A later deployment must separately back up persistent data and upgrade the matching API/Web images together.
+
 ## [5.1.0] - 2026-10-27
 
 ### Added

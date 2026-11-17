@@ -1,5 +1,7 @@
 <template>
   <div class="workspace-page">
+    <PaperLibraryNavigation active="theses" />
+    <router-link to="/theses" class="library-back-link">← {{ $t('degreeTheses.backToList') }}</router-link>
     <header class="workspace-header">
       <div>
         <h1>{{ $t('degreeTheses.myTheses') }}</h1>
@@ -56,6 +58,7 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import PaperLibraryNavigation from '@/components/PaperLibraryNavigation.vue'
 import { Message } from '@arco-design/web-vue'
 import { useI18n } from 'vue-i18n'
 import {
@@ -111,6 +114,7 @@ onMounted(load)
 </script>
 
 <style scoped>
+.library-back-link { display: inline-flex; align-items: center; min-height: 44px; margin-bottom: 16px; color: var(--scholar-primary); text-decoration: none; }
 .workspace-page { max-width: 1080px; margin: 0 auto; padding: 44px 36px 80px; }
 .workspace-header { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; margin-bottom: 28px; }
 .workspace-header h1 { margin: 0 0 8px; font-size: 32px; }

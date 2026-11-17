@@ -14,6 +14,14 @@ const routeByName = (name: string): RouteRecordRaw => {
 
 describe('public route policies', () => {
   it.each([
+    ['Theses', '/theses'], ['ThesisSubmit', '/theses/submit'], ['MyTheses', '/theses/mine'],
+    ['ThesisEdit', '/theses/:id/edit'], ['ThesisDetail', '/theses/:id'],
+  ])('retains the existing %s route and thesis feature gate after navigation consolidation', (name, path) => {
+    expect(routeByName(name!).path).toBe(path)
+    expect(routeByName(name!).meta?.featureKey).toBe('degreeTheses')
+  })
+
+  it.each([
     'Papers',
     'InstitutionPapers',
     'InstitutionCollegePapers',

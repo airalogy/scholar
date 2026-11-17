@@ -47,18 +47,6 @@
           <span>{{ $t('nav.scholars') }}</span>
         </router-link>
 
-        <router-link
-          v-if="showDegreeTheses"
-          to="/theses"
-          class="nav-item"
-          :class="{ 'nav-item--active': isThesisRouteActive() }"
-        >
-          <span class="nav-item-icon">
-            <IconFile class="nav-icon-font" />
-          </span>
-          <span>{{ $t('nav.theses') }}</span>
-        </router-link>
-
         <div class="nav-expandable">
           <button
             class="nav-item"
@@ -140,7 +128,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
-import { IconBook, IconDown, IconEdit, IconFile, IconSettings, IconUser } from '@arco-design/web-vue/es/icon'
+import { IconBook, IconDown, IconEdit, IconSettings, IconUser } from '@arco-design/web-vue/es/icon'
 import UploadIcon from '@/assets/icons/upload.svg?component'
 import UploadActiveIcon from '@/assets/icons/upload-active.svg?component'
 import AiChatIcon from '@/assets/icons/ai-chat-2.svg?component'
@@ -201,13 +189,8 @@ const isPaperRouteActive = (): boolean => {
     'LabPapers',
     'ScholarPapers',
     'PaperDetail',
-  ].includes(String(route.name ?? ''))
-}
-
-const isThesisRouteActive = (): boolean => {
-  return ['Theses', 'ThesisSubmit', 'MyTheses', 'ThesisEdit', 'ThesisDetail'].includes(
-    String(route.name ?? ''),
-  )
+  ].includes(String(route.name ?? '')) || (props.showDegreeTheses === true &&
+    ['Theses', 'ThesisSubmit', 'MyTheses', 'ThesisEdit', 'ThesisDetail'].includes(String(route.name ?? '')))
 }
 </script>
 

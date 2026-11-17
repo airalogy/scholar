@@ -1,11 +1,13 @@
 <template>
   <div class="papers-page">
     <div class="papers-container">
+      <PaperLibraryNavigation v-if="isLibraryHome" active="publications" />
       <section class="papers-hero">
         <div class="papers-hero-copy">
-          <div class="papers-eyebrow">{{ $t('papersPage.eyebrow') }}</div>
+          <div v-if="!isLibraryHome" class="papers-eyebrow">{{ $t('papersPage.eyebrow') }}</div>
           <h1 class="papers-title">{{ pageTitle }}</h1>
           <p class="papers-subtitle">{{ pageSubtitle }}</p>
+          <p v-if="isLibraryHome && features.degreeTheses" class="papers-subtitle library-scope-note">{{ $t('paperLibrary.publicationsScope') }}</p>
         </div>
 
         <div v-if="scopeChips.length" class="scope-chip-list">
@@ -17,6 +19,7 @@
             v-model="queryText"
             class="papers-search-input"
             :placeholder="$t('papersPage.searchPlaceholder')"
+            :aria-label="$t('papersPage.searchPlaceholder')"
             allow-clear
             @press-enter="applyFilters"
           />
@@ -25,11 +28,19 @@
           </a-button>
         </div>
 
-        <div class="papers-filter-grid">
+        <div class="filter-toolbar">
+          <button type="button" class="filter-toggle" :aria-expanded="filtersExpanded" aria-controls="publication-filters" @click="filtersExpanded = !filtersExpanded">
+            {{ $t('paperLibrary.filters') }}<span v-if="filterCount"> ({{ filterCount }})</span>
+            <span aria-hidden="true">{{ filtersExpanded ? ' −' : ' +' }}</span>
+          </button>
+          <a-button class="papers-filter-reset" @click="resetFilters">{{ $t('papersPage.resetFilters') }}</a-button>
+        </div>
+        <div v-show="filtersExpanded" id="publication-filters" class="papers-filter-grid">
           <a-select
             v-model="selectedAuthorId"
             class="papers-filter-control"
             :placeholder="$t('papersPage.authorFilterPlaceholder')"
+            :aria-label="$t('papersPage.authorFilterPlaceholder')"
             allow-clear
             allow-search
             :filter-option="false"
@@ -45,6 +56,7 @@
             v-model="selectedPaperType"
             class="papers-filter-control"
             :placeholder="$t('papersPage.paperTypePlaceholder')"
+            :aria-label="$t('papersPage.paperTypePlaceholder')"
             allow-clear
           >
             <a-option v-for="item in paperTypeOptions" :key="item.value" :value="item.value">
@@ -52,7 +64,7 @@
             </a-option>
           </a-select>
 
-          <a-select v-model="selectedSort" class="papers-filter-control" :placeholder="$t('papersPage.sortPlaceholder')">
+          <a-select v-model="selectedSort" class="papers-filter-control" :placeholder="$t('papersPage.sortPlaceholder')" :aria-label="$t('papersPage.sortPlaceholder')">
             <a-option value="latest">{{ $t('papersPage.sort.latest') }}</a-option>
             <a-option value="citations">{{ $t('papersPage.sort.citations') }}</a-option>
             <a-option value="relevance">{{ $t('papersPage.sort.relevance') }}</a-option>
@@ -64,6 +76,7 @@
             :min="1900"
             :max="2100"
             :placeholder="$t('papersPage.yearFromPlaceholder')"
+            :aria-label="$t('papersPage.yearFromPlaceholder')"
             hide-button
           />
 
@@ -73,11 +86,12 @@
             :min="1900"
             :max="2100"
             :placeholder="$t('papersPage.yearToPlaceholder')"
+            :aria-label="$t('papersPage.yearToPlaceholder')"
             hide-button
           />
 
-          <a-button class="papers-filter-reset" @click="resetFilters">
-            {{ $t('papersPage.resetFilters') }}
+          <a-button class="papers-filter-reset" @click="applyFilters">
+            {{ $t('paperLibrary.applyFilters') }}
           </a-button>
         </div>
       </section>
@@ -119,13 +133,19 @@
         </div>
       </section>
 
-      <div class="papers-meta">
-        {{ $t('papersPage.totalResults', { count: total }) }}
+      <div class="papers-meta" role="status" aria-live="polite">
+        {{ isLoading ? $t('common.loading') : $t('papersPage.totalResults', { count: total }) }}
       </div>
 
       <div v-if="isLoading" class="papers-state">{{ $t('common.loading') }}</div>
-      <div v-else-if="loadError" class="papers-state">{{ loadError }}</div>
-      <div v-else-if="!papers.length" class="papers-state">{{ $t('papersPage.empty') }}</div>
+      <div v-else-if="loadError" class="papers-state" role="alert">
+        <p>{{ loadError }}</p>
+        <a-button @click="loadPapers">{{ $t('paperLibrary.retry') }}</a-button>
+      </div>
+      <div v-else-if="!papers.length" class="papers-state">
+        <p>{{ $t('papersPage.empty') }}</p>
+        <a-button @click="resetFilters">{{ $t('papersPage.resetFilters') }}</a-button>
+      </div>
 
       <div v-else class="papers-list">
         <article v-for="paper in papers" :key="paper.id" class="paper-shell">
@@ -166,7 +186,7 @@
         </article>
       </div>
 
-      <div class="papers-pagination">
+      <div v-if="!isLoading && !loadError && total > pageSize" class="papers-pagination">
         <a-pagination
           :total="total"
           :current="page"
@@ -180,12 +200,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { Message } from '@arco-design/web-vue'
 import { IconBookmark } from '@arco-design/web-vue/es/icon'
 import { useI18n } from 'vue-i18n'
 import PaperInfoCard, { type PaperInfo } from '@/components/PaperInfoCard.vue'
+import PaperLibraryNavigation from '@/components/PaperLibraryNavigation.vue'
+import { usePublicConfig } from '@/composables/usePublicConfig'
 import {
   listPapers,
   type ListPapersParams,
@@ -205,6 +227,9 @@ import { hasPublishYear } from '@/utils/papers'
 
 const pageSize = 10
 const route = useRoute()
+const router = useRouter()
+const { features } = usePublicConfig()
+const isLibraryHome = computed(() => ['Papers', 'InstitutionPapers'].includes(String(route.name)))
 const { t, locale } = useI18n()
 const { isLoggedIn, token } = useAuth()
 
@@ -230,6 +255,8 @@ const selectedPaperType = ref<number | undefined>(undefined)
 const selectedSort = ref<'latest' | 'citations' | 'relevance'>('latest')
 const yearFrom = ref<number | undefined>(undefined)
 const yearTo = ref<number | undefined>(undefined)
+const filtersExpanded = ref(false)
+const filterCount = computed(() => [selectedAuthorId.value, selectedPaperType.value, yearFrom.value, yearTo.value].filter((value) => value !== undefined && value !== '').length)
 
 const pageScope = ref<PageScope>({ kind: 'default' })
 const currentInstitutionSlug = ref('')
@@ -243,6 +270,7 @@ const paperTypeOptions = computed(() => {
 })
 
 const pageTitle = computed(() => {
+  if (isLibraryHome.value && features.value.degreeTheses) return t('paperLibrary.publications')
   if (pageScope.value.kind === 'institution') {
     return t('papersPage.scopeTitles.institution', { name: pageScope.value.name })
   }
@@ -386,43 +414,62 @@ const resetFilters = (): void => {
   yearFrom.value = undefined
   yearTo.value = undefined
   page.value = 1
-  void loadPapers()
+  void updateSearchRoute()
 }
 
 const applyFilters = (): void => {
   page.value = 1
-  void loadPapers()
+  void updateSearchRoute()
 }
 
 const onPageChange = (next: number): void => {
-  page.value = next
-  void loadPapers()
+  void router.push({ path: route.path, query: { ...route.query, page: next > 1 ? String(next) : undefined } })
 }
 
+const updateSearchRoute = async (): Promise<void> => {
+  const query = {
+    q: queryText.value.trim() || undefined,
+    author: selectedAuthorId.value || undefined,
+    type: selectedPaperType.value === undefined ? undefined : String(selectedPaperType.value),
+    sort: selectedSort.value,
+    from: yearFrom.value === undefined ? undefined : String(yearFrom.value),
+    to: yearTo.value === undefined ? undefined : String(yearTo.value),
+    page: page.value > 1 ? String(page.value) : undefined,
+  }
+  const target = { path: route.path, query }
+  if (router.resolve(target).fullPath === route.fullPath) await loadPapers()
+  else await router.push(target)
+}
+
+let authorRequestId = 0
 const handleAuthorSearch = async (keyword: string): Promise<void> => {
+  const currentRequest = ++authorRequestId
   isAuthorLoading.value = true
   try {
     const response = await searchAuthors(keyword.trim() || undefined, 20, 0)
-    authorOptions.value = response.items
+    if (currentRequest === authorRequestId) authorOptions.value = response.items
   } catch {
-    authorOptions.value = []
+    if (currentRequest === authorRequestId) authorOptions.value = []
   } finally {
-    isAuthorLoading.value = false
+    if (currentRequest === authorRequestId) isAuthorLoading.value = false
   }
 }
 
-const buildPresetParams = async (): Promise<Partial<ListPapersParams>> => {
+const buildPresetParams = async (currentRequest: number): Promise<Partial<ListPapersParams>> => {
+  const routeName = route.name
+  const routeParams = { ...route.params }
   currentInstitutionSlug.value = ''
   currentInstitution.value = null
   pageScope.value = { kind: 'default' }
 
-  if (route.name === 'InstitutionPapers' || route.name === 'InstitutionCollegePapers') {
-    const institution = await getInstitution(String(route.params.slug ?? ''))
+  if (routeName === 'InstitutionPapers' || routeName === 'InstitutionCollegePapers') {
+    const institution = await getInstitution(String(routeParams.slug ?? ''))
+    if (currentRequest !== requestId) return {}
     currentInstitution.value = institution
     currentInstitutionSlug.value = institution.slug
 
-    const college = route.name === 'InstitutionCollegePapers'
-      ? String(route.params.collegeSlug ?? '').trim()
+    const college = routeName === 'InstitutionCollegePapers'
+      ? String(routeParams.collegeSlug ?? '').trim()
       : ''
 
     pageScope.value = college
@@ -435,16 +482,18 @@ const buildPresetParams = async (): Promise<Partial<ListPapersParams>> => {
     }
   }
 
-  if (route.name === 'LabPapers') {
-    const lab = await getLab(String(route.params.slug ?? ''))
+  if (routeName === 'LabPapers') {
+    const lab = await getLab(String(routeParams.slug ?? ''))
+    if (currentRequest !== requestId) return {}
     pageScope.value = { kind: 'lab', name: lab.name }
     return {
       lab_id: lab.id,
     }
   }
 
-  if (route.name === 'ScholarPapers') {
-    const scholar = await getScholar(String(route.params.id ?? ''))
+  if (routeName === 'ScholarPapers') {
+    const scholar = await getScholar(String(routeParams.id ?? ''))
+    if (currentRequest !== requestId) return {}
     pageScope.value = { kind: 'scholar', name: scholar.name }
     return {
       scholar_id: scholar.id,
@@ -454,12 +503,19 @@ const buildPresetParams = async (): Promise<Partial<ListPapersParams>> => {
   return {}
 }
 
+let requestId = 0
+onBeforeUnmount(() => {
+  requestId++
+  authorRequestId++
+})
 const loadPapers = async (): Promise<void> => {
+  const currentRequest = ++requestId
   isLoading.value = true
   loadError.value = ''
 
   try {
-    const presetParams = await buildPresetParams()
+    const presetParams = await buildPresetParams(currentRequest)
+    if (currentRequest !== requestId) return
     const params: ListPapersParams = {
       ...presetParams,
       q: queryText.value.trim() || undefined,
@@ -478,16 +534,18 @@ const loadPapers = async (): Promise<void> => {
         ? listBookmarks(100, 0, false).catch(() => ({ items: [], total: 0 }))
         : Promise.resolve({ items: [], total: 0 }),
     ])
+    if (currentRequest !== requestId) return
 
     papers.value = paperResponse.items
     total.value = paperResponse.total
     bookmarkSet.value = new Set(bookmarkResponse.items.map((item) => item.paperId))
   } catch (error) {
+    if (currentRequest !== requestId) return
     papers.value = []
     total.value = 0
     loadError.value = getErrorMessage(error, t('papersPage.listLoadFailed'))
   } finally {
-    isLoading.value = false
+    if (currentRequest === requestId) isLoading.value = false
   }
 }
 
@@ -543,13 +601,20 @@ watch(token, (nextToken, previousToken) => {
 watch(
   () => route.fullPath,
   () => {
-    page.value = 1
+    if (!['Papers', 'InstitutionPapers', 'InstitutionCollegePapers', 'LabPapers', 'ScholarPapers'].includes(String(route.name))) return
+    const numberQuery = (key: string, min: number, max: number): number | undefined => {
+      const value = typeof route.query[key] === 'string' && route.query[key].trim() ? Number(route.query[key]) : NaN
+      return Number.isInteger(value) && value >= min && value <= max ? value : undefined
+    }
+    page.value = numberQuery('page', 1, 100000) ?? 1
     queryText.value = typeof route.query.q === 'string' ? route.query.q : ''
-    selectedAuthorId.value = ''
-    selectedPaperType.value = undefined
-    selectedSort.value = queryText.value.trim() ? 'relevance' : 'latest'
-    yearFrom.value = undefined
-    yearTo.value = undefined
+    selectedAuthorId.value = typeof route.query.author === 'string' ? route.query.author : ''
+    selectedPaperType.value = numberQuery('type', 0, 5)
+    selectedSort.value = route.query.sort === 'citations' || route.query.sort === 'latest' || route.query.sort === 'relevance'
+      ? route.query.sort : queryText.value.trim() ? 'relevance' : 'latest'
+    yearFrom.value = numberQuery('from', 1900, 2100)
+    yearTo.value = numberQuery('to', 1900, 2100)
+    if (filterCount.value) filtersExpanded.value = true
     void Promise.all([
       loadPapers(),
       handleAuthorSearch(''),
@@ -562,30 +627,26 @@ watch(
 <style lang="sass" scoped>
 .papers-page
   padding: 26px 0 48px
-  background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%)
 
 .papers-container
   width: 1120px
   max-width: 100%
   margin: 0 auto
-  padding: 0 30px
+  box-sizing: border-box
+  padding: 0 24px
 
 .papers-hero
-  padding: 28px 30px
-  border-radius: 28px
-  background: linear-gradient(135deg, #0f2f57 0%, #14599a 55%, #dcecff 180%)
-  color: #fff
-  box-shadow: 0 18px 46px rgba(15, 47, 87, 0.14)
+  color: var(--scholar-text-primary)
 
 .papers-eyebrow
   font-size: 12px
   letter-spacing: 0.22em
   text-transform: uppercase
-  color: rgba(255, 255, 255, 0.72)
+  color: var(--scholar-text-secondary)
 
 .papers-title
-  margin: 12px 0 0
-  font-size: 34px
+  margin: 0
+  font-size: 30px
   font-weight: 700
   line-height: 1.18
 
@@ -594,7 +655,7 @@ watch(
   margin: 12px 0 0
   font-size: 14px
   line-height: 1.7
-  color: rgba(255, 255, 255, 0.82)
+  color: var(--scholar-text-secondary)
 
 .scope-chip-list
   display: flex
@@ -605,8 +666,8 @@ watch(
 .scope-chip
   padding: 7px 12px
   border-radius: 999px
-  background: rgba(255, 255, 255, 0.14)
-  color: #fff
+  background: var(--scholar-primary-light)
+  color: var(--scholar-primary)
   font-size: 12px
 
 .papers-search-row
@@ -617,11 +678,31 @@ watch(
 
 .papers-search-input
   flex: 1
+  min-width: 0
 
 .papers-search-input :deep(.arco-input-wrapper)
   min-height: 48px
   border-radius: 14px
-  border: none
+  border: 1px solid var(--scholar-border-input)
+
+.filter-toolbar
+  display: flex
+  align-items: center
+  justify-content: space-between
+  margin-top: 12px
+
+.filter-toggle
+  min-height: 44px
+  padding: 0
+  border: 0
+  background: transparent
+  color: var(--scholar-primary)
+  cursor: pointer
+  font: inherit
+
+.filter-toggle:focus-visible, .browse-chip:focus-visible, .paper-bookmark:focus-visible
+  outline: 2px solid var(--scholar-primary)
+  outline-offset: 3px
 
 .papers-search-btn
   min-width: 90px
@@ -653,10 +734,9 @@ watch(
 .browse-section
   margin-top: 22px
   padding: 22px 24px
-  border-radius: 24px
+  border-radius: 12px
   background: #fff
   border: 1px solid rgba(15, 47, 87, 0.08)
-  box-shadow: 0 14px 34px rgba(15, 47, 87, 0.06)
 
 .section-head
   display: flex
@@ -717,10 +797,9 @@ watch(
 
 .paper-shell
   padding: 18px
-  border-radius: 22px
+  border-radius: 12px
   background: #fff
   border: 1px solid rgba(15, 47, 87, 0.08)
-  box-shadow: 0 14px 34px rgba(15, 47, 87, 0.06)
 
 .paper-shell-head
   display: flex
@@ -750,8 +829,8 @@ watch(
   text-decoration: none
 
 .paper-bookmark
-  width: 36px
-  height: 36px
+  min-width: 44px
+  height: 44px
   border-radius: 50%
   border: 1px solid rgba(15, 47, 87, 0.1)
   background: #fff
@@ -787,6 +866,8 @@ watch(
 .papers-state, .section-state
   min-height: 160px
   display: flex
+  flex-direction: column
+  gap: 12px
   align-items: center
   justify-content: center
   color: #667085
@@ -805,9 +886,6 @@ watch(
   .papers-container
     padding: 0 18px
 
-  .papers-hero
-    padding: 22px 18px
-
   .papers-title
     font-size: 28px
 
@@ -818,6 +896,9 @@ watch(
     flex-direction: column
 
   .papers-search-btn
+    width: 100%
+
+  .papers-search-input
     width: 100%
 
   .papers-filter-grid
