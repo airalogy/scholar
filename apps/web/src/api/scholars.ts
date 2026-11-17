@@ -1,6 +1,57 @@
 import { apiClient } from './client'
 import { isDevAuthBypassEnabled } from '@/utils/devAuth'
 
+export interface ScholarDirectoryItem {
+  id: string
+  name: string
+  avatar: string | null
+  title: string | null
+  units: Array<{ id: string; name: string }>
+  research: string[]
+  summary: string
+  letter: string
+}
+
+export interface ScholarDirectoryUnit {
+  id: string
+  name: string
+  kind: 'college' | 'department' | 'unit'
+  parentId: string | null
+  count: number
+}
+
+export interface ScholarDirectoryData {
+  items: ScholarDirectoryItem[]
+  total: number
+  page: number
+  limit: number
+  nameOrder: 'pinyin' | 'unicode'
+  facets: {
+    units: ScholarDirectoryUnit[]
+    subjects: ScholarSubjectFacet[]
+    letters: Array<{ letter: string; count: number }>
+  }
+}
+
+export interface ScholarDirectoryQuery {
+  q?: string
+  unit?: string
+  subject_id?: string
+  letter?: string
+  sort?: 'relevance' | 'name'
+  institution_slug?: string
+  page?: number
+  limit?: number
+}
+
+export const getScholarDirectory = async (
+  params: ScholarDirectoryQuery,
+  signal?: AbortSignal,
+): Promise<ScholarDirectoryData> => {
+  const response = await apiClient.get<{ code: 0; data: ScholarDirectoryData }>('/v1/scholars/directory', { params, signal })
+  return response.data.data
+}
+
 export interface ResearchDirection {
   name: string
   description: string

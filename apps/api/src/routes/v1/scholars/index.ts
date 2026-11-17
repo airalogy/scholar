@@ -17,8 +17,23 @@ import {
   startTimelineGeneration,
 } from './service'
 import { getScholarFacets } from './service.facets'
+import { ScholarDirectoryQuerySchema, ScholarDirectoryResponseSchema } from './schema.directory'
+import { getScholarDirectory } from './service.directory'
 
 const scholarTimelineRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
+  fastify.get(
+    '/directory',
+    {
+      config: { publicRoute: true, publicContentRoute: true },
+      schema: {
+        tags: ['scholars-v1'],
+        querystring: ScholarDirectoryQuerySchema,
+        response: { 200: ScholarDirectoryResponseSchema },
+      },
+    },
+    async (request) => getScholarDirectory(fastify, request.query),
+  )
+
   fastify.get(
     '/facets',
     {
