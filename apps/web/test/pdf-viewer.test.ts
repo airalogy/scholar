@@ -5,12 +5,33 @@ import i18n from '@/i18n'
 import PdfViewer from '@/components/PdfViewer.vue'
 import { FILE_REQUEST_TIMEOUT_MS, loadPdfSource } from '@/api/files'
 import { getDocument } from 'pdfjs-dist'
+import type { TextContent } from 'pdfjs-dist/types/src/display/api'
+
+const textLayerMocks = vi.hoisted(() => ({ cancel: vi.fn(), finish: vi.fn() }))
 
 vi.mock('@/api/files', () => ({ FILE_REQUEST_TIMEOUT_MS: 180_000, loadPdfSource: vi.fn() }))
 vi.mock('pdfjs-dist', () => ({
   GlobalWorkerOptions: {},
   getDocument: vi.fn(),
-  TextLayer: class { render = async (): Promise<void> => {}; cancel = (): void => {} },
+  TextLayer: class {
+    textDivs: HTMLElement[] = []
+    content: TextContent
+    container: HTMLElement
+    constructor ({ textContentSource, container }: { textContentSource: TextContent; container: HTMLElement }) {
+      this.content = textContentSource
+      this.container = container
+    }
+    render = async (): Promise<void> => {
+      this.textDivs = this.content.items.map(item => {
+        const span = document.createElement('span')
+        span.textContent = 'str' in item ? item.str : ''
+        this.container.append(span)
+        return span
+      })
+      await textLayerMocks.finish()
+    }
+    cancel = textLayerMocks.cancel
+  },
 }))
 
 let app: App | undefined
@@ -25,6 +46,67 @@ const mount = async (): Promise<void> => {
   await settle()
 }
 
+const mockDocument = (texts: string[][] = [['Scholar beta SCHOLAR']], count = texts.length, lineBreaks: number[] = []): {
+  getPage: ReturnType<typeof vi.fn>
+  render: ReturnType<typeof vi.fn>
+  cancel: ReturnType<typeof vi.fn>
+  destroy: ReturnType<typeof vi.fn>
+} => {
+  const cancel = vi.fn()
+  const render = vi.fn(() => ({ promise: Promise.resolve(), cancel }))
+  const getPage = vi.fn(async (page: number) => ({
+    getViewport: ({ scale }: { scale: number }): { width: number; height: number; scale: number; userUnit: number } => ({
+      width: (page === 2 ? 800 : 600) * scale, height: (page === 2 ? 600 : 800) * scale, scale, userUnit: 1,
+    }),
+    render,
+    getTextContent: async (): Promise<TextContent> => ({
+      items: (texts[page - 1] ?? []).map((str, index) => ({ str, dir: 'ltr', transform: [], width: 10, height: 10, fontName: 'test', hasEOL: lineBreaks.includes(index) })),
+      styles: {}, lang: null,
+    }),
+  }))
+  const destroy = vi.fn(async (): Promise<void> => {})
+  vi.mocked(loadPdfSource).mockResolvedValue({ data: new Uint8Array([37, 80, 68, 70]) })
+  vi.mocked(getDocument).mockReturnValue({ promise: Promise.resolve({ numPages: count, getPage }), destroy } as never)
+  return { getPage, render, cancel, destroy }
+}
+
+const search = async (text: string): Promise<void> => {
+  const input = document.querySelector<HTMLInputElement>('input[type="search"]')!
+  input.value = text
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  await settle()
+}
+const click = async (key: string): Promise<void> => {
+  document.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.global.t(`pdfViewer.${key}`)}"]`)!.click()
+  await settle()
+}
+
+const mockScrollLayout = (heights: number[], viewportHeight: number): HTMLElement => {
+  const container = document.querySelector<HTMLElement>('.pdf-pages')!
+  const offsets: number[] = []
+  let height = 16
+  heights.forEach(pageHeight => { offsets.push(height); height += pageHeight + 12 })
+  Object.defineProperties(container, {
+    clientHeight: { value: viewportHeight, configurable: true },
+    scrollHeight: { value: Math.max(viewportHeight, height + 16), configurable: true },
+  })
+  vi.spyOn(container, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 632, viewportHeight))
+  container.querySelectorAll<HTMLElement>('[data-page]').forEach((el, index) => {
+    vi.spyOn(el, 'getBoundingClientRect').mockImplementation(() => new DOMRect(16, offsets[index]! - container.scrollTop, 600, heights[index]!))
+  })
+  vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement): void {
+    const page = Number(this.closest<HTMLElement>('[data-page]')?.dataset.page)
+    if (page) container.scrollTop = Math.max(0, Math.min(offsets[page - 1]!, container.scrollHeight - container.clientHeight))
+  })
+  return container
+}
+
+const scrollPages = async (container: HTMLElement, top = container.scrollTop): Promise<void> => {
+  container.scrollTop = top
+  container.dispatchEvent(new Event('scroll'))
+  await settle()
+}
+
 beforeEach(() => {
   vi.resetAllMocks()
   fileId.value = 'file-1'
@@ -35,6 +117,7 @@ beforeEach(() => {
     observe = vi.fn(); disconnect = vi.fn()
   })
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({} as never)
+  HTMLElement.prototype.scrollIntoView = vi.fn()
 })
 afterEach(() => {
   app?.unmount(); app = undefined
@@ -58,7 +141,7 @@ describe('PDF reader', () => {
   it('renders a first page from authenticated bytes and destroys the document on close', async () => {
     vi.useFakeTimers()
     const render = vi.fn(() => ({ promise: Promise.resolve(), cancel: vi.fn() }))
-    const page = { getViewport: ({ scale }: { scale: number }) => ({ width: 600 * scale, height: 800 * scale }), render, getTextContent: async () => ({ items: [] }) }
+    const page = { getViewport: ({ scale }: { scale: number }) => ({ width: 600 * scale, height: 800 * scale, scale, userUnit: 1 }), render, getTextContent: async () => ({ items: [] }) }
     const destroy = vi.fn(async () => {})
     vi.mocked(loadPdfSource).mockResolvedValue({ data: new Uint8Array([37, 80, 68, 70]) })
     vi.mocked(getDocument).mockReturnValue({ promise: Promise.resolve({ numPages: 1, getPage: async () => page }), destroy } as never)
@@ -113,5 +196,235 @@ describe('PDF reader', () => {
     app!.unmount(); app = undefined
     expect(vi.mocked(loadPdfSource).mock.calls[0][2].aborted).toBe(true)
     expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('finds literal, case-insensitive text and navigates individual matches with keyboard and buttons', async () => {
+    mockDocument()
+    await mount()
+    await search('scholar')
+    expect(document.querySelectorAll('.highlight')).toHaveLength(2)
+    expect(document.querySelector('.pdf-match-count')?.textContent).toBe('1 / 2')
+    await click('nextMatch')
+    expect(document.querySelector('.pdf-match-count')?.textContent).toBe('2 / 2')
+    expect(document.querySelector('.highlight.selected')?.textContent).toBe('SCHOLAR')
+    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled()
+    const input = document.querySelector('input')!
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true }))
+    await settle()
+    expect(document.querySelector('.pdf-match-count')?.textContent).toBe('1 / 2')
+    await click('previousMatch')
+    expect(document.querySelector('.pdf-match-count')?.textContent).toBe('2 / 2')
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await settle()
+    expect(document.querySelectorAll('.highlight')).toHaveLength(0)
+    expect(document.querySelector('.textLayer')?.textContent).toBe('Scholar beta SCHOLAR')
+  })
+
+  it('handles empty, Chinese, cross-span and regex-special text without injecting markup', async () => {
+    mockDocument([['学者', '阅读 (a+b) <img src=x onerror=alert(1)>']])
+    await mount()
+    await search('  ')
+    expect(document.querySelectorAll('.highlight')).toHaveLength(0)
+    await search('学者阅读')
+    expect(document.querySelector('.pdf-match-count')?.textContent).toBe('1 / 1')
+    expect(document.querySelectorAll('.highlight.selected')).toHaveLength(2)
+    await search('(a+b)')
+    expect(document.querySelector('.highlight')?.textContent).toBe('(a+b)')
+    await search('<img src=x onerror=alert(1)>')
+    expect(document.querySelector('.highlight')?.textContent).toBe('<img src=x onerror=alert(1)>')
+    expect(document.querySelector('img')).toBeNull()
+    await search('absent')
+    expect(document.querySelector('.pdf-match-count')?.textContent).toBe(i18n.global.t('pdfViewer.noMatches'))
+  })
+
+  it('searches only rendered current-page text and preserves mixed page sizes', async () => {
+    const doc = mockDocument([['Scholar'], ['Other page']], 80)
+    await mount()
+    await search('scholar')
+    expect(doc.getPage.mock.calls.every(([page]) => page === 1)).toBe(true)
+    await click('nextPage')
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('2 / 80')
+    expect(document.querySelectorAll('[data-page="1"] .highlight')).toHaveLength(0)
+    expect(document.querySelector('.pdf-match-count')?.textContent).toBe(i18n.global.t('pdfViewer.noMatches'))
+    expect(document.querySelector<HTMLElement>('[data-page="2"]')?.style.width).toBe('800px')
+    expect(document.querySelector<HTMLElement>('[data-page="2"]')?.style.height).toBe('600px')
+    expect(doc.getPage.mock.calls.every(([page]) => page === 1 || page === 2)).toBe(true)
+    await click('previousPage')
+    expect(document.querySelector('.pdf-match-count')?.textContent).toBe('1 / 1')
+  })
+
+  it.each([800, 1200])('keeps a short final page selected and searchable after clamped navigation in a %i px viewport', async (viewportHeight: number) => {
+    mockDocument([['First page'], ['Final target']])
+    await mount()
+    const container = mockScrollLayout([800, 600], viewportHeight)
+    await click('nextPage')
+    await scrollPages(container)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('2 / 2')
+    await search('Final target')
+    expect(document.querySelector('[data-page="2"] .highlight.selected')?.textContent).toBe('Final target')
+    expect(document.querySelector('.pdf-match-count')?.textContent).toBe('1 / 1')
+    await click('previousPage')
+    await scrollPages(container)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('1 / 2')
+    expect(document.querySelectorAll('[data-page="2"] .highlight')).toHaveLength(0)
+  })
+
+  it.each([0, 0.5])('selects the final page when manually scrolled within %s px of the bottom', async (remaining: number) => {
+    mockDocument([['First page'], ['Final target']])
+    await mount()
+    const container = mockScrollLayout([800, 600], 800)
+    await scrollPages(container, container.scrollHeight - container.clientHeight - remaining)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('2 / 2')
+    await scrollPages(container, 100)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('1 / 2')
+  })
+
+  it('preserves explicit previous and next navigation among short pages sharing the same bottom position', async () => {
+    mockDocument([['First page'], ['Middle target'], ['Final target']])
+    await mount()
+    const container = mockScrollLayout([800, 100, 100], 800)
+    await click('nextPage')
+    const bottom = container.scrollTop
+    expect(bottom).toBe(container.scrollHeight - container.clientHeight)
+    await scrollPages(container)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('2 / 3')
+    await click('nextPage')
+    expect(container.scrollTop).toBe(bottom)
+    await scrollPages(container)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('3 / 3')
+    await click('previousPage')
+    await scrollPages(container)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('2 / 3')
+    await search('Middle target')
+    expect(document.querySelector('[data-page="2"] .highlight.selected')?.textContent).toBe('Middle target')
+    await scrollPages(container, 100)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('1 / 3')
+    await scrollPages(container, bottom)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('3 / 3')
+  })
+
+  it('preserves explicit page selection when the entire document fits without vertical scrolling', async () => {
+    mockDocument([['First page'], ['Final target']])
+    await mount()
+    const container = mockScrollLayout([200, 200], 800)
+    await scrollPages(container)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('1 / 2')
+    await click('nextPage')
+    container.scrollLeft = 20
+    await scrollPages(container)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('2 / 2')
+    await click('previousPage')
+    await scrollPages(container)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('1 / 2')
+  })
+
+  it('keeps the final page searchable after zooming out changes the clamped position', async () => {
+    vi.useFakeTimers()
+    mockDocument([['First page'], ['Final target']])
+    await mount()
+    const container = mockScrollLayout([800, 600], 800)
+    await click('nextPage')
+    await search('Final target')
+    await click('zoomOut')
+    mockScrollLayout([640, 480], 800)
+    await vi.advanceTimersByTimeAsync(200)
+    await scrollPages(container)
+    expect(document.querySelector('.pdf-scale-info')?.textContent).toBe('80%')
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('2 / 2')
+    expect(document.querySelector('[data-page="2"] .highlight.selected')?.textContent).toBe('Final target')
+    expect(document.querySelector('.pdf-match-count')?.textContent).toBe('1 / 1')
+  })
+
+  it('clears the explicit navigation position when switching documents', async () => {
+    mockDocument([['First page'], ['Final target']])
+    await mount()
+    const previousContainer = mockScrollLayout([800, 600], 800)
+    await click('nextPage')
+    const previousBottom = previousContainer.scrollTop
+    fileId.value = 'file-2'
+    await settle()
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('1 / 2')
+    const container = mockScrollLayout([800, 600], 800)
+    await scrollPages(container, previousBottom)
+    expect(document.querySelector('.pdf-page-info')?.textContent).toBe('2 / 2')
+  })
+
+  it('matches Latin and CJK phrases across separate empty line-break items', async () => {
+    mockDocument([['Scholar', '', 'reader', ' 学者', '', '阅读']], 1, [1, 4])
+    await mount()
+    await search('Scholar reader')
+    expect(document.querySelector('.pdf-match-count')?.textContent).toBe('1 / 1')
+    expect([...document.querySelectorAll('.highlight.selected')].map(el => el.textContent).join('')).toBe('Scholarreader')
+    await search('学者阅读')
+    expect(document.querySelector('.pdf-match-count')?.textContent).toBe('1 / 1')
+    expect([...document.querySelectorAll('.highlight.selected')].map(el => el.textContent).join('')).toBe('学者阅读')
+  })
+
+  it('reapplies highlights after zoom, keeps text selectable and clears on file change', async () => {
+    vi.useFakeTimers()
+    const doc = mockDocument()
+    await mount()
+    await search('scholar')
+    await click('zoomIn')
+    await vi.advanceTimersByTimeAsync(200)
+    await settle()
+    expect(document.querySelector('.pdf-scale-info')?.textContent).toBe('120%')
+    expect(document.querySelectorAll('.highlight')).toHaveLength(2)
+    expect(document.querySelector<HTMLElement>('.textLayer')?.style.getPropertyValue('--total-scale-factor')).toBe('1.2')
+    const range = document.createRange()
+    range.selectNodeContents(document.querySelector('.textLayer')!)
+    expect(range.toString()).toBe('Scholar beta SCHOLAR')
+    expect(textLayerMocks.cancel).toHaveBeenCalled()
+    fileId.value = 'file-2'
+    await settle()
+    expect(doc.destroy).toHaveBeenCalledOnce()
+    expect(document.querySelector<HTMLInputElement>('input')?.value).toBe('')
+    expect(document.querySelectorAll('.highlight')).toHaveLength(0)
+  })
+
+  it('reports scanned pages as unsearchable in both locales and labels every control', async () => {
+    mockDocument([[]])
+    await mount()
+    await search('Scholar')
+    expect(document.querySelector('.pdf-match-count')?.textContent).toBe(i18n.global.t('pdfViewer.noText'))
+    i18n.global.locale.value = 'en-US'
+    await settle()
+    expect(document.querySelector('.pdf-match-count')?.textContent).toBe('No searchable text on this page')
+    for (const button of document.querySelectorAll('button')) {
+      expect(button.getAttribute('aria-label') || button.textContent?.trim()).toBeTruthy()
+      expect(button.type).toBe('button')
+    }
+    expect(document.querySelector('input')?.closest('label')?.textContent).toContain('Find on this page')
+  })
+
+  it('cancels pending canvas rendering on close and ignores late completion', async () => {
+    const doc = mockDocument()
+    let finish!: () => void
+    doc.render.mockReturnValue({ promise: new Promise<void>(resolve => { finish = resolve }), cancel: doc.cancel })
+    await mount()
+    app!.unmount()
+    app = undefined
+    expect(doc.cancel).toHaveBeenCalledOnce()
+    expect(doc.destroy).toHaveBeenCalledOnce()
+    finish()
+    await settle()
+    expect(textLayerMocks.finish).not.toHaveBeenCalled()
+  })
+
+  it('ignores stale text-layer completion after switching documents', async () => {
+    mockDocument()
+    let finish!: () => void
+    textLayerMocks.finish.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve }))
+    await mount()
+    await search('Scholar')
+    expect(document.querySelector('.pdf-match-count')?.textContent).toBe(i18n.global.t('pdfViewer.searchLoading'))
+    mockDocument([['New document']])
+    fileId.value = 'file-2'
+    await settle()
+    finish()
+    await settle()
+    await search('Scholar')
+    expect(document.querySelector('.pdf-match-count')?.textContent).toBe(i18n.global.t('pdfViewer.noMatches'))
+    expect(document.querySelector('.textLayer')?.textContent).toBe('New document')
   })
 })
