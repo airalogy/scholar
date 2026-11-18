@@ -64,14 +64,13 @@ const appoint = async (): Promise<void> => {
 beforeEach(() => {
   vi.clearAllMocks()
   i18n.global.locale.value = 'zh-CN'
-  vi.spyOn(Message, 'success')
+  vi.spyOn(Message, 'success').mockReturnValue({ close: vi.fn() })
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
   vi.stubGlobal('ResizeObserver', class { observe (): void {} unobserve (): void {} disconnect (): void {} })
 })
 afterEach(() => {
   app?.unmount()
   app = undefined
-  Message.clear()
   document.body.replaceChildren()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
