@@ -4,6 +4,17 @@ Chinese version: [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)
 
 ## [Unreleased]
 
+## [5.2.2] - 2026-11-18
+
+### Changed
+
+- The Paper Library now gives search results more space in both Publications and Degree Theses. Expand the filters when needed; in Publications, you can also expand the list of departments and labs to browse their work.
+- The institution members page now explains what platform administrators, institution owners and institution administrators can do, and why library final review requires a separate grant.
+
+### Database and Deployment
+
+- No database migration is needed when upgrading from 5.2.1. Existing data, account bindings, primary employee IDs and permissions are unchanged.
+
 ## [5.2.1] - 2026-11-18
 
 ### Changed

@@ -1,6 +1,6 @@
 {
   "name": "airalogy-scholar",
-  "version": "5.2.1",
+  "version": "5.2.2",
   "private": true,
   "description": "Airalogy Scholar - Vue 3 + Vite + Arco Design + Fastify",
   "bugs": {
