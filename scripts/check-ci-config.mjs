@@ -1,6 +1,7 @@
 import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
+import { fullGroups, groups } from './run-checks.mjs'
 
 const repositoryRoot = path.resolve(import.meta.dirname, '..')
 const workflowDirectory = path.join(repositoryRoot, '.github', 'workflows')
@@ -33,15 +34,17 @@ if (!packageManagerMatch) {
   fail(packageJsonPath, 1, 'packageManager must pin an exact pnpm version')
 }
 
-if (packageJson.scripts?.prepush !== 'pnpm audit:prod && pnpm check && node scripts/verify-bibliography.mjs --if-configured && node scripts/verify-review-governance.mjs --if-configured') {
-  fail(
-    packageJsonPath,
-    1,
-    'prepush must audit production dependencies before running the complete repository checks',
-  )
+if (
+  packageJson.scripts?.prepush !== 'node scripts/run-checks.mjs --pre-push' ||
+  packageJson.scripts?.check !== 'node scripts/run-checks.mjs --full' ||
+  packageJson.scripts?.['check:quick'] !== 'node scripts/run-checks.mjs --quick'
+) {
+  fail(packageJsonPath, 1, 'prepush and check must use the shared scoped/full check runner')
 }
 
-const sharedChecks = (packageJson.scripts?.check ?? '').split(' && ')
+const sharedChecks = [...fullGroups, 'database']
+  .flatMap((name) => groups[name] ?? [])
+  .map((command) => `pnpm ${command}`)
 for (const command of [
   'pnpm ci:config:check',
   'pnpm license:check',
@@ -51,10 +54,18 @@ for (const command of [
   'pnpm db:validate',
   'pnpm db:generate',
   'pnpm format:check',
-  'pnpm lint',
-  'pnpm type-check',
-  'pnpm test',
-  'pnpm build',
+  ...['server', 'web', 'docs'].flatMap((component) =>
+    ['lint', 'type-check', 'test', 'build'].map(
+      (command) => `pnpm --filter @airalogy/scholar-${component} ${command}`,
+    ),
+  ),
+  'pnpm test:deployment',
+  'pnpm db:migrate:deploy',
+  'pnpm db:audit:integrity',
+  'pnpm db:verify:upgrade',
+  'pnpm db:verify:identity',
+  'pnpm db:verify:governance',
+  'pnpm db:verify:bibliography',
   'pnpm --filter @airalogy/scholar-server smoke:dist',
 ]) {
   if (!sharedChecks.includes(command)) {
@@ -63,8 +74,8 @@ for (const command of [
 }
 
 const prepushPath = path.join(repositoryRoot, '.githooks', 'pre-push')
-if (!/^pnpm prepush$/m.test(await readFile(prepushPath, 'utf8'))) {
-  fail(prepushPath, 1, 'the pre-push hook must run pnpm prepush')
+if (!/^node scripts\/run-checks.mjs --pre-push$/m.test(await readFile(prepushPath, 'utf8'))) {
+  fail(prepushPath, 1, 'the pre-push hook must preserve stdin and use the scoped check runner')
 }
 
 const apiPackageJsonPath = path.join(repositoryRoot, 'apps', 'api', 'package.json')
@@ -225,9 +236,6 @@ const requiredReleaseFragments = [
   'sbom: true',
   'artifact-metadata: write',
   'pnpm release:source:verify',
-  'pnpm db:verify:identity',
-  'pnpm db:verify:governance',
-  'pnpm db:verify:bibliography',
   'README.zh-CN.md',
   'scholar-${{ matrix.component }}',
   'type=semver,pattern={{major}}.{{minor}}',
@@ -240,34 +248,41 @@ for (const fragment of requiredReleaseFragments) {
 
 const ciWorkflowPath = path.join(workflowDirectory, 'ci.yml')
 const ciWorkflow = await readFile(ciWorkflowPath, 'utf8')
-for (const [file, workflow] of [[ciWorkflowPath, ciWorkflow], [releaseWorkflowPath, releaseWorkflow]]) {
-  for (const command of ['pnpm audit:prod', 'pnpm check']) {
-    if (!workflow.split('\n').some((line) => line.trim() === `- run: ${command}`)) {
-      fail(file, 1, `workflow must run ${command} so local and cloud validation stay aligned`)
-    }
-  }
-}
+if (!releaseWorkflow.includes('- run: pnpm audit:prod'))
+  fail(releaseWorkflowPath, 1, 'release must run a fresh pnpm audit:prod')
 if (!/^on:\n  push:\n    branches:\n      - main\n  pull_request:/m.test(ciWorkflow)) {
   fail(ciWorkflowPath, 1, 'CI must run branch pushes only on main and use pull_request for changes')
 }
-if (!ciWorkflow.includes('pnpm release:source:verify')) {
-  fail(ciWorkflowPath, 1, 'CI must verify the generated release source snapshot')
-}
-if (!ciWorkflow.includes('pnpm db:verify:identity')) {
-  fail(ciWorkflowPath, 1, 'CI must run the PostgreSQL institution identity verification')
-}
-if (!ciWorkflow.includes('pnpm db:verify:bibliography')) {
-  fail(ciWorkflowPath, 1, 'CI must run the PostgreSQL bibliography verification')
-}
 
 // Keep the existing required PR job IDs and matrix entries while separating native builds.
-const workflowJob = (workflow, name) => workflow.match(new RegExp(`^  ${name}:\\n[\\s\\S]*?(?=^  [\\w-]+:|$(?![\\s\\S]))`, 'm'))?.[0] ?? ''
+const workflowJob = (workflow, name) =>
+  workflow.match(new RegExp(`^  ${name}:\\n[\\s\\S]*?(?=^  [\\w-]+:|$(?![\\s\\S]))`, 'm'))?.[0] ??
+  ''
 const requireFragments = (file, source, fragments) => {
   for (const fragment of fragments) {
     if (!source.includes(fragment)) fail(file, 1, `release acceleration must retain ${fragment}`)
   }
 }
 const nativeBuilds = workflowJob(releaseWorkflow, 'image-platforms')
+requireFragments(ciWorkflowPath, workflowJob(ciWorkflow, 'source-checks'), [
+  'group: [quality, api, web, docs, database]',
+  'fail-fast: false',
+  'run: pnpm release:source:verify --group "$CHECK_GROUP"',
+  'RELEASE_SOURCE_DATABASE_URL:',
+])
+requireFragments(ciWorkflowPath, workflowJob(ciWorkflow, 'verify'), [
+  'if: always()',
+  'needs: [deployment-config, source-checks, container-build]',
+  'length == 3 and all(.[]; .result == "success")',
+])
+requireFragments(releaseWorkflowPath, workflowJob(releaseWorkflow, 'verify'), [
+  'actions: read',
+  'run: node scripts/verify-release-ci.mjs',
+  'id: evidence',
+  "if: steps.evidence.outputs.reused == 'false'",
+  'run: pnpm release:source:verify',
+  'run: pnpm release:check',
+])
 requireFragments(releaseWorkflowPath, nativeBuilds, [
   'needs: verify',
   'runs-on: ${{ matrix.runner }}',
@@ -278,7 +293,8 @@ requireFragments(releaseWorkflowPath, nativeBuilds, [
   'platforms: linux/${{ matrix.arch }}',
   'push-by-digest=true,name-canonical=true,push=true',
   'labels: ${{ steps.metadata.outputs.labels }}',
-  'cache-from: type=gha,scope=main-${{ matrix.component }}-${{ matrix.arch }},timeout=3m',
+  'type=gha,scope=main-${{ matrix.component }}-${{ matrix.arch }},timeout=3m',
+  'cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/scholar-${{ matrix.component }}-buildcache:${{ matrix.arch }},mode=max,ignore-error=true',
   'dist/src/scripts/smoke-built-app.js',
   '--entrypoint caddy "$IMAGE" validate',
   'sbom: true',
@@ -295,25 +311,38 @@ requireFragments(releaseWorkflowPath, workflowJob(releaseWorkflow, 'images'), [
   'subject-digest: ${{ steps.merge.outputs.digest }}',
   '"image-metadata/$COMPONENT.digest"',
 ])
-requireFragments(releaseWorkflowPath, workflowJob(releaseWorkflow, 'release'), ['needs: images', 'scholarctl install'])
-if (/^\s+(?:cache-to|continue-on-error):/m.test(releaseWorkflow) || releaseWorkflow.includes('docker/setup-qemu-action')) {
-  fail(releaseWorkflowPath, 1, 'Release must use native builds without tag-cache exports or optional checks')
+requireFragments(releaseWorkflowPath, workflowJob(releaseWorkflow, 'release'), [
+  'needs: images',
+  'scholarctl install',
+])
+if (
+  /^\s+cache-to: (?!type=registry,ref=ghcr.io\/\$\{\{ github.repository_owner \}\}\/scholar-\$\{\{ matrix.component \}\}-buildcache:)/m.test(
+    releaseWorkflow,
+  ) ||
+  /^\s+continue-on-error:/m.test(releaseWorkflow) ||
+  releaseWorkflow.includes('docker/setup-qemu-action')
+) {
+  fail(
+    releaseWorkflowPath,
+    1,
+    'Release must use native builds without tag-cache exports or optional checks',
+  )
 }
 const requiredContainerBuild = workflowJob(ciWorkflow, 'container-build')
 requireFragments(ciWorkflowPath, requiredContainerBuild, [
-  '- deployment-config', '- verify',
+  'needs: deployment-config',
   '- component: api\n            dockerfile: apps/api/Dockerfile',
   '- component: web\n            dockerfile: apps/web/Dockerfile',
   'platforms: linux/amd64',
+  "if: needs.deployment-config.outputs[matrix.component] == 'true'",
+  'case "$REQUIRED" in true|false) ;; *) exit 1 ;; esac',
   "scope=${{ github.event_name == 'push' && 'main' || format('pr-{0}', github.event.pull_request.number) }}-${{ matrix.component }}-amd64,timeout=3m,ignore-error=true",
 ])
-requireFragments(ciWorkflowPath, workflowJob(ciWorkflow, 'container-cache-arm64'), [
-  "if: github.event_name == 'push' && github.ref == 'refs/heads/main'",
-  '- deployment-config', '- verify',
-  'runs-on: ubuntu-24.04-arm',
-  'platforms: linux/arm64',
-  'outputs: type=cacheonly',
-  'cache-to: type=gha,mode=max,scope=main-${{ matrix.component }}-arm64,timeout=3m,ignore-error=true',
+if (ciWorkflow.includes('container-cache-arm64:'))
+  fail(ciWorkflowPath, 1, 'Daily CI must not unconditionally warm ARM caches')
+requireFragments(ciWorkflowPath, workflowJob(ciWorkflow, 'deployment-config'), [
+  'fetch-depth: 0',
+  'run: node scripts/run-checks.mjs --containers "$BASE_SHA"',
 ])
 if (/^\s+continue-on-error:/m.test(ciWorkflow)) {
   fail(ciWorkflowPath, 1, 'CI checks cannot be optional; only cache export failures may be ignored')
@@ -365,18 +394,36 @@ for (const dockerFile of dockerFiles) {
 
   const copiedSources = lines.slice(0, installIndex).flatMap((line) => dockerCopySources(line))
 
-  const fetchIndex = lines.findIndex((line) => line === 'RUN pnpm fetch --frozen-lockfile --ignore-scripts')
+  const fetchIndex = lines.findIndex(
+    (line) => line === 'RUN pnpm fetch --frozen-lockfile --ignore-scripts',
+  )
   const beforeFetch = lines.slice(0, fetchIndex).flatMap((line) => dockerCopySources(line))
-  if (fetchIndex < 0 || fetchIndex >= installIndex ||
-    !beforeFetch.includes('pnpm-lock.yaml') || !beforeFetch.includes('pnpm-workspace.yaml') ||
-    beforeFetch.some((source) => !['pnpm-lock.yaml', 'pnpm-workspace.yaml'].includes(source))) {
-    fail(dockerFile, 1, 'fetch must depend only on the lockfile and workspace configuration before installation')
+  if (
+    fetchIndex < 0 ||
+    fetchIndex >= installIndex ||
+    !beforeFetch.includes('pnpm-lock.yaml') ||
+    !beforeFetch.includes('pnpm-workspace.yaml') ||
+    beforeFetch.some((source) => !['pnpm-lock.yaml', 'pnpm-workspace.yaml'].includes(source))
+  ) {
+    fail(
+      dockerFile,
+      1,
+      'fetch must depend only on the lockfile and workspace configuration before installation',
+    )
   }
   if (lines[installIndex] !== 'RUN pnpm install --offline --frozen-lockfile') {
     fail(dockerFile, installIndex + 1, 'Docker dependency installation must be offline and frozen')
   }
-  if (copiedSources.some((source) => ['.', 'apps/api', 'apps/web', 'apps/docs', 'VERSION'].includes(source))) {
-    fail(dockerFile, 1, 'application source and VERSION must not invalidate the dependency installation layer')
+  if (
+    copiedSources.some((source) =>
+      ['.', 'apps/api', 'apps/web', 'apps/docs', 'VERSION'].includes(source),
+    )
+  ) {
+    fail(
+      dockerFile,
+      1,
+      'application source and VERSION must not invalidate the dependency installation layer',
+    )
   }
 
   for (const scriptPath of lifecycleScriptPaths) {
@@ -399,11 +446,20 @@ for (const dockerFile of dockerFiles) {
   }
 }
 
-requireFragments(dockerFiles[0], await readFile(dockerFiles[0], 'utf8'), [
+const apiDockerfile = await readFile(dockerFiles[0], 'utf8')
+requireFragments(dockerFiles[0], apiDockerfile, [
   'FROM dependencies AS production-dependencies',
   'COPY --from=production-dependencies --chown=node:node /opt/scholar-api/node_modules/ ./node_modules/',
   'COPY --from=build --chown=node:node /workspace/apps/api/dist/ ./dist/',
+  'RUN node scripts/write-build-info.mjs apps/api/dist/build-info.json',
+  'pnpm --filter @airalogy/scholar-server build',
 ])
+if (
+  apiDockerfile.indexOf('pnpm --filter @airalogy/scholar-server build') >
+  apiDockerfile.indexOf('ARG GIT_COMMIT=')
+) {
+  fail(dockerFiles[0], 1, 'API compilation must precede changing Git build metadata')
+}
 
 const versionedFiles = [...dockerFiles, path.join(repositoryRoot, 'deploy', 'compose.build.yaml')]
 

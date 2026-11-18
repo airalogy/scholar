@@ -10,5 +10,6 @@ if ! command -v pnpm >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "Scholar pre-push: validating CI configuration and repository checks..."
-pnpm prepush
+echo "Scholar pre-push: checking the complete pending push scope..."
+# Preserve Git's ref list on stdin; pnpm can consume stdin itself.
+node scripts/run-checks.mjs --pre-push

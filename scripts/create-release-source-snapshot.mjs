@@ -20,22 +20,38 @@ const repositoryRoot = fileURLToPath(new URL('../', import.meta.url))
 const checkOnly = process.argv.includes('--check')
 const verifyOnly = process.argv.includes('--verify')
 const updateManifest = process.argv.includes('--update-manifest')
+const groupIndex = process.argv.indexOf('--group')
+const verificationGroup = groupIndex < 0 ? null : process.argv[groupIndex + 1]
+if (
+  groupIndex >= 0 &&
+  (!verifyOnly || !['quality', 'api', 'web', 'docs', 'database'].includes(verificationGroup))
+) {
+  throw new Error('--group requires --verify and a known check group')
+}
 const targetArgument = process.argv
   .slice(2)
   .find(
     (argument) =>
-      argument !== '--check' && argument !== '--verify' && argument !== '--update-manifest',
+      argument !== '--check' &&
+      argument !== '--verify' &&
+      argument !== '--update-manifest' &&
+      argument !== '--group' &&
+      argument !== verificationGroup,
   )
 const initialMigrationPath = 'apps/api/prisma/migrations/00000000000000_v3_initial/migration.sql'
 const releaseManifestPath = 'RELEASE-SOURCE-MANIFEST.json'
 const releaseHistoryBaseline = '3.0.0'
 
 const run = (command, args, options = {}) => {
+  const env = Object.fromEntries(
+    Object.entries(options.env ?? process.env).filter(([key]) => !key.startsWith('GIT_')),
+  )
   const result = spawnSync(command, args, {
     cwd: repositoryRoot,
     encoding: 'utf8',
     maxBuffer: 32 * 1024 * 1024,
     ...options,
+    env,
   })
   if (result.status !== 0) {
     const stderr = typeof result.stderr === 'string' ? result.stderr.trim() : ''
@@ -181,13 +197,16 @@ const writeSnapshot = async (targetRoot, files) => {
 }
 
 const verifySnapshot = (targetRoot) => {
+  const needsDatabase = !verificationGroup || verificationGroup === 'database'
   const databaseUrl = process.env.RELEASE_SOURCE_DATABASE_URL?.trim()
-  if (!databaseUrl) {
+  if (needsDatabase && !databaseUrl) {
     throw new Error(
       'RELEASE_SOURCE_DATABASE_URL must point to an empty, disposable PostgreSQL schema',
     )
   }
-  const parsedDatabaseUrl = new URL(databaseUrl)
+  const parsedDatabaseUrl = new URL(
+    databaseUrl || 'postgresql://test:test@127.0.0.1:5432/test?schema=source_check',
+  )
   const schema = parsedDatabaseUrl.searchParams.get('schema')
   if (!schema || schema === 'public') {
     throw new Error('RELEASE_SOURCE_DATABASE_URL must use a non-public disposable schema')
@@ -197,7 +216,13 @@ const verifySnapshot = (targetRoot) => {
   }
 
   parsedDatabaseUrl.searchParams.set('options', `-c search_path=${schema},public`)
-  const env = { ...process.env, DATABASE_URL: parsedDatabaseUrl.toString() }
+  const env = {
+    ...process.env,
+    DATABASE_URL: parsedDatabaseUrl.toString(),
+    BIBLIOGRAPHY_TEST_DATABASE_URL: '',
+    GOVERNANCE_TEST_DATABASE_URL: '',
+    IDENTITY_TEST_DATABASE_URL: '',
+  }
   console.log('Release source verification: pnpm install --frozen-lockfile')
   run('pnpm', ['install', '--frozen-lockfile'], {
     cwd: targetRoot,
@@ -205,39 +230,39 @@ const verifySnapshot = (targetRoot) => {
     stdio: 'inherit',
   })
 
-  const administrativeDatabaseUrl = new URL(databaseUrl)
-  administrativeDatabaseUrl.searchParams.set('schema', 'public')
-  administrativeDatabaseUrl.searchParams.set('options', '-c search_path=public')
-  console.log(`Release source verification: recreate disposable schema ${schema}`)
-  run(
-    'pnpm',
-    ['--filter', '@airalogy/scholar-server', 'exec', 'prisma', 'db', 'execute', '--stdin'],
-    {
-      cwd: targetRoot,
-      env: { ...process.env, DATABASE_URL: administrativeDatabaseUrl.toString() },
-      input: `DROP SCHEMA IF EXISTS "${schema}" CASCADE;\nCREATE SCHEMA "${schema}";\n`,
-      stdio: ['pipe', 'inherit', 'inherit'],
-    },
-  )
+  if (needsDatabase) {
+    const administrativeDatabaseUrl = new URL(databaseUrl)
+    administrativeDatabaseUrl.searchParams.set('schema', 'public')
+    administrativeDatabaseUrl.searchParams.set('options', '-c search_path=public')
+    console.log(`Release source verification: recreate disposable schema ${schema}`)
+    run(
+      'pnpm',
+      ['--filter', '@airalogy/scholar-server', 'exec', 'prisma', 'db', 'execute', '--stdin'],
+      {
+        cwd: targetRoot,
+        env: { ...process.env, DATABASE_URL: administrativeDatabaseUrl.toString() },
+        // Standalone database groups no longer inherit an earlier public migration.
+        // Shared extension types must be visible to the rolled-back upgrade fixtures.
+        input: [
+          'CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;',
+          'CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;',
+          `DROP SCHEMA IF EXISTS "${schema}" CASCADE;`,
+          `CREATE SCHEMA "${schema}";`,
+        ].join('\n'),
+        stdio: ['pipe', 'inherit', 'inherit'],
+      },
+    )
+  }
 
-  const commands = [
-    ['pnpm', ['ci:config:check']],
-    ['pnpm', ['version:check']],
-    ['pnpm', ['db:validate']],
-    ['pnpm', ['db:generate']],
-    ['pnpm', ['format:check']],
-    ['pnpm', ['lint']],
-    ['pnpm', ['type-check']],
-    ['pnpm', ['test']],
-    ['pnpm', ['build']],
-    ['pnpm', ['--filter', '@airalogy/scholar-server', 'smoke:dist']],
-    ['pnpm', ['db:migrate:deploy']],
-    ['pnpm', ['db:audit:integrity']],
-    ['pnpm', ['db:verify:upgrade']],
-    ['pnpm', ['db:verify:identity']],
-    ['pnpm', ['db:verify:governance']],
-    ['pnpm', ['db:verify:bibliography']],
-  ]
+  const commands = verificationGroup
+    ? [
+        ...(verificationGroup === 'quality' ? [['pnpm', ['audit:prod']]] : []),
+        ['node', ['scripts/run-checks.mjs', '--group', verificationGroup]],
+      ]
+    : [
+        ['pnpm', ['check']],
+        ['node', ['scripts/run-checks.mjs', '--group', 'database']],
+      ]
 
   for (const [command, args] of commands) {
     console.log(`Release source verification: ${command} ${args.join(' ')}`)
@@ -275,6 +300,12 @@ const main = async () => {
   }
 
   if (verifyOnly) {
+    if (
+      (await readFile(path.join(repositoryRoot, releaseManifestPath), 'utf8')) !==
+      (await createManifest(repositoryRoot, files))
+    ) {
+      throw new Error(`${releaseManifestPath} is stale; run pnpm release:source:manifest`)
+    }
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'scholar-release-source-'))
     const targetRoot = path.join(temporaryRoot, 'source')
     try {

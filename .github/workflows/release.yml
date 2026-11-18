@@ -16,6 +16,7 @@ jobs:
   verify:
     permissions:
       contents: read
+      actions: read
     runs-on: ubuntu-latest
     timeout-minutes: 40
     services:
@@ -47,15 +48,14 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm audit:prod
-      - run: pnpm db:generate
-      - run: pnpm db:migrate:deploy
-      - run: pnpm db:audit:integrity
-      - run: pnpm db:verify:upgrade
-      - run: pnpm db:verify:identity
-      - run: pnpm db:verify:governance
-      - run: pnpm db:verify:bibliography
-      - run: pnpm check
-      - run: pnpm release:source:verify
+      - name: Verify exact-commit main CI evidence
+        id: evidence
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/verify-release-ci.mjs
+      - name: Full clean-source fallback when no matching CI exists
+        if: steps.evidence.outputs.reused == 'false'
+        run: pnpm release:source:verify
       - run: pnpm release:check
 
   image-platforms:
@@ -113,8 +113,11 @@ jobs:
             APP_VERSION=${{ steps.version.outputs.value }}
             GIT_COMMIT=${{ github.sha }}
             GIT_TAG=${{ github.ref_name }}
-          # Only main publishes trusted caches; tag-scoped exports cannot warm later releases.
-          cache-from: type=gha,scope=main-${{ matrix.component }}-${{ matrix.arch }},timeout=3m
+          # Separate registry cache refs survive across tags; PRs cannot write these refs.
+          cache-from: |
+            type=registry,ref=ghcr.io/${{ github.repository_owner }}/scholar-${{ matrix.component }}-buildcache:${{ matrix.arch }}
+            type=gha,scope=main-${{ matrix.component }}-${{ matrix.arch }},timeout=3m
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/scholar-${{ matrix.component }}-buildcache:${{ matrix.arch }},mode=max,ignore-error=true
           sbom: true
           provenance: mode=max
       - name: Smoke test on the native architecture

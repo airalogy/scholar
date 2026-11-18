@@ -39,6 +39,10 @@ COPY VERSION LICENSE NOTICE TRADEMARKS.md ASSETS.md ./
 RUN DATABASE_URL=postgresql://scholar:scholar@localhost:5432/scholar?schema=public \
   pnpm --filter @airalogy/scholar-server db:generate
 
+# Compile independently of the changing commit, tag and timestamp.
+RUN GIT_COMMIT=build-cache GIT_TAG= BUILD_TIME=1970-01-01T00:00:00.000Z BUILD_DIRTY=false \
+  pnpm --filter @airalogy/scholar-server build
+
 ARG APP_VERSION=dev
 ARG GIT_COMMIT=unknown
 ARG GIT_TAG=
@@ -49,7 +53,8 @@ ENV GIT_TAG=$GIT_TAG
 ENV BUILD_TIME=$BUILD_TIME
 ENV BUILD_DIRTY=false
 
-RUN pnpm --filter @airalogy/scholar-server build
+# The final image still contains the actual release metadata, never the cached placeholder.
+RUN node scripts/write-build-info.mjs apps/api/dist/build-info.json
 
 FROM base AS runtime
 

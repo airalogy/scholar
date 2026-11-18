@@ -17,10 +17,23 @@ jobs:
   deployment-config:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      api: ${{ steps.changes.outputs.api }}
+      web: ${{ steps.changes.outputs.web }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .node-version
       - name: Validate CI toolchain configuration
         run: node scripts/check-ci-config.mjs
+      - name: Select container validation from the complete change range
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: node scripts/run-checks.mjs --containers "$BASE_SHA"
       - name: Validate deployment scripts
         run: sh -n deploy/scholarctl deploy/export-images.sh deploy/import-images.sh
       - name: Validate bundled database Compose configuration
@@ -38,9 +51,13 @@ jobs:
           SCHOLAR_DOCKER_GATEWAY: 172.30.255.1
         run: docker compose --env-file deploy/.env.example -f deploy/compose.yaml -f deploy/compose.database.yaml -f deploy/compose.network.yaml config --quiet
 
-  verify:
+  source-checks:
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [quality, api, web, docs, database]
     services:
       postgres:
         image: pgvector/pgvector:pg17@sha256:7ae6051efd0e60444282c27c7e141af07f322ce033300e727a49c3dd11075e38
@@ -55,40 +72,27 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
-
     env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/airalogy_scholar_test?schema=public
       RELEASE_SOURCE_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/airalogy_scholar_test?schema=release_source
-
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
-
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version-file: .node-version
           cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm audit:prod
-      - run: pnpm db:generate
-      - run: pnpm db:migrate:deploy
-      - run: pnpm db:audit:integrity
-      - run: pnpm db:verify:upgrade
-      - run: pnpm db:verify:identity
-      - run: pnpm db:verify:governance
-      - run: pnpm db:verify:bibliography
-      - run: pnpm check
-      - run: pnpm release:source:verify
+      # Each group runs once, inside an audited clean snapshot with frozen dependencies.
+      - name: Verify clean source group
+        env:
+          CHECK_GROUP: ${{ matrix.group }}
+        run: pnpm release:source:verify --group "$CHECK_GROUP"
 
   container-build:
-    needs:
-      - deployment-config
-      - verify
+    needs: deployment-config
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     strategy:
+      fail-fast: false
       matrix:
         include:
           - component: api
@@ -97,11 +101,21 @@ jobs:
             dockerfile: apps/web/Dockerfile
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Explain container validation scope
+        env:
+          REQUIRED: ${{ needs.deployment-config.outputs[matrix.component] }}
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          case "$REQUIRED" in true|false) ;; *) exit 1 ;; esac
+          echo "$COMPONENT container build required: $REQUIRED. Every formal release still validates both native architectures." >> "$GITHUB_STEP_SUMMARY"
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+        if: needs.deployment-config.outputs[matrix.component] == 'true'
       - name: Read product version
+        if: needs.deployment-config.outputs[matrix.component] == 'true'
         id: version
         run: echo "value=$(cat VERSION)" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        if: needs.deployment-config.outputs[matrix.component] == 'true'
         with:
           context: .
           file: ${{ matrix.dockerfile }}
@@ -117,33 +131,29 @@ jobs:
             type=gha,scope=pr-${{ github.event.pull_request.number }}-${{ matrix.component }}-amd64,timeout=3m
           # PR caches never overwrite the main scopes read by Release.
           cache-to: type=gha,mode=max,scope=${{ github.event_name == 'push' && 'main' || format('pr-{0}', github.event.pull_request.number) }}-${{ matrix.component }}-amd64,timeout=3m,ignore-error=true
+      - name: Smoke test changed container inputs
+        if: needs.deployment-config.outputs[matrix.component] == 'true'
+        env:
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          if [ "$COMPONENT" = api ]; then
+            docker run --rm --network none --entrypoint node "airalogy/scholar-$COMPONENT:ci" dist/src/scripts/smoke-built-app.js
+          else
+            docker run --rm --network none --entrypoint caddy "airalogy/scholar-$COMPONENT:ci" validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          fi
 
-  container-cache-arm64:
-    # Keep the existing required PR check names unchanged. Warm ARM caches on trusted main only.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs:
-      - deployment-config
-      - verify
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 35
-    strategy:
-      matrix:
-        component: [api, web]
+  verify:
+    # Keep the required status name; skipped/cancelled/failed groups never turn green.
+    if: always()
+    needs: [deployment-config, source-checks, container-build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
-      - name: Read product version
-        id: version
-        run: echo "value=$(cat VERSION)" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
-        with:
-          context: .
-          file: apps/${{ matrix.component }}/Dockerfile
-          platforms: linux/arm64
-          outputs: type=cacheonly
-          build-args: |
-            APP_VERSION=${{ steps.version.outputs.value }}
-            GIT_COMMIT=${{ github.sha }}
-            BUILD_TIME=${{ github.event.repository.updated_at }}
-          cache-from: type=gha,scope=main-${{ matrix.component }}-arm64,timeout=3m
-          cache-to: type=gha,mode=max,scope=main-${{ matrix.component }}-arm64,timeout=3m,ignore-error=true
+      - name: Require every check group
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          echo "CI commit: $COMMIT" >> "$GITHUB_STEP_SUMMARY"
+          echo "$RESULTS" | jq -r 'to_entries[] | "- \(.key): \(.value.result)"' >> "$GITHUB_STEP_SUMMARY"
+          echo "$RESULTS" | jq -e 'length == 3 and all(.[]; .result == "success")'
