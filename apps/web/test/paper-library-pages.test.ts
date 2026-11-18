@@ -9,6 +9,7 @@ import MyTheses from '@/views/MyTheses.vue'
 import { getDegreeThesisFacets, listDegreeTheses, listMyDegreeTheses, submitDegreeThesis, type DegreeThesis, type DegreeThesisVersion } from '@/api/theses'
 import { listPapers, type PaperResponse } from '@/api/papers'
 import { searchAuthors } from '@/api/authors'
+import { getInstitution } from '@/api/institutions'
 import { getLab } from '@/api/labs'
 
 vi.mock('@/api/theses', () => ({ getDegreeThesisFacets: vi.fn(), listDegreeTheses: vi.fn(), listMyDegreeTheses: vi.fn(), submitDegreeThesis: vi.fn() }))
@@ -18,7 +19,7 @@ vi.mock('@/api/bookmarks', () => ({ listBookmarks: vi.fn(), addBookmark: vi.fn()
 vi.mock('@/api/labs', () => ({ getLab: vi.fn() }))
 vi.mock('@/composables/useAuth', () => ({ useAuth: () => ({ isLoggedIn: ref(false), token: ref(null) }) }))
 vi.mock('@/composables/usePublicConfig', () => ({ usePublicConfig: () => ({ features: ref({ degreeTheses: true }), paperLibrary: ref({ defaultPath: '/papers' }) }) }))
-vi.mock('@/components/PaperInfoCard.vue', () => ({ default: { props: ['paper'], template: '<h2>{{ paper.title }}</h2>' } }))
+vi.mock('@/api/institutions', () => ({ getInstitution: vi.fn() }))
 
 const version: DegreeThesisVersion = {
   id: 'version-demo', version_number: 1, title: '示例细胞研究', title_en: 'Example cell study',
@@ -53,6 +54,8 @@ const settle = async (): Promise<void> => {
 const mount = async (path: string): Promise<void> => {
   router = createRouter({ history: createMemoryHistory(), routes: [
     { path: '/papers', name: 'Papers', component: Papers },
+    { path: '/institutions/:slug/papers', name: 'InstitutionPapers', component: Papers },
+    { path: '/institutions/:slug/colleges/:collegeSlug/papers', name: 'InstitutionCollegePapers', component: Papers },
     { path: '/labs/:slug/papers', name: 'LabPapers', component: Papers },
     { path: '/theses', name: 'Theses', component: Theses },
     { path: '/theses/mine', name: 'MyTheses', component: MyTheses },
@@ -106,6 +109,62 @@ afterEach(() => {
 })
 
 describe('paper library pages', () => {
+  it.each(['/papers', '/theses'])('has one library heading, no initial reset and collapsed advanced filters on %s', async (path): Promise<void> => {
+    await mount(path)
+    expect([...document.querySelectorAll('h1')].map((h) => h.textContent)).toEqual([i18n.global.t('nav.papers')])
+    expect(document.querySelector('button[aria-controls]')?.getAttribute('aria-expanded')).toBe('false')
+    expect(document.querySelector('form')?.textContent).not.toContain(i18n.global.t('papersPage.resetFilters'))
+    expect(document.querySelector('article h2 a')).not.toBeNull()
+    expect(document.querySelectorAll('article a')).toHaveLength(1)
+    if (path === '/theses') {
+      for (const value of [version.title_en, version.author_name, version.training_unit, version.major, '2026', '博士', 'TH-DEMO-001']) {
+        expect(document.querySelector('article')?.textContent).toContain(value)
+      }
+    }
+  })
+
+  it('keeps the configured institution visible but folds college and lab links', async (): Promise<void> => {
+    vi.mocked(getInstitution).mockResolvedValue({ id: 'demo', name: '示例大学', slug: 'demo',
+      labs: [{ id: 'lab-demo', slug: 'sample', name: '示例实验室', college: '示例学院' }],
+    } as Awaited<ReturnType<typeof getInstitution>>)
+    await mount('/institutions/demo/papers')
+    expect(document.querySelector('.library-context')?.textContent).toBe('示例大学')
+    const browse = document.querySelector('details')!
+    expect(browse.open).toBe(false)
+    browse.querySelector('summary')!.click()
+    expect(browse.open).toBe(true)
+    expect([...browse.querySelectorAll('a')].map((a) => a.textContent.trim())).toEqual(['示例学院', '示例实验室'])
+    expect(listPapers).toHaveBeenLastCalledWith(expect.objectContaining({ institution_id: 'demo' }))
+  })
+
+  it('applies the visible sort to the committed search and supports browser Back', async (): Promise<void> => {
+    await mount('/papers?q=history&page=2')
+    await input('.papers-search-input', 'unsubmitted')
+    const sort = document.querySelector<HTMLSelectElement>('.results-toolbar select')!
+    sort.value = 'citations'
+    sort.dispatchEvent(new Event('change', { bubbles: true }))
+    await settle()
+    expect(router.currentRoute.value.query).toEqual({ q: 'history', sort: 'citations' })
+    expect(listPapers).toHaveBeenLastCalledWith(expect.objectContaining({ q: 'history', sort: 'citations', offset: 0 }))
+    router.back()
+    await settle()
+    expect(sort.value).toBe('relevance')
+    expect(listPapers).toHaveBeenLastCalledWith(expect.objectContaining({ q: 'history', offset: 10 }))
+  })
+
+  it('keeps bookmarking separate from reading and does not bypass login', async (): Promise<void> => {
+    const login = vi.fn()
+    await mount('/papers')
+    window.addEventListener('auth:open-login', login, { once: true })
+    const button = document.querySelector<HTMLButtonElement>('.paper-bookmark')!
+    expect(button.closest('a')).toBeNull()
+    expect(button.getAttribute('aria-pressed')).toBe('false')
+    button.click()
+    expect(login).toHaveBeenCalledOnce()
+    expect(router.currentRoute.value.path).toBe('/papers')
+    expect(document.querySelector('article')?.textContent?.match(/2020/g)).toHaveLength(1)
+  })
+
   it('restores all thesis filters from the URL, expands them and preserves the original links', async (): Promise<void> => {
     await mount('/theses?q=cell&year=2026&unit=示例学院&degree=博士&major=示例专业&page=2')
     expect(listDegreeTheses).toHaveBeenLastCalledWith(expect.objectContaining({ q: 'cell', training_unit: '示例学院', degree_category: '博士', major: '示例专业', year_from: 2026, year_to: 2026, offset: 20 }))
@@ -196,6 +255,7 @@ describe('paper library pages', () => {
   it('keeps existing personal submission and edit eligibility', async (): Promise<void> => {
     vi.mocked(listMyDegreeTheses).mockResolvedValue({ items: [thesis({ can_edit: true, status: 'draft' })], total: 1 })
     await mount('/theses/mine')
+    expect(document.querySelectorAll('h1')).toHaveLength(1)
     expect(document.querySelector('a[href="/theses/thesis-demo/edit"]')).not.toBeNull()
     expect(document.body.textContent).toContain(i18n.global.t('degreeTheses.submitReview'))
     expect(submitDegreeThesis).not.toHaveBeenCalled()

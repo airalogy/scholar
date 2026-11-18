@@ -49,9 +49,17 @@ describe('unified paper library navigation', () => {
     expect(links[0]?.getAttribute('aria-current')).toBeNull()
   })
 
+  it('renders the library heading only when the parent delegates the page title', async (): Promise<void> => {
+    await mount(PaperLibraryNavigation, '/papers', 'Papers', { active: 'publications', heading: true, context: '示例大学', hint: '示例说明' })
+    expect(document.querySelector('h1')?.textContent).toBe(i18n.global.t('nav.papers'))
+    expect(document.querySelector('.library-context')?.textContent).toBe('示例大学')
+    expect(document.querySelector('.library-hint')?.textContent).toBe('示例说明')
+  })
+
   it('hides the thesis category when the existing feature switch is off', async (): Promise<void> => {
     features.value.degreeTheses = false
     await mount(PaperLibraryNavigation, '/papers', 'Papers', { active: 'publications' })
+    expect(document.querySelector('h1')).toBeNull()
     expect(document.querySelector('nav')).toBeNull()
     expect(document.body.textContent).toContain(i18n.global.t('nav.papers'))
   })

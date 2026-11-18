@@ -1,39 +1,25 @@
 <template>
   <div class="papers-page">
     <div class="papers-container">
-      <PaperLibraryNavigation v-if="isLibraryHome" active="publications" />
-      <section class="papers-hero">
-        <div class="papers-hero-copy">
-          <div v-if="!isLibraryHome" class="papers-eyebrow">{{ $t('papersPage.eyebrow') }}</div>
-          <h1 class="papers-title">{{ pageTitle }}</h1>
-          <p class="papers-subtitle">{{ pageSubtitle }}</p>
-          <p v-if="isLibraryHome && features.degreeTheses" class="papers-subtitle library-scope-note">{{ $t('paperLibrary.publicationsScope') }}</p>
-        </div>
-
-        <div v-if="scopeChips.length" class="scope-chip-list">
-          <span v-for="chip in scopeChips" :key="chip" class="scope-chip">{{ chip }}</span>
-        </div>
-
+      <PaperLibraryNavigation v-if="isLibraryHome" active="publications" heading
+        :context="currentInstitution?.name"
+        :hint="features.degreeTheses ? $t('paperLibrary.publicationsScope') : pageSubtitle"
+      />
+      <header v-else class="scope-header">
+        <h1>{{ pageTitle }}</h1>
+        <p>{{ pageSubtitle }}</p>
+      </header>
+      <form role="search" :aria-label="$t('paperLibrary.publications')" @submit.prevent="applyFilters">
         <div class="papers-search-row">
-          <a-input
-            v-model="queryText"
-            class="papers-search-input"
-            :placeholder="$t('papersPage.searchPlaceholder')"
-            :aria-label="$t('papersPage.searchPlaceholder')"
-            allow-clear
-            @press-enter="applyFilters"
+          <input v-model="queryText" class="papers-search-input" type="search"
+            :placeholder="$t('papersPage.searchPlaceholder')" :aria-label="$t('papersPage.searchPlaceholder')"
           />
-          <a-button type="primary" class="papers-search-btn" @click="applyFilters">
-            {{ $t('common.search') }}
-          </a-button>
-        </div>
-
-        <div class="filter-toolbar">
+          <button type="submit" class="search-btn">{{ $t('common.search') }}</button>
           <button type="button" class="filter-toggle" :aria-expanded="filtersExpanded" aria-controls="publication-filters" @click="filtersExpanded = !filtersExpanded">
             {{ $t('paperLibrary.filters') }}<span v-if="filterCount"> ({{ filterCount }})</span>
-            <span aria-hidden="true">{{ filtersExpanded ? ' −' : ' +' }}</span>
+            <span aria-hidden="true">{{ filtersExpanded ? '−' : '+' }}</span>
           </button>
-          <a-button class="papers-filter-reset" @click="resetFilters">{{ $t('papersPage.resetFilters') }}</a-button>
+          <button v-if="canReset" type="button" class="reset-btn" @click="resetFilters">{{ $t('papersPage.resetFilters') }}</button>
         </div>
         <div v-show="filtersExpanded" id="publication-filters" class="papers-filter-grid">
           <a-select
@@ -64,12 +50,6 @@
             </a-option>
           </a-select>
 
-          <a-select v-model="selectedSort" class="papers-filter-control" :placeholder="$t('papersPage.sortPlaceholder')" :aria-label="$t('papersPage.sortPlaceholder')">
-            <a-option value="latest">{{ $t('papersPage.sort.latest') }}</a-option>
-            <a-option value="citations">{{ $t('papersPage.sort.citations') }}</a-option>
-            <a-option value="relevance">{{ $t('papersPage.sort.relevance') }}</a-option>
-          </a-select>
-
           <a-input-number
             v-model="yearFrom"
             class="papers-filter-control"
@@ -90,20 +70,12 @@
             hide-button
           />
 
-          <a-button class="papers-filter-reset" @click="applyFilters">
-            {{ $t('paperLibrary.applyFilters') }}
-          </a-button>
+          <button type="submit" class="filter-toggle">{{ $t('paperLibrary.applyFilters') }}</button>
         </div>
-      </section>
+      </form>
 
-      <section v-if="institutionQuickBrowse.colleges.length || institutionQuickBrowse.labs.length" class="browse-section">
-        <div class="section-head">
-          <div>
-            <h2 class="section-title">{{ $t('papersPage.organizedBrowseTitle') }}</h2>
-            <p class="section-subtitle">{{ $t('papersPage.organizedBrowseSubtitle') }}</p>
-          </div>
-        </div>
-
+      <details v-if="institutionQuickBrowse.colleges.length || institutionQuickBrowse.labs.length" class="browse-section">
+        <summary>{{ $t('papersPage.organizedBrowseTitle') }}</summary>
         <div v-if="institutionQuickBrowse.colleges.length" class="browse-group">
           <div class="browse-label">{{ $t('papersPage.collegesLabel') }}</div>
           <div class="browse-chip-list">
@@ -131,12 +103,18 @@
             </router-link>
           </div>
         </div>
-      </section>
+      </details>
 
-      <div class="papers-meta" role="status" aria-live="polite">
-        {{ isLoading ? $t('common.loading') : $t('papersPage.totalResults', { count: total }) }}
+      <div class="results-toolbar">
+        <span role="status" aria-live="polite">{{ isLoading ? $t('common.loading') : $t('papersPage.totalResults', { count: total }) }}</span>
+        <label class="sort-control">{{ $t('papersPage.sortPlaceholder') }}
+          <select :value="selectedSort" @change="changeSort">
+            <option value="latest">{{ $t('papersPage.sort.latest') }}</option>
+            <option value="citations">{{ $t('papersPage.sort.citations') }}</option>
+            <option value="relevance">{{ $t('papersPage.sort.relevance') }}</option>
+          </select>
+        </label>
       </div>
-
       <div v-if="isLoading" class="papers-state">{{ $t('common.loading') }}</div>
       <div v-else-if="loadError" class="papers-state" role="alert">
         <p>{{ loadError }}</p>
@@ -144,46 +122,21 @@
       </div>
       <div v-else-if="!papers.length" class="papers-state">
         <p>{{ $t('papersPage.empty') }}</p>
-        <a-button @click="resetFilters">{{ $t('papersPage.resetFilters') }}</a-button>
+        <a-button v-if="canReset" @click="resetFilters">{{ $t('papersPage.resetFilters') }}</a-button>
       </div>
 
       <div v-else class="papers-list">
-        <article v-for="paper in papers" :key="paper.id" class="paper-shell">
-          <div class="paper-shell-head">
-            <div class="paper-badges">
-              <span v-if="showPaperSourceBadges && paper.institutionName" class="paper-badge">{{ paper.institutionName }}</span>
-              <span v-if="showPaperSourceBadges && paper.labName" class="paper-badge paper-badge--muted">{{ paper.labName }}</span>
-              <span v-if="paper.paper_type != null" class="paper-badge paper-badge--muted">{{ getPaperTypeLabel(paper.paper_type) }}</span>
-            </div>
-            <button
-              class="paper-bookmark"
-              type="button"
+        <PaperInfoCard v-for="paper in papers" :key="paper.id" :to="`/papers/${paper.id}`"
+          :title="paper.title" :byline="paperByline(paper)" :abstract="paper.abstract"
+          :details="paperDetails(paper)" :keywords="paper.keywords.slice(0, 5)"
+        >
+          <template #action>
+            <button class="paper-bookmark" type="button" :aria-pressed="bookmarkSet.has(paper.id)"
               :aria-label="bookmarkSet.has(paper.id) ? $t('paperDetail.removeBookmarkAria') : $t('paperDetail.addBookmarkAria')"
               @click="toggleBookmark(paper.id)"
-            >
-              <IconBookmark
-                class="paper-bookmark-icon"
-                :class="{ 'paper-bookmark-icon--active': bookmarkSet.has(paper.id) }"
-              />
-            </button>
-          </div>
-
-          <router-link :to="`/papers/${paper.id}`" class="paper-link">
-            <PaperInfoCard
-              :paper="toPaperInfo(paper)"
-              :keywords="paper.keywords.slice(0, 5)"
-              class-name="paper-info-card"
-            />
-          </router-link>
-
-          <div class="paper-foot">
-            <div class="paper-foot-meta">
-              <span v-if="paper.citation_count !== null">{{ $t('papersPage.citationCount', { count: paper.citation_count }) }}</span>
-              <span v-if="hasPublishYear(paper.publish_year)">{{ $t('papersPage.publishedYear', { year: paper.publish_year }) }}</span>
-              <span v-if="paper.reviewedAt">{{ $t('common.review.reviewedAt', { date: formatDate(paper.reviewedAt) }) }}</span>
-            </div>
-          </div>
-        </article>
+            ><IconBookmark aria-hidden="true" /></button>
+          </template>
+        </PaperInfoCard>
       </div>
 
       <div v-if="!isLoading && !loadError && total > pageSize" class="papers-pagination">
@@ -205,7 +158,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Message } from '@arco-design/web-vue'
 import { IconBookmark } from '@arco-design/web-vue/es/icon'
 import { useI18n } from 'vue-i18n'
-import PaperInfoCard, { type PaperInfo } from '@/components/PaperInfoCard.vue'
+import PaperInfoCard from '@/components/PaperInfoCard.vue'
 import PaperLibraryNavigation from '@/components/PaperLibraryNavigation.vue'
 import { usePublicConfig } from '@/composables/usePublicConfig'
 import {
@@ -270,7 +223,6 @@ const paperTypeOptions = computed(() => {
 })
 
 const pageTitle = computed(() => {
-  if (isLibraryHome.value && features.value.degreeTheses) return t('paperLibrary.publications')
   if (pageScope.value.kind === 'institution') {
     return t('papersPage.scopeTitles.institution', { name: pageScope.value.name })
   }
@@ -311,28 +263,6 @@ const pageSubtitle = computed(() => {
   }
 
   return t('papersPage.defaultSubtitle')
-})
-
-const scopeChips = computed(() => {
-  const chips: string[] = []
-
-  if (currentInstitution.value) {
-    chips.push(currentInstitution.value.name)
-  }
-
-  if (route.name === 'InstitutionCollegePapers') {
-    chips.push(String(route.params.collegeSlug ?? ''))
-  }
-
-  if (route.name === 'LabPapers' && papers.value[0]?.labName) {
-    chips.push(papers.value[0].labName ?? '')
-  }
-
-  if (route.name === 'ScholarPapers' && pageTitle.value) {
-    chips.push(t('papersPage.scholarChip'))
-  }
-
-  return chips.filter(Boolean)
 })
 
 const institutionQuickBrowse = computed(() => {
@@ -393,17 +323,27 @@ const getPaperTypeLabel = (value: number): string => {
   return t(key)
 }
 
-const toPaperInfo = (paper: PaperResponse): PaperInfo => {
-  return {
-    title: paper.title,
-    authors: paper.authors.map((author) => ({
-      name: author.name,
-      type: 'normal' as const,
-    })),
-    publishYear: paper.publish_year,
-    journal: paper.journal_name ?? t('papersPage.sourceFallback'),
-    summary: paper.abstract ?? t('common.noAbstract'),
-  }
+const paperByline = (paper: PaperResponse): string[] => [
+  paper.authors.map((author) => author.name).join(locale.value === 'zh-CN' ? '、' : ', '),
+  paper.journal_name || '',
+  hasPublishYear(paper.publish_year) ? String(paper.publish_year) : '',
+].filter(Boolean)
+
+const paperDetails = (paper: PaperResponse): string[] => [
+  paper.paper_type != null ? getPaperTypeLabel(paper.paper_type) : '',
+  showPaperSourceBadges.value ? paper.institutionName || '' : '',
+  showPaperSourceBadges.value ? paper.labName || '' : '',
+  paper.citation_count != null ? t('papersPage.citationCount', { count: paper.citation_count }) : '',
+  paper.reviewedAt ? t('common.review.reviewedAt', { date: formatDate(paper.reviewedAt) }) : '',
+].filter(Boolean)
+
+const canReset = computed(() => Boolean(queryText.value.trim() || filterCount.value ||
+  ['q', 'author', 'type', 'from', 'to'].some((key) => route.query[key]) || selectedSort.value !== 'latest'))
+
+const changeSort = (event: Event): void => {
+  const sort = (event.target as HTMLSelectElement).value
+  if (sort !== 'latest' && sort !== 'citations' && sort !== 'relevance') return
+  void router.push({ path: route.path, query: { ...route.query, sort, page: undefined } })
 }
 
 const resetFilters = (): void => {
@@ -431,7 +371,7 @@ const updateSearchRoute = async (): Promise<void> => {
     q: queryText.value.trim() || undefined,
     author: selectedAuthorId.value || undefined,
     type: selectedPaperType.value === undefined ? undefined : String(selectedPaperType.value),
-    sort: selectedSort.value,
+    sort: selectedSort.value === 'latest' && !queryText.value.trim() ? undefined : selectedSort.value,
     from: yearFrom.value === undefined ? undefined : String(yearFrom.value),
     to: yearTo.value === undefined ? undefined : String(yearTo.value),
     page: page.value > 1 ? String(page.value) : undefined,
@@ -624,286 +564,41 @@ watch(
 )
 </script>
 
-<style lang="sass" scoped>
-.papers-page
-  padding: 26px 0 48px
-
-.papers-container
-  width: 1120px
-  max-width: 100%
-  margin: 0 auto
-  box-sizing: border-box
-  padding: 0 24px
-
-.papers-hero
-  color: var(--scholar-text-primary)
-
-.papers-eyebrow
-  font-size: 12px
-  letter-spacing: 0.22em
-  text-transform: uppercase
-  color: var(--scholar-text-secondary)
-
-.papers-title
-  margin: 0
-  font-size: 30px
-  font-weight: 700
-  line-height: 1.18
-
-.papers-subtitle
-  max-width: 760px
-  margin: 12px 0 0
-  font-size: 14px
-  line-height: 1.7
-  color: var(--scholar-text-secondary)
-
-.scope-chip-list
-  display: flex
-  flex-wrap: wrap
-  gap: 10px
-  margin-top: 18px
-
-.scope-chip
-  padding: 7px 12px
-  border-radius: 999px
-  background: var(--scholar-primary-light)
-  color: var(--scholar-primary)
-  font-size: 12px
-
-.papers-search-row
-  display: flex
-  gap: 12px
-  align-items: center
-  margin-top: 22px
-
-.papers-search-input
-  flex: 1
-  min-width: 0
-
-.papers-search-input :deep(.arco-input-wrapper)
-  min-height: 48px
-  border-radius: 14px
-  border: 1px solid var(--scholar-border-input)
-
-.filter-toolbar
-  display: flex
-  align-items: center
-  justify-content: space-between
-  margin-top: 12px
-
-.filter-toggle
-  min-height: 44px
-  padding: 0
-  border: 0
-  background: transparent
-  color: var(--scholar-primary)
-  cursor: pointer
-  font: inherit
-
-.filter-toggle:focus-visible, .browse-chip:focus-visible, .paper-bookmark:focus-visible
-  outline: 2px solid var(--scholar-primary)
-  outline-offset: 3px
-
-.papers-search-btn
-  min-width: 90px
-  height: 48px
-  border-radius: 14px
-
-.papers-filter-grid
-  display: grid
-  grid-template-columns: repeat(6, minmax(0, 1fr))
-  gap: 12px
-  margin-top: 14px
-
-.papers-filter-control
-  width: 100%
-
-.papers-filter-control :deep(.arco-select-view),
-.papers-filter-control :deep(.arco-input-wrapper),
-.papers-filter-control :deep(.arco-input-number)
-  min-height: 44px
-  border-radius: 12px
-
-.papers-filter-reset
-  height: 44px
-  border-radius: 12px
-
-.option-meta
-  color: #98a2b3
-
-.browse-section
-  margin-top: 22px
-  padding: 22px 24px
-  border-radius: 12px
-  background: #fff
-  border: 1px solid rgba(15, 47, 87, 0.08)
-
-.section-head
-  display: flex
-  align-items: flex-start
-  justify-content: space-between
-  gap: 16px
-  margin-bottom: 16px
-
-.section-title
-  margin: 0
-  font-size: 20px
-  color: #1f2937
-
-.section-subtitle
-  margin: 8px 0 0
-  font-size: 14px
-  color: #667085
-
-.browse-group + .browse-group
-  margin-top: 16px
-
-.browse-label
-  font-size: 13px
-  font-weight: 600
-  color: #667085
-
-.browse-chip-list
-  display: flex
-  flex-wrap: wrap
-  gap: 10px
-  margin-top: 10px
-
-.browse-chip
-  display: inline-flex
-  align-items: center
-  min-height: 36px
-  padding: 0 14px
-  border-radius: 999px
-  background: #eef4ff
-  color: #0f62fe
-  text-decoration: none
-  font-size: 13px
-  font-weight: 600
-
-.papers-meta
-  margin: 22px 0 12px
-  font-size: 14px
-  color: #667085
-
-.papers-meta-num
-  color: #0f2f57
-  font-weight: 700
-
-.papers-list
-  display: flex
-  flex-direction: column
-  gap: 16px
-
-.paper-shell
-  padding: 18px
-  border-radius: 12px
-  background: #fff
-  border: 1px solid rgba(15, 47, 87, 0.08)
-
-.paper-shell-head
-  display: flex
-  align-items: center
-  justify-content: space-between
-  gap: 12px
-  margin-bottom: 10px
-
-.paper-badges
-  display: flex
-  flex-wrap: wrap
-  gap: 8px
-
-.paper-badge
-  padding: 6px 10px
-  border-radius: 999px
-  background: #eef4ff
-  color: #0f62fe
-  font-size: 12px
-  font-weight: 600
-
-.paper-badge--muted
-  background: #f4f6f8
-  color: #667085
-
-.paper-link
-  text-decoration: none
-
-.paper-bookmark
-  min-width: 44px
-  height: 44px
-  border-radius: 50%
-  border: 1px solid rgba(15, 47, 87, 0.1)
-  background: #fff
-  display: inline-flex
-  align-items: center
-  justify-content: center
-  cursor: pointer
-
-.paper-bookmark-icon
-  color: #98a2b3
-  font-size: 18px
-
-.paper-bookmark-icon--active
-  color: #0f62fe
-
-.paper-foot
-  display: flex
-  justify-content: flex-end
-  margin-top: 10px
-
-.paper-foot-meta
-  display: flex
-  flex-wrap: wrap
-  gap: 8px 12px
-  font-size: 12px
-  color: #667085
-
-.papers-pagination
-  display: flex
-  justify-content: center
-  margin-top: 22px
-
-.papers-state, .section-state
-  min-height: 160px
-  display: flex
-  flex-direction: column
-  gap: 12px
-  align-items: center
-  justify-content: center
-  color: #667085
-  text-align: center
-
-.section-state--compact
-  min-height: 0
-  justify-content: flex-start
-  text-align: left
-
-@media (max-width: 960px)
-  .papers-filter-grid
-    grid-template-columns: repeat(2, minmax(0, 1fr))
-
-@media (max-width: 768px)
-  .papers-container
-    padding: 0 18px
-
-  .papers-title
-    font-size: 28px
-
-  .section-head
-    flex-direction: column
-
-  .papers-search-row
-    flex-direction: column
-
-  .papers-search-btn
-    width: 100%
-
-  .papers-search-input
-    width: 100%
-
-  .papers-filter-grid
-    grid-template-columns: minmax(0, 1fr)
-
-  .paper-shell-head
-    align-items: flex-start
+<style scoped>
+.papers-container { width: 100%; max-width: 1080px; margin: 0 auto; padding: 22px 24px 40px; box-sizing: border-box; color: var(--scholar-text-1); }
+.scope-header { margin-bottom: 12px; }
+.scope-header h1 { margin: 0; font-size: clamp(24px, 2vw, 30px); }
+.scope-header p { margin: 6px 0 0; color: var(--scholar-text-2); }
+.papers-search-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.papers-search-input, .sort-control select { min-width: 0; box-sizing: border-box; background: white; color: var(--scholar-text-1); border: 1px solid var(--scholar-border-input); border-radius: 8px; font: inherit; }
+.papers-search-input { flex: 1 1 220px; height: 44px; padding: 0 12px; }
+.search-btn, .filter-toggle, .reset-btn { box-sizing: border-box; min-height: 44px; border: 1px solid var(--scholar-border-input); border-radius: 8px; padding: 0 14px; color: var(--scholar-text-2); background: white; font: inherit; cursor: pointer; }
+.search-btn { background: var(--scholar-primary); border-color: var(--scholar-primary); color: white; font-weight: 600; }
+.filter-toggle[aria-expanded="true"] { border-color: var(--scholar-primary); color: var(--scholar-primary); }
+.reset-btn { border-color: transparent; background: transparent; color: var(--scholar-primary); }
+.papers-filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); align-items: center; gap: 8px; margin-top: 8px; padding: 12px; border-radius: 8px; background: var(--scholar-bg-sidebar); }
+.papers-filter-control { width: 100%; min-width: 0; min-height: 44px; }
+.papers-filter-control :deep(.arco-input-wrapper) { min-height: 44px; }
+.option-meta { color: var(--scholar-text-desc); }
+.browse-section { margin-top: 4px; }
+.browse-section summary { cursor: pointer; width: fit-content; max-width: 100%; padding: 12px 0; box-sizing: border-box; min-height: 44px; color: var(--scholar-primary); font-weight: 500; }
+.browse-group { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; padding-inline-start: 12px; }
+.browse-label { font-size: 13px; color: var(--scholar-text-desc); }
+.browse-chip-list { display: flex; flex-wrap: wrap; gap: 0 12px; }
+.browse-chip { display: inline-flex; align-items: center; min-height: 44px; color: var(--scholar-primary); overflow-wrap: anywhere; }
+.results-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; margin-top: 10px; color: var(--scholar-text-2); font-size: 13px; }
+.sort-control { display: inline-flex; align-items: center; gap: 6px; }
+.sort-control select { min-height: 44px; border-color: transparent; color: var(--scholar-primary); cursor: pointer; }
+.paper-bookmark { flex: 0 0 44px; width: 44px; height: 44px; margin: -8px 0; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--scholar-text-desc); font-size: 18px; cursor: pointer; }
+.paper-bookmark:hover, .paper-bookmark[aria-pressed="true"] { background: var(--scholar-primary-light); color: var(--scholar-primary); }
+.paper-bookmark[aria-pressed="true"] svg { fill: currentColor; }
+.papers-pagination { display: flex; justify-content: center; margin-top: 18px; }
+.papers-state { padding: 32px 12px; border-top: 1px solid var(--scholar-divider); text-align: center; color: var(--scholar-text-2); }
+:where(input, button, summary, select, a):focus-visible { outline: 2px solid var(--scholar-primary); outline-offset: 2px; }
+@media (max-width: 640px) {
+  .papers-container { padding: 16px 12px 32px; }
+  .papers-search-input { flex-basis: 100%; }
+  .papers-filter-grid { grid-template-columns: 1fr; }
+  .papers-pagination :deep(.arco-pagination) { max-width: 100%; flex-wrap: wrap; justify-content: center; row-gap: 4px; }
+}
 </style>

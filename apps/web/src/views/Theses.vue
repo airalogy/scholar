@@ -1,29 +1,22 @@
 <template>
   <div class="theses-page">
-    <PaperLibraryNavigation active="theses" />
-    <header class="page-header">
-      <div>
-        <h1>{{ $t('paperLibrary.theses') }}</h1>
-        <p class="page-description">{{ $t('paperLibrary.thesesScope') }}</p>
-      </div>
-      <div class="header-actions">
-        <router-link to="/theses/mine" class="secondary-btn">{{ $t('degreeTheses.myTheses') }}</router-link>
-        <router-link to="/theses/submit" class="primary-btn">{{ $t('degreeTheses.submitThesis') }}</router-link>
-      </div>
-    </header>
+    <PaperLibraryNavigation active="theses" heading :hint="$t('paperLibrary.thesesScope')">
+      <template #actions>
+        <router-link to="/theses/mine" class="header-link">{{ $t('degreeTheses.myTheses') }}</router-link>
+        <router-link to="/theses/submit" class="secondary-btn">{{ $t('degreeTheses.submitThesis') }}</router-link>
+      </template>
+    </PaperLibraryNavigation>
 
     <form class="search-panel" role="search" :aria-label="$t('paperLibrary.thesisSearch')" @submit.prevent="runSearch">
-      <label class="search-label" for="thesis-search">{{ $t('paperLibrary.thesisSearch') }}</label>
       <div class="search-row">
-        <input id="thesis-search" v-model="query.q" class="search-input" type="search" :placeholder="$t('degreeTheses.searchPlaceholder')" />
+        <input id="thesis-search" v-model="query.q" class="search-input" type="search" :aria-label="$t('paperLibrary.thesisSearch')" :placeholder="$t('degreeTheses.searchPlaceholder')" />
         <button class="primary-btn" type="submit">{{ $t('common.search') }}</button>
-      </div>
-      <div class="filter-toolbar">
-        <button class="text-btn" type="button" :aria-expanded="filtersExpanded" aria-controls="thesis-filters" @click="filtersExpanded = !filtersExpanded">
+
+        <button class="secondary-btn" type="button" :aria-expanded="filtersExpanded" aria-controls="thesis-filters" @click="filtersExpanded = !filtersExpanded">
           {{ $t('paperLibrary.filters') }}<span v-if="filterCount"> ({{ filterCount }})</span>
           <span aria-hidden="true">{{ filtersExpanded ? ' −' : ' +' }}</span>
         </button>
-        <button class="text-btn" type="button" @click="resetFilters">{{ $t('papersPage.resetFilters') }}</button>
+        <button v-if="canReset" class="text-btn" type="button" @click="resetFilters">{{ $t('papersPage.resetFilters') }}</button>
       </div>
       <div v-show="filtersExpanded" id="thesis-filters" class="filter-grid">
         <label>{{ $t('degreeTheses.awardYearLabel') }}
@@ -69,29 +62,11 @@
       <button v-if="hasSearch" class="secondary-btn" type="button" @click="resetFilters">{{ $t('papersPage.resetFilters') }}</button>
     </div>
     <section v-else class="thesis-list" :aria-label="$t('paperLibrary.theses')">
-      <article v-for="thesis in items" :key="thesis.id" class="thesis-card">
-        <div class="thesis-main">
-          <div class="record-meta">
-            <span class="type-badge">{{ thesis.published_version?.degree_category }}</span>
-            <span>{{ thesis.published_version?.award_year }}</span>
-            <span class="record-code">{{ thesis.record_code }}</span>
-          </div>
-          <h2><router-link :to="`/theses/${thesis.record_code}`">{{ thesis.published_version?.title }}</router-link></h2>
-          <p v-if="thesis.published_version?.title_en" class="title-en">{{ thesis.published_version.title_en }}</p>
-          <div class="metadata-row">
-            <span>{{ thesis.published_version?.author_name }}</span>
-            <span>{{ thesis.published_version?.training_unit }}</span>
-            <span>{{ thesis.published_version?.major }}</span>
-          </div>
-          <p class="abstract">{{ thesis.published_version?.abstract || $t('common.noAbstract') }}</p>
-          <div v-if="thesis.published_version?.keywords.length" class="tags">
-            <span v-for="keyword in thesis.published_version.keywords.slice(0, 6)" :key="keyword">{{ keyword }}</span>
-          </div>
-        </div>
-        <router-link :to="`/theses/${thesis.record_code}`" class="detail-link" :aria-label="$t('paperLibrary.viewThesis', { title: thesis.published_version?.title })">
-          {{ $t('degreeTheses.viewDetail') }} <span aria-hidden="true">→</span>
-        </router-link>
-      </article>
+      <PaperInfoCard v-for="thesis in items" :key="thesis.id" :to="`/theses/${thesis.record_code}`"
+        :title="thesis.published_version?.title || thesis.record_code" :subtitle="thesis.published_version?.title_en"
+        :byline="thesisByline(thesis)" :abstract="thesis.published_version?.abstract"
+        :details="thesisDetails(thesis)" :keywords="thesis.published_version?.keywords.slice(0, 6) ?? []"
+      />
     </section>
     <nav v-if="!loading && !errorMessage && total > pageSize" class="pagination" :aria-label="$t('degreeTheses.paginationLabel')">
       <button class="secondary-btn" type="button" :disabled="offset === 0" @click="changePage(-1)">{{ $t('degreeTheses.previousPage') }}</button>
@@ -104,6 +79,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import PaperInfoCard from '@/components/PaperInfoCard.vue'
 import PaperLibraryNavigation from '@/components/PaperLibraryNavigation.vue'
 import { getDegreeThesisFacets, listDegreeTheses, type DegreeThesis, type DegreeThesisFacets } from '@/api/theses'
 
@@ -120,7 +96,13 @@ const pageSize = 20
 const facets = ref<DegreeThesisFacets>({ training_units: [], majors: [], degree_categories: [], award_years: [] })
 const query = reactive({ q: '', award_year: '', training_unit: '', degree_category: '', major: '' })
 const filterCount = computed(() => [query.award_year, query.training_unit, query.degree_category, query.major].filter(Boolean).length)
-const hasSearch = computed(() => Object.values(route.query).some(Boolean))
+const hasSearch = computed(() => ['q', 'year', 'unit', 'degree', 'major'].some((key) => route.query[key]))
+const canReset = computed(() => Boolean(hasSearch.value || query.q.trim() || filterCount.value))
+const thesisByline = (thesis: DegreeThesis): string[] => {
+  const v = thesis.published_version
+  return v ? [v.author_name, v.training_unit, v.major, v.award_year ? String(v.award_year) : ''].filter((item): item is string => Boolean(item)) : []
+}
+const thesisDetails = (thesis: DegreeThesis): string[] => [thesis.published_version?.degree_category || '', thesis.record_code].filter(Boolean)
 const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const withSelected = (values: string[], selected: string): string[] => [...new Set([...values, ...(selected ? [selected] : [])])]
@@ -210,60 +192,30 @@ onMounted(async (): Promise<void> => {
 </script>
 
 <style scoped>
-.theses-page { width: 1120px; max-width: 100%; box-sizing: border-box; margin: 0 auto; padding: 26px 24px 48px; }
-.page-header { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; margin-bottom: 24px; }
-h1 { margin: 0; font-size: 30px; line-height: 1.3; color: var(--scholar-text-primary); }
-.page-description { max-width: 660px; margin: 12px 0 0; color: var(--scholar-text-secondary); line-height: 1.7; }
-.header-actions { display: flex; gap: 10px; flex-wrap: wrap; flex-shrink: 0; }
-.primary-btn, .secondary-btn { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-height: 42px; border-radius: 8px; padding: 10px 16px; text-decoration: none; font-size: 14px; font-weight: 600; cursor: pointer; }
-.primary-btn { border: 1px solid var(--scholar-primary); background: var(--scholar-primary); color: #fff; }
-.secondary-btn { border: 1px solid var(--scholar-border-input); color: var(--scholar-text-primary); background: #fff; }
-.search-panel { background: #fff; border: 1px solid var(--scholar-border-light); border-radius: 14px; padding: 24px; margin-bottom: 24px; }
-.search-label { display: block; margin-bottom: 10px; font-size: 14px; font-weight: 600; color: var(--scholar-text-primary); }
-.search-row { display: flex; gap: 12px; }
-.search-input, .filter-select { width: 100%; min-width: 0; min-height: 44px; box-sizing: border-box; border: 1px solid var(--scholar-border-input); border-radius: 8px; padding: 0 12px; color: var(--scholar-text-primary); background: #fff; font: inherit; }
-.search-row .primary-btn { flex-shrink: 0; min-width: 88px; }
-.filter-toolbar { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; }
-.text-btn { padding: 10px 0; min-height: 44px; border: 0; background: none; color: var(--scholar-primary); cursor: pointer; font: inherit; font-size: 14px; }
-.filter-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-top: 10px; padding-top: 18px; border-top: 1px solid var(--scholar-border-light); }
-.filter-grid label { display: grid; gap: 8px; color: var(--scholar-text-secondary); font-size: 13px; }
-.apply-filters { justify-self: start; }
-.filter-hint { grid-column: 1 / -1; color: var(--scholar-text-secondary); margin: 0; font-size: 13px; }
-.results-summary { margin: 0 0 16px; color: var(--scholar-text-secondary); font-size: 14px; }
-.state-card { padding: 48px 20px; text-align: center; background: #fff; border: 1px solid var(--scholar-border-light); border-radius: 12px; color: var(--scholar-text-secondary); }
-.state-card h2 { font-size: 18px; color: var(--scholar-text-primary); }
-.state-card p { line-height: 1.7; margin-bottom: 20px; }
-.state-card--error { border-color: #f2cccc; }
-.thesis-list { display: grid; gap: 16px; }
-.thesis-card { display: flex; gap: 24px; align-items: center; padding: 24px; border: 1px solid var(--scholar-border-light); border-radius: 12px; background: #fff; }
-.thesis-card:hover { border-color: var(--scholar-primary); }
-.thesis-main { min-width: 0; flex: 1; overflow-wrap: anywhere; }
-.record-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; color: var(--scholar-text-secondary); font-size: 12px; }
-.type-badge { padding: 4px 10px; border-radius: 6px; background: var(--scholar-primary-light); color: var(--scholar-primary); }
-.record-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.thesis-main h2 { margin: 12px 0 0; font-size: 19px; line-height: 1.6; }
-.thesis-main h2 a { color: var(--scholar-text-primary); text-decoration: none; }
-.thesis-main h2 a:hover { color: var(--scholar-primary); }
-.title-en { margin: 4px 0; color: var(--scholar-text-secondary); font-size: 14px; }
-.metadata-row { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 12px 0; color: var(--scholar-text-secondary); font-size: 14px; }
-.abstract { color: var(--scholar-text-secondary); font-size: 14px; line-height: 1.8; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.tags { display: flex; flex-wrap: wrap; gap: 8px; }
-.tags span { background: var(--scholar-bg-sidebar); color: var(--scholar-text-secondary); border-radius: 6px; padding: 4px 8px; font-size: 12px; }
-.detail-link { flex-shrink: 0; display: inline-flex; align-items: center; gap: 8px; min-height: 44px; color: var(--scholar-primary); text-decoration: none; font-size: 14px; }
-.pagination { display: flex; justify-content: center; align-items: center; gap: 16px; margin-top: 28px; color: var(--scholar-text-secondary); font-size: 14px; }
-.pagination button:disabled { opacity: .5; cursor: not-allowed; }
-a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--scholar-primary); outline-offset: 3px; }
-@media (max-width: 1000px) { .page-header { flex-direction: column; } .filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.theses-page { width: 100%; max-width: 1080px; margin: 0 auto; padding: 22px 24px 40px; box-sizing: border-box; color: var(--scholar-text-1); }
+.primary-btn, .secondary-btn, .text-btn, .header-link { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-height: 44px; border-radius: 8px; padding: 0 14px; border: 1px solid var(--scholar-border-input); background: white; color: var(--scholar-text-2); font: inherit; text-decoration: none; cursor: pointer; }
+.primary-btn { color: white; background: var(--scholar-primary); border-color: var(--scholar-primary); font-weight: 600; }
+.secondary-btn[aria-expanded="true"] { border-color: var(--scholar-primary); color: var(--scholar-primary); }
+.text-btn, .header-link { color: var(--scholar-primary); background: transparent; border-color: transparent; }
+.header-link { padding: 0 2px; }
+.header-link:hover { text-decoration: underline; }
+.search-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.search-input, .filter-select { min-width: 0; min-height: 44px; box-sizing: border-box; border: 1px solid var(--scholar-border-input); border-radius: 8px; padding: 0 12px; color: var(--scholar-text-1); background: white; font: inherit; }
+.search-input { flex: 1 1 220px; }
+.filter-select { width: 100%; }
+.filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); align-items: end; gap: 8px; margin-top: 8px; padding: 12px; border-radius: 8px; background: var(--scholar-bg-sidebar); }
+.filter-grid label { display: grid; gap: 4px; font-size: 13px; color: var(--scholar-text-2); }
+.filter-hint { grid-column: 1 / -1; margin: 0; color: var(--scholar-text-desc); }
+.results-summary { display: flex; align-items: center; min-height: 44px; margin-top: 10px; color: var(--scholar-text-2); font-size: 13px; }
+.state-card { padding: 32px 12px; border-top: 1px solid var(--scholar-divider); text-align: center; color: var(--scholar-text-2); }
+.state-card h2 { color: var(--scholar-text-1); font-size: 18px; }
+.pagination { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px 12px; margin-top: 18px; color: var(--scholar-text-2); }
+.pagination button:disabled { opacity: .55; cursor: not-allowed; }
+:where(input, button, select, a):focus-visible { outline: 2px solid var(--scholar-primary); outline-offset: 2px; }
 @media (max-width: 640px) {
-  .theses-page { padding: 24px 16px 48px; }
-  h1 { font-size: 26px; }
-  .header-actions { width: 100%; }
-  .header-actions a { flex: 1; padding: 10px 8px; }
-  .search-panel { padding: 18px 16px; }
+  .theses-page { padding: 16px 12px 32px; }
+  .search-input { flex-basis: 100%; }
   .filter-grid { grid-template-columns: 1fr; }
-  .thesis-card { padding: 20px; flex-direction: column; align-items: stretch; gap: 4px; }
-  .detail-link { align-self: flex-start; }
-  .pagination { flex-wrap: wrap; gap: 12px; }
   .pagination > span { order: -1; width: 100%; text-align: center; }
 }
 </style>
