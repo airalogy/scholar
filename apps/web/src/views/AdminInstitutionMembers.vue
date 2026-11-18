@@ -8,6 +8,7 @@
           <p class="admin-subtitle">
             {{ $t('adminInstitutionMembers.subtitle') }}
           </p>
+          <span v-if="institution" class="role-badge">{{ $t('adminInstitutionMembers.yourRole', { role: institutionRoleLabel }) }}</span>
         </div>
         <div class="header-actions">
           <router-link
@@ -24,22 +25,189 @@
       <div v-if="isLoading" class="admin-state">{{ $t('common.loading') }}</div>
       <div v-else-if="loadError" class="admin-state">{{ loadError }}</div>
       <template v-else-if="institution">
+        <section class="admin-panel">
+          <div class="panel-head">
+            <div>
+              <h2 class="panel-title">{{ $t('adminInstitutionMembers.memberPermissionsTitle') }}</h2>
+              <p class="panel-subtitle">{{ $t('adminInstitutionMembers.memberPermissionsSubtitle') }}</p>
+            </div>
+          </div>
+
+          <template v-if="institution.access.can_manage_members">
+            <p v-if="!canManageOwnerRole" class="permission-note">{{ $t('adminInstitutionMembers.ownerRoleRestriction') }}</p>
+            <div class="roster-toolbar">
+              <label class="roster-search">
+                <span>{{ $t('adminInstitutionMembers.findMember') }}</span>
+                <input v-model.trim="rosterQuery" type="search" :placeholder="$t('adminInstitutionMembers.rosterPlaceholder')" />
+              </label>
+              <div class="roster-filters" role="group" :aria-label="$t('adminInstitutionMembers.institutionRoleLabel')">
+                <button type="button" :aria-pressed="!managersOnly" @click="managersOnly = false">{{ $t('adminInstitutionMembers.allMembers') }}</button>
+                <button type="button" :aria-pressed="managersOnly" @click="managersOnly = true">{{ $t('adminInstitutionMembers.managers') }}</button>
+              </div>
+            </div>
+            <div v-if="isMembershipLoading" class="table-state">{{ $t('adminInstitutionMembers.memberListLoading') }}</div>
+            <div v-else-if="visibleMembers.length" class="member-list">
+              <article v-for="member in visibleMembers" :key="member.userId" class="member-card">
+                <div class="search-user">
+                  <div class="avatar">
+                    <img v-if="member.avatar" :src="member.avatar" :alt="member.name" />
+                    <span v-else>{{ member.name.charAt(0) }}</span>
+                  </div>
+                  <div>
+                    <div class="member-identity"><strong>{{ member.name }}</strong><span class="role-badge">{{ getRoleLabel(member.role) }}</span></div>
+                    <div class="search-meta">{{ member.email }}</div>
+                    <div class="search-meta">
+                      {{ [member.degree, member.major].filter(Boolean).join(' / ') || $t('common.noAdditionalInfo') }}
+                    </div>
+                    <div class="search-meta">
+                      {{ $t('adminInstitutionMembers.paperStats', {
+                        total: member.paperCount,
+                        approved: member.approvedPaperCount,
+                      }) }}
+                    </div>
+                  </div>
+                </div>
+
+                <div class="member-actions">
+                  <a-button
+                    v-if="canManageOwnerRole && member.role === 'member'"
+                    type="primary"
+                    size="small"
+                    class="appoint-admin"
+                    @click="handleRoleChange(member, 'admin')"
+                  >
+                    {{ $t('adminInstitutionMembers.appoint') }}
+                  </a-button>
+                  <details v-if="canManageMember(member.role)" class="row-disclosure">
+                    <summary>{{ $t('adminInstitutionMembers.memberOptions') }}</summary>
+                    <div class="row-options">
+                      <a-checkbox
+                        class="reviewer-toggle"
+                        :model-value="member.role === 'member' ? member.canReviewContent : true"
+                        :disabled="member.role !== 'member'"
+                        @change="handleReviewPermissionChange(member, $event)"
+                      >
+                        {{ $t('adminInstitutionMembers.reviewerPermissionLabel') }}
+                      </a-checkbox>
+                      <a-checkbox
+                        class="reviewer-toggle"
+                        :model-value="member.role === 'member' ? member.canImportData : true"
+                        :disabled="member.role !== 'member'"
+                        @change="handleImportPermissionChange(member, $event)"
+                      >
+                        {{ $t('adminInstitutionMembers.importPermissionLabel') }}
+                      </a-checkbox>
+                      <a-select
+                        v-if="canManageOwnerRole"
+                        :aria-label="$t('adminInstitutionMembers.institutionRoleLabel')"
+                        :model-value="member.role"
+                        size="small"
+                        class="inline-role-select"
+                        @change="handleRoleChange(member, $event)"
+                      >
+                        <a-option v-for="item in manageableRoleOptions" :key="item.value" :value="item.value">{{ item.label }}</a-option>
+                      </a-select>
+                      <a-button
+                        status="danger"
+                        type="outline"
+                        size="small"
+                        :loading="actionUserId === member.userId"
+                        @click="requestChange(member, null)"
+                      >
+                        {{ $t('common.remove') }}
+                      </a-button>
+                    </div>
+                  </details>
+                </div>
+              </article>
+            </div>
+            <div v-else class="table-state" role="status">
+              {{ memberships.length ? $t('adminInstitutionMembers.noMatches') : $t('adminInstitutionMembers.noMembers') }}
+            </div>
+            <details class="directory-disclosure">
+              <summary>{{ $t('adminInstitutionMembers.addFromDirectory') }}</summary>
+              <div class="member-toolbar">
+                <a-input-search
+                  v-model="searchQuery"
+                  class="member-search"
+                  search-button
+                  :button-text="$t('common.search')"
+                  :placeholder="$t('adminInstitutionMembers.memberSearchPlaceholder')"
+                  allow-clear
+                  @search="searchDirectory"
+                  @press-enter="searchDirectory"
+                />
+                <a-input
+                  v-model="searchInternalId"
+                  class="internal-id-input"
+                  :placeholder="$t('adminInstitutionMembers.internalIdPlaceholder')"
+                />
+                <a-select v-model="searchRole" class="role-select">
+                  <a-option v-for="item in manageableRoleOptions" :key="item.value" :value="item.value">{{ item.label }}</a-option>
+                </a-select>
+                <a-checkbox
+                  class="reviewer-toggle"
+                  :model-value="searchRole === 'member' ? searchCanReviewContent : true"
+                  :disabled="searchRole !== 'member'"
+                  @change="handleSearchReviewPermissionChange"
+                >
+                  {{ $t('adminInstitutionMembers.reviewerPermissionLabel') }}
+                </a-checkbox>
+                <a-checkbox
+                  class="reviewer-toggle"
+                  :model-value="searchRole === 'member' ? searchCanImportData : true"
+                  :disabled="searchRole !== 'member'"
+                  @change="handleSearchImportPermissionChange"
+                >
+                  {{ $t('adminInstitutionMembers.importPermissionLabel') }}
+                </a-checkbox>
+              </div>
+
+              <div v-if="searchResults.length" class="search-grid">
+                <article v-for="user in searchResults" :key="user.id" class="search-card">
+                  <div class="search-user">
+                    <div class="avatar">
+                      <img v-if="user.avatar" :src="user.avatar" :alt="user.name" />
+                      <span v-else>{{ user.name.charAt(0) }}</span>
+                    </div>
+                    <div>
+                      <div class="search-name">{{ user.name }}</div>
+                      <div class="search-meta">{{ user.email }}</div>
+                      <div class="search-meta">
+                        {{ [user.college, user.major, user.laboratory].filter(Boolean).join(' / ') || $t('common.noAdditionalInfo') }}
+                      </div>
+                    </div>
+                  </div>
+                  <a-button
+                    type="outline"
+                    :loading="actionUserId === user.id"
+                    :disabled="!canUpdateDirectoryUser(user.id)"
+                    @click="requestChange(user, searchRole, searchCanReviewContent, searchCanImportData, searchInternalId)"
+                  >
+                    {{ memberIdSet.has(user.id) ? $t('common.updateRole') : $t('common.addToInstitution') }}
+                  </a-button>
+                </article>
+              </div>
+              <div v-else-if="isSearching" class="search-state">{{ $t('common.searching') }}</div>
+              <div v-else class="search-state">{{ $t('adminInstitutionMembers.memberSearchHint') }}</div>
+            </details>
+          </template>
+
+          <div v-else class="table-state">
+            {{ $t('adminInstitutionMembers.noMemberPermission') }}
+          </div>
+        </section>
+
         <router-link v-if="canManageOwnerRole" :to="`/admin/institutions/${institution.slug}/governance`">{{ $t('governance.title') }}</router-link>
         <InstitutionIdentityRequestsPanel v-if="canManageOwnerRole" :slug="institution.slug" />
         <InstitutionIdentifiersPanel v-if="canManageOwnerRole" :slug="institution.slug" />
         <AdministratorGovernancePanel v-if="canManageOwnerRole" :key="institution.slug" :slug="institution.slug" :memberships="memberships" @completed="load(institution.slug)" />
-        <section v-if="institution.access.can_manage_members" class="admin-panel">
-          <label for="permission-reason">{{ $t('administrators.reason') }}</label>
-          <a-textarea id="permission-reason" v-model="permissionReason" :max-length="1000" />
-          <p>{{ $t('administrators.roleRestriction') }}</p>
-        </section>
         <section class="admin-panel">
           <div class="panel-head">
             <div>
               <h2 class="panel-title">{{ $t('adminInstitutionMembers.homepageTitle') }}</h2>
               <p class="panel-subtitle">{{ $t('adminInstitutionMembers.homepageSubtitle') }}</p>
             </div>
-            <span class="role-badge">{{ institutionRoleLabel }}</span>
           </div>
 
           <div class="panel-meta">
@@ -92,6 +260,8 @@
           </div>
 
           <template v-if="institution.access.can_manage_members">
+            <label for="permission-reason">{{ $t('administrators.reason') }}</label>
+            <a-textarea id="permission-reason" v-model="permissionReason" :max-length="1000" />
             <div class="provision-note">
               {{ $t('adminInstitutionMembers.provisionNote') }}
             </div>
@@ -266,151 +436,6 @@
         <section class="admin-panel">
           <div class="panel-head">
             <div>
-              <h2 class="panel-title">{{ $t('adminInstitutionMembers.memberPermissionsTitle') }}</h2>
-              <p class="panel-subtitle">{{ $t('adminInstitutionMembers.memberPermissionsSubtitle') }}</p>
-            </div>
-          </div>
-
-          <template v-if="institution.access.can_manage_members">
-            <div class="member-toolbar">
-              <a-input-search
-                v-model="searchQuery"
-                class="member-search"
-                :placeholder="$t('adminInstitutionMembers.memberSearchPlaceholder')"
-                allow-clear
-                @search="searchDirectory"
-                @press-enter="searchDirectory"
-              />
-              <a-input
-                v-model="searchInternalId"
-                class="internal-id-input"
-                :placeholder="$t('adminInstitutionMembers.internalIdPlaceholder')"
-              />
-              <a-select v-model="searchRole" class="role-select">
-                <a-option v-for="item in manageableRoleOptions" :key="item.value" :value="item.value">{{ item.label }}</a-option>
-              </a-select>
-              <a-checkbox
-                class="reviewer-toggle"
-                :model-value="searchRole === 'member' ? searchCanReviewContent : true"
-                :disabled="searchRole !== 'member'"
-                @change="handleSearchReviewPermissionChange"
-              >
-                {{ $t('adminInstitutionMembers.reviewerPermissionLabel') }}
-              </a-checkbox>
-              <a-checkbox
-                class="reviewer-toggle"
-                :model-value="searchRole === 'member' ? searchCanImportData : true"
-                :disabled="searchRole !== 'member'"
-                @change="handleSearchImportPermissionChange"
-              >
-                {{ $t('adminInstitutionMembers.importPermissionLabel') }}
-              </a-checkbox>
-            </div>
-            <div v-if="!canManageOwnerRole" class="permission-note permission-note--section">
-              {{ $t('adminInstitutionMembers.ownerRoleRestriction') }}
-            </div>
-
-            <div v-if="searchResults.length" class="search-grid">
-              <article v-for="user in searchResults" :key="user.id" class="search-card">
-                <div class="search-user">
-                  <div class="avatar">
-                    <img v-if="user.avatar" :src="user.avatar" :alt="user.name" />
-                    <span v-else>{{ user.name.charAt(0) }}</span>
-                  </div>
-                  <div>
-                    <div class="search-name">{{ user.name }}</div>
-                    <div class="search-meta">{{ user.email }}</div>
-                    <div class="search-meta">
-                      {{ [user.college, user.major, user.laboratory].filter(Boolean).join(' / ') || $t('common.noAdditionalInfo') }}
-                    </div>
-                  </div>
-                </div>
-                <a-button
-                  type="outline"
-                  :loading="actionUserId === user.id"
-                  :disabled="!memberIdSet.has(user.id) && !searchInternalId.trim()"
-                  @click="upsertMember(user.id, searchRole, searchCanReviewContent, searchCanImportData, searchInternalId)"
-                >
-                  {{ memberIdSet.has(user.id) ? $t('common.updateRole') : $t('common.addToInstitution') }}
-                </a-button>
-              </article>
-            </div>
-            <div v-else-if="isSearching" class="search-state">{{ $t('common.searching') }}</div>
-            <div v-else class="search-state">{{ $t('adminInstitutionMembers.memberSearchHint') }}</div>
-
-            <div v-if="isMembershipLoading" class="table-state">{{ $t('adminInstitutionMembers.memberListLoading') }}</div>
-            <div v-else-if="memberships.length" class="member-list">
-              <article v-for="member in memberships" :key="member.userId" class="member-card">
-                <div class="search-user">
-                  <div class="avatar">
-                    <img v-if="member.avatar" :src="member.avatar" :alt="member.name" />
-                    <span v-else>{{ member.name.charAt(0) }}</span>
-                  </div>
-                  <div>
-                    <div class="search-name">{{ member.name }}</div>
-                    <div class="search-meta">{{ member.email }}</div>
-                    <div class="search-meta">
-                      {{ [member.degree, member.major].filter(Boolean).join(' / ') || $t('common.noAdditionalInfo') }}
-                    </div>
-                    <div class="search-meta">
-                      {{ $t('adminInstitutionMembers.paperStats', {
-                        total: member.paperCount,
-                        approved: member.approvedPaperCount,
-                      }) }}
-                    </div>
-                  </div>
-                </div>
-
-                <div class="member-actions">
-                  <a-checkbox
-                    class="reviewer-toggle"
-                    :model-value="member.role === 'member' ? member.canReviewContent : true"
-                    :disabled="!canManageMember(member.role) || member.role !== 'member'"
-                    @change="handleReviewPermissionChange(member, $event)"
-                  >
-                    {{ $t('adminInstitutionMembers.reviewerPermissionLabel') }}
-                  </a-checkbox>
-                  <a-checkbox
-                    class="reviewer-toggle"
-                    :model-value="member.role === 'member' ? member.canImportData : true"
-                    :disabled="!canManageMember(member.role) || member.role !== 'member'"
-                    @change="handleImportPermissionChange(member, $event)"
-                  >
-                    {{ $t('adminInstitutionMembers.importPermissionLabel') }}
-                  </a-checkbox>
-                  <a-select
-                    :model-value="member.role"
-                    size="small"
-                    class="inline-role-select"
-                    :disabled="!canManageMember(member.role)"
-                    @change="handleRoleChange(member, $event)"
-                  >
-                    <a-option v-for="item in getManageableRoleOptions(member.role)" :key="item.value" :value="item.value">{{ item.label }}</a-option>
-                  </a-select>
-                  <a-button
-                    status="danger"
-                    type="outline"
-                    size="small"
-                    :disabled="!canManageMember(member.role)"
-                    :loading="actionUserId === member.userId"
-                    @click="removeMember(member.userId)"
-                  >
-                    {{ $t('common.remove') }}
-                  </a-button>
-                </div>
-              </article>
-            </div>
-            <div v-else class="table-state">{{ $t('adminInstitutionMembers.noMembers') }}</div>
-          </template>
-
-          <div v-else class="table-state">
-            {{ $t('adminInstitutionMembers.noMemberPermission') }}
-          </div>
-        </section>
-
-        <section class="admin-panel">
-          <div class="panel-head">
-            <div>
               <h2 class="panel-title">{{ $t('adminInstitutionMembers.labsTitle') }}</h2>
               <p class="panel-subtitle">{{ $t('adminInstitutionMembers.labsSubtitle') }}</p>
             </div>
@@ -432,6 +457,37 @@
           </div>
           <div v-else class="table-state">{{ $t('adminInstitutionMembers.noLabs') }}</div>
         </section>
+        <a-modal
+          :visible="Boolean(pendingChange)"
+          :title="$t('adminInstitutionMembers.confirmChange')"
+          :mask-closable="false"
+          :closable="!actionUserId"
+          :esc-to-close="!actionUserId"
+          :footer="false"
+          width="min(480px, 94vw)"
+          @cancel="cancelChange"
+        >
+          <form v-if="pendingChange" class="change-form" @submit.prevent="confirmChange">
+            <strong>{{ pendingChange.name }} · {{ institution.name }}</strong>
+            <p>{{ $t('adminInstitutionMembers.roleTransition', {
+              from: pendingChange.from ? getRoleLabel(pendingChange.from) : $t('adminInstitutionMembers.notMember'),
+              to: pendingChange.to ? getRoleLabel(pendingChange.to) : $t('adminInstitutionMembers.notMember'),
+            }) }}</p>
+            <p v-if="pendingChange.internalId">{{ $t('adminInstitutionMembers.internalIdLabel') }}: {{ pendingChange.internalId }}</p>
+            <p v-if="pendingChange.to === 'admin' && pendingChange.from !== 'admin'">{{ $t('adminInstitutionMembers.appointmentNote') }}</p>
+            <p v-if="pendingChange.to === 'member'">
+              {{ $t('adminInstitutionMembers.reviewerPermissionLabel') }}: {{ pendingChange.review ? $t('common.yes') : $t('common.no') }} ·
+              {{ $t('adminInstitutionMembers.importPermissionLabel') }}: {{ pendingChange.importData ? $t('common.yes') : $t('common.no') }}
+            </p>
+            <label for="member-change-reason">{{ $t('administrators.reason') }}</label>
+            <textarea id="member-change-reason" v-model="changeReason" rows="3" maxlength="1000" :disabled="Boolean(actionUserId)" />
+            <p v-if="changeError" role="alert">{{ changeError }}</p>
+            <div class="panel-actions">
+              <a-button :disabled="Boolean(actionUserId)" @click="cancelChange">{{ $t('common.cancel') }}</a-button>
+              <a-button type="primary" html-type="submit" :loading="Boolean(actionUserId)" :disabled="changeReason.trim().length < 3">{{ $t('common.confirm') }}</a-button>
+            </div>
+          </form>
+        </a-modal>
       </template>
     </div>
   </div>
@@ -509,6 +565,31 @@ const provisionForm = reactive({
   laboratory: '',
   expiresInDays: 30,
 })
+
+const rosterQuery = ref('')
+const managersOnly = ref(false)
+const visibleMembers = computed(() => {
+  const query = rosterQuery.value.toLocaleLowerCase()
+  return memberships.value.filter(member =>
+    (!managersOnly.value || member.role === 'admin' || member.role === 'owner') &&
+    [member.name, member.email, member.internalId].some(value => value?.toLocaleLowerCase().includes(query)),
+  )
+})
+
+interface MemberChange {
+  slug: string
+  userId: string
+  name: string
+  from: InstitutionRole | null
+  to: InstitutionRole | null
+  review: boolean
+  importData: boolean
+  internalId?: string
+}
+
+const pendingChange = ref<MemberChange | null>(null)
+const changeReason = ref('')
+const changeError = ref('')
 
 const memberIdSet = computed(() => new Set(memberships.value.map((member) => member.userId)))
 const allRoleOptions = computed(() => {
@@ -639,14 +720,9 @@ const canManageMember = (role: InstitutionRole): boolean => {
   return canManageOwnerRole.value || role === 'member'
 }
 
-const getManageableRoleOptions = (
-  role: InstitutionRole,
-): Array<{ value: InstitutionRole, label: string }> => {
-  if (canManageMember(role)) {
-    return manageableRoleOptions.value
-  }
-
-  return allRoleOptions.value.filter((item) => item.value === role)
+const canUpdateDirectoryUser = (userId: string): boolean => {
+  const member = memberships.value.find(item => item.userId === userId)
+  return member ? canManageMember(member.role) : Boolean(searchInternalId.value.trim())
 }
 
 const getProvisionStatusLabel = (status: InstitutionProvisionStatus): string => {
@@ -690,9 +766,10 @@ const loadMemberships = async (slug: string): Promise<void> => {
 
   isMembershipLoading.value = true
   try {
-    memberships.value = await listInstitutionMemberships(slug)
+    const items = await listInstitutionMemberships(slug)
+    if (route.params.slug === slug) memberships.value = items
   } finally {
-    isMembershipLoading.value = false
+    if (route.params.slug === slug) isMembershipLoading.value = false
   }
 }
 
@@ -704,14 +781,17 @@ const loadProvisions = async (slug: string): Promise<void> => {
 
   isProvisionLoading.value = true
   try {
-    provisions.value = await listInstitutionProvisions(slug)
+    const items = await listInstitutionProvisions(slug)
+    if (route.params.slug === slug) provisions.value = items
   } finally {
-    isProvisionLoading.value = false
+    if (route.params.slug === slug) isProvisionLoading.value = false
   }
 }
 
 const refreshInstitutionDetail = async (slug: string): Promise<void> => {
-  institution.value = await getInstitution(slug)
+  const detail = await getInstitution(slug)
+  if (route.params.slug !== slug) return
+  institution.value = detail
   syncFormState()
 }
 
@@ -723,14 +803,16 @@ const load = async (slug: string): Promise<void> => {
 
   try {
     await refreshInstitutionDetail(slug)
+    if (route.params.slug !== slug) return
     await Promise.all([loadMemberships(slug), loadProvisions(slug)])
   } catch (error) {
+    if (route.params.slug !== slug) return
     institution.value = null
     memberships.value = []
     provisions.value = []
     loadError.value = getErrorMessage(error, t('adminInstitutionMembers.loadFailed'))
   } finally {
-    isLoading.value = false
+    if (route.params.slug === slug) isLoading.value = false
   }
 }
 
@@ -844,84 +926,77 @@ const searchDirectory = async (): Promise<void> => {
   }
 }
 
-const upsertMember = async (
-  userId: string,
-  role: InstitutionRole,
-  canReviewContent: boolean,
-  canImportData: boolean,
+const requestChange = (
+  person: InstitutionMembershipItem | UserSearchItem,
+  to: InstitutionRole | null,
+  review = false,
+  importData = false,
   internalId?: string,
-): Promise<void> => {
-  if (!requirePermissionReason()) return
-  const slug = String(route.params.slug ?? '')
-  if (!slug) {
-    return
+): void => {
+  if (!institution.value?.access.can_manage_members || institution.value.slug !== route.params.slug || actionUserId.value || pendingChange.value) return
+  const userId = 'userId' in person ? person.userId : person.id
+  const current = memberships.value.find(member => member.userId === userId)
+  if (current && !canManageMember(current.role)) return
+  if (to && !manageableRoleOptions.value.some(option => option.value === to)) return
+  if (!current && (!to || !internalId?.trim())) return
+  pendingChange.value = {
+    slug: institution.value.slug, userId, name: person.name, from: current?.role ?? null,
+    to, review, importData, internalId: internalId?.trim(),
   }
+  changeReason.value = ''
+  changeError.value = ''
+}
 
-  actionUserId.value = userId
+const cancelChange = (): void => {
+  if (actionUserId.value) return
+  pendingChange.value = null
+  changeReason.value = ''
+  changeError.value = ''
+}
+
+const confirmChange = async (): Promise<void> => {
+  const change = pendingChange.value
+  const reason = changeReason.value.trim()
+  if (!change || actionUserId.value || reason.length < 3 || reason.length > 1000 ||
+    change.slug !== route.params.slug || !institution.value?.access.can_manage_members) return
+
+  actionUserId.value = change.userId
+  changeError.value = ''
   try {
-    memberships.value = await upsertInstitutionMembership(slug, {
-      reason: permissionReason.value.trim(),
-      userId,
-      internalId: internalId?.trim() || undefined,
-      role,
-      can_review_content: resolveRequestedReviewPermission(role, canReviewContent),
-      can_import_data: resolveRequestedImportPermission(role, canImportData),
-    })
-    Message.success(t('adminInstitutionMembers.memberUpdated'))
-    searchInternalId.value = ''
+    const result = change.to
+      ? await upsertInstitutionMembership(change.slug, {
+        userId: change.userId, role: change.to, reason,
+        ...(change.internalId ? { internalId: change.internalId } : {}),
+        can_review_content: resolveRequestedReviewPermission(change.to, change.review),
+        can_import_data: resolveRequestedImportPermission(change.to, change.importData),
+      })
+      : await removeInstitutionMembership(change.slug, change.userId, reason)
+    if (pendingChange.value !== change) return
+    memberships.value = result
+    if (change.internalId) searchInternalId.value = ''
+    Message.success(t(change.to ? 'adminInstitutionMembers.memberUpdated' : 'adminInstitutionMembers.memberRemoved'))
+    pendingChange.value = null
+    changeReason.value = ''
   } catch (error) {
-    Message.error(getErrorMessage(error, t('adminInstitutionMembers.memberUpdateFailed')))
+    if (pendingChange.value === change) {
+      changeError.value = getErrorMessage(error, t(change.to ? 'adminInstitutionMembers.memberUpdateFailed' : 'adminInstitutionMembers.memberRemoveFailed'))
+    }
   } finally {
     actionUserId.value = ''
   }
 }
 
-const handleRoleChange = (
-  member: InstitutionMembershipItem,
-  value: unknown,
-): void => {
-  if (typeof value !== 'string') {
-    return
-  }
-
-  void upsertMember(
-    member.userId,
-    value as InstitutionRole,
-    member.role === 'member' ? member.canReviewContent : false,
-    member.role === 'member' ? member.canImportData : false,
-  )
+const handleRoleChange = (member: InstitutionMembershipItem, value: unknown): void => {
+  if (value === member.role || (value !== 'owner' && value !== 'admin' && value !== 'member')) return
+  requestChange(member, value, member.role === 'member' && member.canReviewContent, member.role === 'member' && member.canImportData)
 }
 
-const handleReviewPermissionChange = (
-  member: InstitutionMembershipItem,
-  value: unknown,
-): void => {
-  if (member.role !== 'member') {
-    return
-  }
-
-  void upsertMember(
-    member.userId,
-    member.role,
-    normalizeCheckboxValue(value),
-    member.canImportData,
-  )
+const handleReviewPermissionChange = (member: InstitutionMembershipItem, value: unknown): void => {
+  if (member.role === 'member') requestChange(member, member.role, normalizeCheckboxValue(value), member.canImportData)
 }
 
-const handleImportPermissionChange = (
-  member: InstitutionMembershipItem,
-  value: unknown,
-): void => {
-  if (member.role !== 'member') {
-    return
-  }
-
-  void upsertMember(
-    member.userId,
-    member.role,
-    member.canReviewContent,
-    normalizeCheckboxValue(value),
-  )
+const handleImportPermissionChange = (member: InstitutionMembershipItem, value: unknown): void => {
+  if (member.role === 'member') requestChange(member, member.role, member.canReviewContent, normalizeCheckboxValue(value))
 }
 
 const handleSearchReviewPermissionChange = (value: unknown): void => {
@@ -940,27 +1015,16 @@ const handleProvisionImportPermissionChange = (value: unknown): void => {
   provisionForm.can_import_data = normalizeCheckboxValue(value)
 }
 
-const removeMember = async (userId: string): Promise<void> => {
-  if (!requirePermissionReason()) return
-  const slug = String(route.params.slug ?? '')
-  if (!slug) {
-    return
-  }
-
-  actionUserId.value = userId
-  try {
-    memberships.value = await removeInstitutionMembership(slug, userId, permissionReason.value.trim())
-    Message.success(t('adminInstitutionMembers.memberRemoved'))
-  } catch (error) {
-    Message.error(getErrorMessage(error, t('adminInstitutionMembers.memberRemoveFailed')))
-  } finally {
-    actionUserId.value = ''
-  }
-}
-
 watch(
   () => String(route.params.slug ?? ''),
   (slug) => {
+    pendingChange.value = null
+    changeReason.value = ''
+    changeError.value = ''
+    rosterQuery.value = ''
+    managersOnly.value = false
+    permissionReason.value = ''
+    searchQuery.value = ''
     if (!slug) {
       institution.value = null
       memberships.value = []
@@ -1200,6 +1264,66 @@ watch(manageableRoleOptions, () => {
   font-size: 13px
   color: #0f2f57
 
+.row-options, .roster-toolbar, .roster-filters, .member-identity
+  display: flex
+  align-items: center
+  flex-wrap: wrap
+  gap: 10px
+
+.roster-toolbar
+  align-items: flex-end
+  margin-top: 16px
+
+.roster-search, .change-form
+  display: grid
+  gap: 8px
+
+.roster-search
+  flex: 1 1 240px
+  font-weight: 600
+
+.roster-search input, .change-form textarea
+  box-sizing: border-box
+  width: 100%
+  padding: 9px 12px
+  border: 1px solid #b4c0cf
+  border-radius: 6px
+  background: #fff
+  font: inherit
+
+.roster-filters button
+  border: 1px solid #bbc8d8
+  border-radius: 6px
+  background: #fff
+  color: #324561
+  padding: 8px 12px
+  cursor: pointer
+
+.roster-filters button[aria-pressed="true"]
+  border-color: #1858ae
+  color: #174c93
+  background: #eaf2ff
+  font-weight: 700
+
+.directory-disclosure
+  margin-top: 20px
+  border-top: 1px solid #dce4ee
+  padding-top: 14px
+
+.row-options
+  padding-top: 8px
+
+.directory-disclosure summary, .row-disclosure summary
+  cursor: pointer
+  font-weight: 600
+  color: #174c93
+
+.change-form p
+  margin: 0 0 6px
+
+.change-form [role="alert"]
+  color: #a42620
+
 .member-toolbar
   display: flex
   gap: 12px
@@ -1279,6 +1403,7 @@ watch(manageableRoleOptions, () => {
 
 .member-actions
   display: flex
+  flex-wrap: wrap
   align-items: center
   gap: 10px
 

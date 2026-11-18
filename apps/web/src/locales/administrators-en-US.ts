@@ -1,6 +1,6 @@
 export default {
   administrators: {
-    title: 'Administrator lifecycle',
+    title: 'Departure handoff and permission audit',
     identityRule: 'People keep their own accounts and employee IDs. Transfer authority; never replace a departed person’s identifier with their successor’s.',
     ownerWarning: 'Active owners: {count}. Maintain at least two independently verified owners to reduce lockout risk.',
     departing: 'Departing administrator', successor: 'Successor', choose: 'Choose an account', preview: 'Preview handoff',
@@ -14,6 +14,6 @@ export default {
     previous: 'Previous', next: 'Next', failed: 'Operation failed. Refresh the current state before retrying.',
     recovery: 'Locked out? An authorized server operator can use scholarctl recover-admin to create a separate recovery account valid for four hours. This page does not provide an anonymous recovery bypass.',
     reasonRequired: 'Enter a change reason of at least three characters before changing permissions.',
-    roleRestriction: 'Only owners and platform administrators can appoint or change administrators and owners.',
+    roleRestriction: 'Only institution owners and platform administrators can appoint or change administrators and owners.',
   },
 }
