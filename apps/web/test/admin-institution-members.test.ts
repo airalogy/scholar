@@ -76,6 +76,37 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+it('explains roles in both languages without loading a roster or granting access', async () => {
+  await mount('member', false, false)
+  const toggle = el<HTMLButtonElement>('.role-guide-toggle')
+  const panel = el(`#${toggle.getAttribute('aria-controls')}`)
+  expect(toggle.textContent).toBe('角色说明')
+  expect(toggle.getAttribute('aria-expanded')).toBe('false')
+  expect(panel.style.display).toBe('none')
+  toggle.click()
+  await settle()
+  expect(toggle.getAttribute('aria-expanded')).toBe('true')
+  expect(panel.style.display).not.toBe('none')
+  const labels = (): string[] => Array.from(panel.querySelectorAll('dt'), node => node.textContent ?? '')
+  expect(labels()).toEqual(['平台管理员', '机构负责人', '机构管理员'])
+  expect(panel.textContent).toContain('执行图书馆终审需要单独授权')
+  expect(panel.querySelector('a')?.getAttribute('href')).toBe('/docs/zh/administration/administrator-governance')
+
+  i18n.global.locale.value = 'en-US'
+  await settle()
+  expect(toggle.textContent).toBe('Role guide')
+  expect(labels()).toEqual(['Platform Admin', 'Institution Owner', 'Institution Administrator'])
+  expect(panel.textContent).toContain('Reviewers need a separate grant')
+  expect(panel.querySelector('a')?.getAttribute('href')).toBe('/docs/en/administration/administrator-governance')
+  toggle.click()
+  await settle()
+  expect(toggle.getAttribute('aria-expanded')).toBe('false')
+  expect(panel.style.display).toBe('none')
+  expect(document.querySelector('.appoint-admin, .member-list')).toBeNull()
+  expect(listInstitutionMemberships).not.toHaveBeenCalled()
+  expect(upsertInstitutionMembership).not.toHaveBeenCalled()
+})
+
 it('searches the local roster first and distinguishes existing managers from candidates', async () => {
   await mount('owner')
   expect(el('h2').textContent).toBe('成员与权限')

@@ -8,7 +8,28 @@
           <p class="admin-subtitle">
             {{ $t('adminInstitutionMembers.subtitle') }}
           </p>
-          <span v-if="institution" class="role-badge">{{ $t('adminInstitutionMembers.yourRole', { role: institutionRoleLabel }) }}</span>
+          <template v-if="institution">
+            <div class="role-context">
+              <span class="role-badge">{{ $t('adminInstitutionMembers.yourRole', { role: institutionRoleLabel }) }}</span>
+              <button
+                type="button"
+                class="role-guide-toggle"
+                aria-controls="institution-role-guide"
+                :aria-expanded="roleGuideOpen"
+                @click="roleGuideOpen = !roleGuideOpen"
+              >{{ $t('adminInstitutionMembers.roleGuide.title') }}</button>
+            </div>
+            <div v-show="roleGuideOpen" id="institution-role-guide" class="role-guide">
+              <dl>
+                <template v-for="role in roleGuideEntries" :key="role.label">
+                  <dt>{{ $t(role.label) }}</dt>
+                  <dd>{{ $t(role.description) }}</dd>
+                </template>
+              </dl>
+              <p>{{ $t('adminInstitutionMembers.roleGuide.reviewNote') }}</p>
+              <a :href="roleGuideUrl">{{ $t('adminInstitutionMembers.roleGuide.handbook') }}</a>
+            </div>
+          </template>
         </div>
         <div class="header-actions">
           <router-link
@@ -521,6 +542,13 @@ import AdministratorGovernancePanel from '@/components/AdministratorGovernancePa
 
 const route = useRoute()
 const { t, locale } = useI18n()
+const roleGuideOpen = ref(false)
+const roleGuideEntries = [
+  { label: PLATFORM_ROLE_LABEL_KEYS.platform_admin, description: 'adminInstitutionMembers.roleGuide.platform' },
+  { label: INSTITUTION_ROLE_LABEL_KEYS.owner, description: 'adminInstitutionMembers.roleGuide.owner' },
+  { label: INSTITUTION_ROLE_LABEL_KEYS.admin, description: 'adminInstitutionMembers.roleGuide.admin' },
+] as const
+const roleGuideUrl = computed<string>(() => `/docs/${locale.value.startsWith('en') ? 'en' : 'zh'}/administration/administrator-governance`)
 
 const institution = ref<InstitutionDetailResponse | null>(null)
 const memberships = ref<InstitutionMembershipItem[]>([])
@@ -1135,6 +1163,47 @@ watch(manageableRoleOptions, () => {
   color: #0f62fe
   font-size: 12px
   font-weight: 600
+
+.role-context
+  display: flex
+  align-items: center
+  flex-wrap: wrap
+  gap: 4px 12px
+  margin-top: 10px
+
+.role-guide-toggle
+  min-height: 32px
+  padding: 0 4px
+  border: 0
+  background: transparent
+  font: inherit
+  cursor: pointer
+
+.role-guide-toggle, .role-guide a
+  color: #1355b6
+  text-decoration: underline
+  text-underline-offset: 3px
+  &:focus-visible
+    outline: 2px solid currentColor
+    outline-offset: 2px
+
+.role-guide
+  max-width: 62ch
+  margin-top: 6px
+  padding: 12px 16px
+  border-left: 3px solid #b5cced
+  background: #f5f8fc
+  color: #344054
+  font-size: 14px
+  line-height: 1.6
+  dl, dd
+    margin: 0
+  dt
+    font-weight: 600
+  dt:not(:first-child)
+    margin-top: 6px
+  p
+    margin: 10px 0 4px
 
 .panel-meta
   display: flex
