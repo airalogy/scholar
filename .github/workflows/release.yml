@@ -129,6 +129,14 @@ jobs:
           docker pull --platform "linux/$ARCH" "$IMAGE"
           test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$IMAGE")" = "linux/$ARCH"
           if [ "$COMPONENT" = api ]; then
+            docker run --rm --network none --entrypoint sh "$IMAGE" -ec '
+              test "$(id -u)" = 1000
+              for tool in npm npx corepack pnpm yarn; do
+                if command -v "$tool"; then exit 1; fi
+              done
+              test ! -e /usr/local/lib/node_modules/npm
+              test -x node_modules/.bin/prisma
+            '
             docker run --rm --network none --entrypoint node "$IMAGE" dist/src/scripts/smoke-built-app.js
           else
             docker run --rm --network none --entrypoint caddy "$IMAGE" validate --config /etc/caddy/Caddyfile --adapter caddyfile

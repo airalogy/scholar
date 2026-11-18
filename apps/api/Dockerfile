@@ -56,7 +56,20 @@ ENV BUILD_DIRTY=false
 # The final image still contains the actual release metadata, never the cached placeholder.
 RUN node scripts/write-build-info.mjs apps/api/dist/build-info.json
 
-FROM base AS runtime
+# Keep the build toolchain (including npm's bundled dependencies) out of every
+# runtime layer. Use the same Debian release and the exact Node binary used to build.
+FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS runtime-base
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates libatomic1 libstdc++6 openssl \
+  && rm -rf /var/lib/apt/lists/* \
+  && groupadd --gid 1000 node \
+  && useradd --uid 1000 --gid node --shell /bin/sh --create-home node
+COPY --from=base /usr/local/bin/node /usr/local/bin/node
+COPY --from=base /usr/local/LICENSE /usr/local/share/doc/node/LICENSE
+RUN node --version && test -s /usr/local/share/doc/node/LICENSE && test ! -e /usr/local/lib/node_modules/npm
+
+FROM runtime-base AS runtime
 
 ARG APP_VERSION=dev
 ARG GIT_COMMIT=unknown

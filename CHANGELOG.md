@@ -4,6 +4,21 @@ Chinese version: [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)
 
 ## [Unreleased]
 
+## [5.2.1] - 2026-11-18
+
+### Changed
+
+- Made administrator appointments easier to find from the institution member roster. Existing authorization checks still apply.
+- Local push checks cover the affected modules, while full main-branch verification and native release image checks remain in place.
+
+### Security
+
+- The API runtime ships Node without npm or its bundled dependencies. Prisma remains available for the fixed deployment migration command; it is not exposed as an HTTP endpoint.
+
+### Database and Deployment
+
+- No new database migrations since 5.1.0. Existing data, account bindings, primary identifiers and permissions are retained.
+
 ## [5.2.0] - 2026-11-17
 
 ### Changed
